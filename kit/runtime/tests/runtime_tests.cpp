@@ -1729,7 +1729,7 @@ static void test_cadence_trace(X86 *c) {
 
     host_set_cadence_trace(nullptr);
 
-    FILE *f = fopen(path, "r");
+    FILE *f = fopen(path, "rb"); // bytes, as the size below counts them
     check(f != nullptr, "the trace file was written");
     std::string log;
     if (f) {
@@ -1755,7 +1755,7 @@ static void test_cadence_trace(X86 *c) {
     // that asked for it would put another run's cadence in the same file.
     size_t was = log.size();
     call_import(c, "WINMM.dll", "timeGetTime", {});
-    f = fopen(path, "r");
+    f = fopen(path, "rb");
     size_t now = 0;
     if (f) {
         fseek(f, 0, SEEK_END);

@@ -6,6 +6,7 @@ import shutil
 import stat
 import subprocess
 import tarfile
+import zipfile
 from unittest.mock import patch
 
 import pytest
@@ -193,6 +194,89 @@ def test_windows_folder(tmp_path):
     readme = (out / "README.txt").read_text()
     assert '$env:RECOMP_EXE = "C:\\path\\to\\your game\\STUB.EXE"' in readme
     assert ".\\StubRecomp.exe" in readme
+    assert "Double-click StubRecomp.exe" in readme
+
+
+def test_windows_carries_innoextract_and_its_licenses(tmp_path):
+    exe = tmp_path / "recomp" / "StubRecomp.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ app")
+    (exe.parent / "innoextract.exe").write_bytes(b"MZ innoextract")
+    build_dir = tmp_path / "cmake"
+    licenses = build_dir / "innoextract-windows/files/license"
+    licenses.mkdir(parents=True)
+    (licenses / "innoextract.LICENSE.txt").write_text("zlib")
+    (licenses / "Boost.LICENSE_1_0.txt").write_text("boost")
+    (build_dir / "CMakeCache.txt").write_text("")
+    cfg = {"game": {"app_name": "StubRecomp", "name": "Stub Game", "executable": "STUB.EXE"}}
+    out = package_desktop.stage(exe, cfg, tmp_path / "out", system="Windows", build_dir=build_dir)
+    assert (out / "innoextract.exe").read_bytes() == b"MZ innoextract"
+    assert (out / "resources/innoextract-NOTICE.md").read_bytes() == (
+        package_desktop.ROOT / "third_party/innoextract/NOTICE.md").read_bytes()
+    assert sorted(p.name for p in (out / "resources/innoextract-license").iterdir()) == [
+        "Boost.LICENSE_1_0.txt", "innoextract.LICENSE.txt"]
+    with zipfile.ZipFile(tmp_path / "out/StubRecomp-windows-x86_64.zip") as z:
+        assert "StubRecomp/innoextract.exe" in z.namelist()
+        assert "StubRecomp/resources/innoextract-license/innoextract.LICENSE.txt" in z.namelist()
+    # A build without the native launcher: no helper, and none left over.
+    (exe.parent / "innoextract.exe").unlink()
+    package_desktop.stage(exe, cfg, tmp_path / "out", system="Windows", build_dir=build_dir)
+    assert not (out / "innoextract.exe").exists()
+    assert not (out / "resources/innoextract-license").exists()
+
+
+def test_windows_binaries_lose_their_dwarf(tmp_path, monkeypatch):
+    exe = tmp_path / "recomp" / "StubRecomp.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ" + bytes(126))  # long enough to be taken for a PE
+    ran = []
+    monkeypatch.setattr(package_desktop, "windows_strip", lambda: "/llvm/bin/llvm-strip")
+    monkeypatch.setattr(package_desktop.subprocess, "run", lambda cmd, check: ran.append(cmd))
+    cfg = {"game": {"app_name": "StubRecomp", "name": "Stub Game", "executable": "STUB.EXE"}}
+    out = package_desktop.stage(exe, cfg, tmp_path / "out", system="Windows")
+    assert ran == [["/llvm/bin/llvm-strip", "--strip-debug", str(out / "StubRecomp.exe")]]
+    # The build tree's own copy keeps it, for the RVAs a crash report gives.
+    assert exe.read_bytes() == b"MZ" + bytes(126)
+
+
+def test_windows_zip_carries_the_package_and_nothing_else(tmp_path):
+    exe = tmp_path / "recomp" / "StubRecomp.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ app")
+    (exe.parent / "SDL3.dll").write_bytes(b"MZ sdl")
+    (exe.parent / "symbols.json").write_text("{}")
+    game = tmp_path / "game"
+    (game / "ui-mods").mkdir(parents=True)
+    (game / "ui-mods/Widescreen.recipe").write_text("recipe")
+    (game / "launcher-games.json").write_text('{"games": []}')
+    build_dir = tmp_path / "cmake"
+    build_dir.mkdir()
+    (build_dir / "CMakeCache.txt").write_text("RECOMP_GAME_MODULES:BOOL=ON\nRECOMP_VIDEO:BOOL=OFF\n"
+                                              "CMAKE_SYSTEM_PROCESSOR:STRING=x86_64\n")
+    cfg = {"game": {"app_name": "StubRecomp", "name": "Stub Game", "executable": "STUB.EXE"},
+           "dir": str(game), "launcher_config_dir": game,
+           "linux": {"ui_mods": [], "profile_files": {}},
+           "windows": {"ui_mods": ["Widescreen"], "profile_files": {}}}
+    out = package_desktop.stage(exe, cfg, tmp_path / "out", system="Windows", build_dir=build_dir)
+    (out / "player.sav").write_bytes(b"the player's")
+    package_desktop.stage(exe, cfg, tmp_path / "out", system="Windows", build_dir=build_dir)
+    assert (out / "SDL3.dll").read_bytes() == b"MZ sdl"
+    assert (out / "resources/ui-mods/Widescreen.recipe").read_text() == "recipe"
+    archive = tmp_path / "out/StubRecomp-windows-x86_64.zip"
+    with zipfile.ZipFile(archive) as z:
+        names = set(z.namelist())
+        assert z.read("StubRecomp/StubRecomp.exe") == b"MZ app"
+    assert {"StubRecomp/StubRecomp.exe", "StubRecomp/SDL3.dll", "StubRecomp/README.txt",
+            "StubRecomp/resources/symbols.json", "StubRecomp/resources/ui-mods/Widescreen.recipe",
+            "StubRecomp/resources/launcher-games.json"} <= names
+    assert "StubRecomp/player.sav" not in names
+    assert not list((tmp_path / "out").glob("*.part"))
+    # A single-game build has no shared SDL to ship.
+    (build_dir / "CMakeCache.txt").write_text("RECOMP_GAME_MODULES:BOOL=OFF\n")
+    package_desktop.stage(exe, cfg, tmp_path / "out", system="Windows", build_dir=build_dir)
+    assert not (out / "SDL3.dll").exists()
+    with zipfile.ZipFile(archive) as z:
+        assert "StubRecomp/SDL3.dll" not in z.namelist()
 
 
 @pytest.mark.parametrize("system", ["Linux", "Windows"])

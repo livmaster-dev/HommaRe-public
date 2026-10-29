@@ -2,7 +2,7 @@
 """Put other games' modules into the app whose launcher picks between them.
 
     tools/assemble_games.py --app build/HommaRe.app \\
-        --game games/hof --game games/toe [--platform macos|ios-sim|ios|linux]
+        --game games/hof --game games/toe [--platform macos|ios-sim|ios|linux|windows]
 
 The app is a RECOMP_GAME_MODULES build (tools/build.py --game-modules): it
 runs its own game and, when the launcher picks another, loads that game's
@@ -15,7 +15,9 @@ macOS and the simulator). On Linux the app is the desktop package's folder
 (build/package/<app_name>): libgame.<id>.so goes into its modules/ and the
 resources into resources/games/<app_name>/; nothing is signed, and the
 package's tarball beside the folder (tools/package_desktop.py packs it before
-the other games are here) gets the same files.
+the other games are here) gets the same files. Windows is laid out the same
+way (build/windows/package/<app_name>, libgame.<id>.dll in modules/), and its
+zip gets the files.
 """
 
 import argparse
@@ -28,13 +30,19 @@ import sys
 import tarfile
 import tempfile
 import tomllib
+import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from package_desktop import strip_debug  # noqa: E402
+
+# The desktop platforms, whose app is tools/package_desktop.py's folder.
+DESKTOP = ("linux", "windows")
 # Top-level names of a game's app that are not its resources. The launcher's
 # files ([launcher] config_dir) are the app's that shows the launcher.
 NOT_RESOURCES = {"Info.plist", "PkgInfo", "_CodeSignature", "Frameworks", "PlugIns", "embedded.mobileprovision",
                  "game", "Assets.car", "MacOS", "launcher-games.json", "launcher-manifests",
-                 "launcher-splash.jpg", "innoextract-NOTICE.md"}
+                 "launcher-splash.jpg", "innoextract-NOTICE.md", "innoextract-license"}
 
 
 def load_game(game_dir):
@@ -48,6 +56,8 @@ def built_app(build_root, app_name, platform):
         return build_root / (app_name + ".app")
     if platform == "linux":
         return build_root / "package" / app_name  # tools/package_desktop.py
+    if platform == "windows":
+        return build_root / "windows" / "package" / app_name  # the windows-cross presets' folder
     # The Xcode generator puts its products under the configuration's folder.
     for path in (build_root / platform / "Release" / (app_name + ".app"), build_root / platform / (app_name + ".app")):
         if path.is_dir():
@@ -56,8 +66,8 @@ def built_app(build_root, app_name, platform):
 
 
 def module_path(build_root, game_id, platform):
-    """libgame.<id>.dylib (.so) as CMake builds it (host/CMakeLists.txt recomp_game)."""
-    name = "libgame.%s.%s" % (game_id, "so" if platform == "linux" else "dylib")
+    """libgame.<id>.dylib (.so, .dll) as CMake builds it (host/CMakeLists.txt recomp_game)."""
+    name = "libgame.%s.%s" % (game_id, {"linux": "so", "windows": "dll"}.get(platform, "dylib"))
     candidates = [build_root / "modules" / name, build_root / platform / "modules" / name,
                   build_root / platform / "modules" / "Release" / name]
     if platform not in ("macos", "linux"):
@@ -74,7 +84,7 @@ def copy_resources(source_app, dest, platform):
     """A game's resources as its own app carries them."""
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
-    if platform == "linux":
+    if platform in DESKTOP:
         root, executable = source_app / "resources", ""
     else:
         root = source_app / "Contents/Resources" if platform == "macos" else source_app
@@ -150,21 +160,50 @@ def add_to_tarballs(app, added):
         print("updated %s" % archive)
 
 
+def add_to_zips(app, added):
+    """Add `added` (paths inside the Windows package folder `app`) to its zips,
+    as add_to_tarballs does for Linux: each zip is rewritten with its own
+    entries, less any earlier copy of the added paths, plus the added files."""
+    top = app.name
+    names = {top + "/" + p.relative_to(app).as_posix() for p in added}
+    for archive in sorted(app.parent.glob(top + "-windows-*.zip")):
+        fd, tmp = tempfile.mkstemp(dir=archive.parent, suffix=".zip")
+        os.close(fd)
+        try:
+            with zipfile.ZipFile(archive) as old, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED,
+                                                                 compresslevel=9) as new:
+                for info in old.infolist():
+                    if info.filename in names or any(info.filename.startswith(n + "/") for n in names):
+                        continue
+                    new.writestr(info, old.read(info))
+                for path in added:
+                    files = sorted(f for f in path.rglob("*") if f.is_file()) if path.is_dir() else [path]
+                    for f in files:
+                        new.write(f, top + "/" + f.relative_to(app).as_posix())
+            os.chmod(tmp, archive.stat().st_mode)
+            os.replace(tmp, archive)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+        print("updated %s" % archive)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--app", type=Path, required=True, help="The launcher's app (a --game-modules build)")
     parser.add_argument("--game", type=Path, action="append", default=[], help="Another game directory")
     parser.add_argument("--build-root", type=Path, action="append", default=[],
                         help="That game's build root, in --game order (default <game>/build)")
-    parser.add_argument("--platform", choices=("macos", "ios-sim", "ios", "linux"), default="macos")
+    parser.add_argument("--platform", choices=("macos", "ios-sim", "ios", "linux", "windows"), default="macos")
     args = parser.parse_args()
     app = args.app.resolve()
     if not app.is_dir():
         parser.error("No app at %s" % app)
-    linux = args.platform == "linux"
-    flat = args.platform not in ("macos", "linux")
-    if linux:
-        frameworks, games_dir, sdl = app / "modules", app / "resources/games", app / "libSDL3.so.0"
+    desktop = args.platform in DESKTOP
+    flat = args.platform not in ("macos",) + DESKTOP
+    if desktop:
+        sdl = app / ("SDL3.dll" if args.platform == "windows" else "libSDL3.so.0")
+        frameworks, games_dir = app / "modules", app / "resources/games"
     else:
         frameworks = app / ("Frameworks" if flat else "Contents/Frameworks")
         games_dir = app / ("games" if flat else "Contents/Resources/games")
@@ -173,7 +212,7 @@ def main():
         parser.error("%s has no shared SDL: build it with tools/build.py --game-modules" % app)
     frameworks.mkdir(parents=True, exist_ok=True)
     dylibs = []
-    added = []  # Linux: what the package's tarball needs too
+    added = []  # Linux and Windows: what the package's archive needs too
     for i, game_dir in enumerate(args.game):
         game_dir = game_dir.resolve()
         game_id, app_name = load_game(game_dir)
@@ -181,7 +220,9 @@ def main():
         module = module_path(build_root, game_id, args.platform)
         dest = frameworks / module.name
         shutil.copy2(module, dest)
-        if not linux:
+        if args.platform == "windows":
+            strip_debug(dest)  # as tools/package_desktop.py strips the app
+        if not desktop:
             subprocess.run(["install_name_tool", "-id", "@rpath/" + dest.name, str(dest)], check=True)
         dylibs.append(dest)
         source_app = built_app(build_root, app_name, args.platform)
@@ -192,8 +233,10 @@ def main():
         else:
             print("warning: no %s; %s gets no resources of its own" % (source_app, game_id), file=sys.stderr)
         print("added %s (%s) from %s" % (game_id, app_name, build_root))
-    if linux:
+    if args.platform == "linux":
         add_to_tarballs(app, added)
+    elif args.platform == "windows":
+        add_to_zips(app, added)
     else:
         sign(app, args.platform, dylibs)
 

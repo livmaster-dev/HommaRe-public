@@ -63,6 +63,15 @@ class ArtworkIconTests(unittest.TestCase):
             icns = extract_icon.write_icns(Path(tmp) / "icon.png", Path(tmp) / "App.icns")
             self.assertEqual(icns.read_bytes()[:4], b"icns")
 
+    def test_writes_ico_with_every_windows_size(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as tmp:
+            Image.new("RGB", (300, 200), (200, 10, 10)).save(Path(tmp) / "icon.png")
+            ico = extract_icon.write_ico(Path(tmp) / "icon.png", Path(tmp) / "out" / "app.ico")
+            self.assertEqual(ico.read_bytes()[:4], b"\0\0\1\0")
+            with Image.open(ico) as image:
+                self.assertEqual(sorted(image.info["sizes"]), [(px, px) for px in extract_icon.WINDOWS_ICONS])
+
 
 @unittest.skipUnless(EXE.is_file(), "needs the developer's game installation")
 class IconTests(unittest.TestCase):

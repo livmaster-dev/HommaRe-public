@@ -22,7 +22,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -30,6 +29,7 @@
 #include "native_screens.h"
 #include "native_seam.h"
 #include "x86.h"
+#include "platform/os.h"
 
 #ifdef RECOMP_OVERRIDE_HEADER
 #include RECOMP_OVERRIDE_HEADER
@@ -90,7 +90,7 @@ static int screens_on(void) {
             /* The paks this game mounts, in order, for the views' pictures
              * (native-screens/GameArt.swift): the base game and HoF share one
              * install, but each reads its own set. */
-            setenv("RECOMP_NATIVE_PAK_DIRS", NS_PAK_DIRS, 1);
+            os_setenv("RECOMP_NATIVE_PAK_DIRS", NS_PAK_DIRS);
         }
     }
     return on;
@@ -104,9 +104,7 @@ int ns_trace(void) {
 }
 
 static int64_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (int64_t)(os_monotonic_ns() / 1000000);
 }
 
 int ns_screens_on(void) {
@@ -832,9 +830,7 @@ static void script(const NsScreen *kind) {
 /* One frame of a native screen: its queued commands, its step, then its
  * document. */
 static int64_t now_ns(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+    return (int64_t)os_monotonic_ns();
 }
 
 /* RECOMP_NATIVE_SCREENS_STATS=1: what the hook costs the game thread, every

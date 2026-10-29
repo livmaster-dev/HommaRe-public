@@ -33,6 +33,7 @@
 #include "../d3d11.h"
 #include "guest_abi.h"
 #include <cmath>
+#include <cstdlib>
 
 #include <algorithm>
 #include <stdlib.h>

@@ -10,6 +10,9 @@
 #include <climits>
 #include <cstdlib>
 #include <mutex>
+#ifdef _WIN32
+#include <filesystem>
+#endif
 
 namespace launcher::native {
 
@@ -98,10 +101,13 @@ std::string entry(const std::string &dir, const std::string &relative) {
         start = slash + 1;
         if (part.empty())
             continue;
+#ifndef _WIN32
+        // Windows finds any spelling there; the one on disk is looked up.
         if (exists(join(at, part))) {
             at = join(at, part);
             continue;
         }
+#endif
         const std::string found = find_name(at, part);
         if (found.empty())
             return "";
@@ -212,6 +218,18 @@ std::vector<std::string> roots_below(const std::string &dir, const std::vector<G
 }
 
 std::string canonical(const std::string &path) {
+#ifdef _WIN32
+    // The drive's letter, links resolved where the path exists, '/' between
+    // the parts as everywhere else here (the app's code page is UTF-8).
+    std::error_code ec;
+    std::filesystem::path p = std::filesystem::weakly_canonical(path, ec);
+    if (ec)
+        p = std::filesystem::path(path).lexically_normal();
+    std::string out = p.generic_string();
+    while (out.size() > 3 && out.back() == '/')
+        out.pop_back();
+    return out;
+#else
     char buf[PATH_MAX];
     if (realpath(path.c_str(), buf))
         return buf;
@@ -233,6 +251,7 @@ std::string canonical(const std::string &path) {
     for (const std::string &p : parts)
         out += "/" + p;
     return out.empty() ? "/" : out;
+#endif
 }
 
 std::string parent_dir(const std::string &path) {

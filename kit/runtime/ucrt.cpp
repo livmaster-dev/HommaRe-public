@@ -664,18 +664,18 @@ void u_localtime32(X86 *c) {
         set_eax(c, 0);
         return;
     }
-    time_t t = (time_t)(int32_t)rd32(arg(c, 0));
+    const int64_t t = (int32_t)rd32(arg(c, 0));
     struct tm out;
-    set_eax(c, localtime_r(&t, &out) ? put_tm(tm_slot(), out) : 0);
+    set_eax(c, os_localtime(t, &out) == 0 ? put_tm(tm_slot(), out) : 0);
 }
 void u_gmtime64(X86 *c) {
     if (!arg(c, 0)) {
         set_eax(c, 0);
         return;
     }
-    time_t t = (time_t)(int64_t)rd64(arg(c, 0));
+    const int64_t t = (int64_t)rd64(arg(c, 0));
     struct tm out;
-    set_eax(c, gmtime_r(&t, &out) ? put_tm(tm_slot(), out) : 0);
+    set_eax(c, os_gmtime(t, &out) == 0 ? put_tm(tm_slot(), out) : 0);
 }
 void u_difftime32(X86 *c) {
     ret_f64(c, (double)(int32_t)arg(c, 0) - (double)(int32_t)arg(c, 1));

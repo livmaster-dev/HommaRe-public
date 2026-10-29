@@ -13,9 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "x86.h"
+#include "platform/os.h"
 #include "funcs.h"
 
 #ifdef RECOMP_ADDRESS_HEADER
@@ -36,9 +36,7 @@ static int light_mode(void) {
     if (mode != 2)
         return mode;
     static int shown = -1;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    const int on = (int)((ts.tv_sec / 10) & 1);
+    const int on = (int)((os_monotonic_ns() / 10000000000ull) & 1);
     if (on != shown) {
         shown = on;
         fprintf(stderr, "[light] %s\n", on ? "native" : "original");

@@ -1,5 +1,9 @@
 if(WIN32)
-  set(POP_OS_SOURCE os_win32.cpp)
+  # The manifest (windows/app.manifest) rides in the platform layer, so every
+  # executable that links it gets UTF-8 as its code page, tests included.
+  set(POP_OS_SOURCE os_win32.cpp windows/manifest.rc)
+  set_source_files_properties(windows/manifest.rc PROPERTIES
+    OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/windows/app.manifest)
 else()
   set(POP_OS_SOURCE os_posix.cpp)
 endif()

@@ -19,3 +19,8 @@ GamePath game_path_resolve(const char *flag, const char *data_root = nullptr);
 bool game_path_is_supported(const std::string &path, std::string *digest_out);
 // Writes <profile_dir>/game-path.txt (creating profile_dir); false on failure.
 bool game_path_save(const std::string &path);
+// The path as the host takes paths apart, at '/': on Windows a game path in
+// the system's own spelling (RECOMP_EXE typed in PowerShell, a file picker's
+// answer, C:\Games\bin\game.exe) gets '/' for '\'. Unchanged elsewhere,
+// where '\' is a file name's own character.
+std::string game_path_normal(std::string path);

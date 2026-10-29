@@ -141,53 +141,63 @@ void test_l10n() {
     for (const char *v : vars) {
         if (const char *value = getenv(v))
             saved[v] = value;
-        unsetenv(v);
+        os_unsetenv(v);
     }
     auto system = [] { return pick_language(preferred_languages()); };
     CHECK(system() == "en");
-    setenv("LANG", "en_US.UTF-8", 1);
+    os_setenv("LANG", "en_US.UTF-8");
     CHECK(system() == "en");
-    setenv("LANG", "ru_RU.UTF-8", 1);
+    os_setenv("LANG", "ru_RU.UTF-8");
     CHECK(system() == "ru");
-    setenv("LC_MESSAGES", "de_DE.UTF-8", 1);
+    os_setenv("LC_MESSAGES", "de_DE.UTF-8");
     CHECK(system() == "de");
-    setenv("LC_ALL", "zh_CN.UTF-8", 1);
+    os_setenv("LC_ALL", "zh_CN.UTF-8");
     CHECK(system() == "zh-Hans");
-    setenv("LC_ALL", "zh_TW.UTF-8", 1);
+    os_setenv("LC_ALL", "zh_TW.UTF-8");
     CHECK(system() == "en");
-    setenv("LANGUAGE", "pt_BR:fr:en", 1);
+    os_setenv("LANGUAGE", "pt_BR:fr:en");
     CHECK(system() == "fr");
-    setenv("LC_ALL", "C", 1); // LANGUAGE does not count under the C locale
+    os_setenv("LC_ALL", "C"); // LANGUAGE does not count under the C locale
     CHECK(system() == "en");
-    setenv("LANG", "pl_PL.UTF-8", 1);
-    unsetenv("LC_ALL");
-    unsetenv("LC_MESSAGES");
-    unsetenv("LANGUAGE");
+    os_setenv("LANG", "pl_PL.UTF-8");
+    os_unsetenv("LC_ALL");
+    os_unsetenv("LC_MESSAGES");
+    os_unsetenv("LANGUAGE");
     CHECK(system() == "pl");
     for (const char *v : vars) {
-        unsetenv(v);
+        os_unsetenv(v);
         if (saved.count(v))
-            setenv(v, saved[v].c_str(), 1);
+            os_setenv(v, saved[v].c_str());
     }
-    setenv("RECOMP_LAUNCHER_LANG", "en", 1);
+    os_setenv("RECOMP_LAUNCHER_LANG", "en");
     CHECK(t("play") == "Play");
     CHECK(t("no such key") == "no such key");
     CHECK(file_of(3, 7) == "File 3 of 7");
-    // The Linux variant wins where there is one.
+    // The platform's variant wins where there is one: Windows', else the
+    // desktop's (Linux).
+#ifdef _WIN32
+    CHECK(t("noHelper").find("innoextract.exe is missing") != std::string::npos);
+#else
     CHECK(t("noHelper").find("dnf install innoextract") != std::string::npos);
+#endif
     CHECK(t("showInFinder") == "Open folder");
     CHECK(bytes(4076506937) == "4.08 GB");
     CHECK(bytes(1500000) == "1.5 MB");
     CHECK(verify_failed({"a", "b", "c", "d"}) ==
           "4 files do not match the installer's manifest (a, b, c…). The installer may be damaged: "
           "download it again.");
-    setenv("RECOMP_LAUNCHER_LANG", "ru", 1);
+    os_setenv("RECOMP_LAUNCHER_LANG", "ru");
     CHECK(t("play") == "Играть");
     CHECK(bytes(4076506937) == "4,08 ГБ");
-    setenv("RECOMP_LAUNCHER_LANG", "en", 1);
+    os_setenv("RECOMP_LAUNCHER_LANG", "en");
+#ifdef _WIN32
+    // Windows shows the path as it is, whatever HOME says (Git Bash sets one).
+    CHECK(location("C:/Users/x/Games/x") == "C:/Users/x/Games/x");
+#else
     const char *home = getenv("HOME");
     if (home && *home && strcmp(home, "/") != 0)
         CHECK(location(std::string(home) + "/Games/x") == "~/Games/x");
+#endif
     CHECK(location("/opt/x") == "/opt/x");
 }
 
@@ -200,16 +210,21 @@ void test_config() {
     CHECK(c.games[0].subtitle.text() == "The first");
     CHECK(c.games[0].exe.size() == 2 &&
           c.games[0].required_dirs == std::vector<std::string>{"data"});
-    setenv("RECOMP_LAUNCHER_LANG", "ru", 1);
+    os_setenv("RECOMP_LAUNCHER_LANG", "ru");
     CHECK(c.games[0].title.text() == "Альфа");
     CHECK(c.games[1].title.text() == "Beta"); // English stands in
-    setenv("RECOMP_LAUNCHER_LANG", "en", 1);
+    os_setenv("RECOMP_LAUNCHER_LANG", "en");
     CHECK(c.tagline.text() == "A test"); // no taglines: the common one
-    // Linux's own tagline wins over the common one.
-    CHECK(parse_config(R"({"tagline": "Everywhere", "taglines": {"macos": "Mac", "linux": "Linux"},
+    // This platform's own tagline wins over the common one.
+    CHECK(parse_config(R"({"tagline": "Everywhere",
+                           "taglines": {"macos": "Mac", "linux": "Linux", "windows": "Windows"},
                            "games": [{"id": "a", "exe": ["a.exe"]}]})",
                        &c, &error));
+#ifdef _WIN32
+    CHECK(c.tagline.text() == "Windows");
+#else
     CHECK(c.tagline.text() == "Linux");
+#endif
     CHECK(!parse_config(R"({"games": []})", &c, &error));
     CHECK(!parse_config("{", &c, &error));
     Manifest m;
@@ -361,8 +376,8 @@ void test_model_and_screens() {
     os_mkdir((games + "/Alpha Game/data").c_str());
     write_file(games + "/Alpha Game/goggame-111.info", "{}");
     g_overlay = fresh("overlay");
-    setenv("RECOMP_LAUNCHER_GAMES_DIR", games.c_str(), 1);
-    setenv("RECOMP_LAUNCHER_SKIN", "0", 1);
+    os_setenv("RECOMP_LAUNCHER_GAMES_DIR", games.c_str());
+    os_setenv("RECOMP_LAUNCHER_SKIN", "0");
     const std::string state = g_scratch + "/profile/launcher.json";
     remove_tree(g_scratch + "/profile");
     Model m(c, "alpha", "", g_scratch + "/saves", g_scratch + "/manifests", state);
@@ -442,8 +457,8 @@ void test_model_and_screens() {
     CHECK(language() == "de" || getenv("RECOMP_LAUNCHER_LANG"));
     CHECK(read_text(state, &text) && text.find("\"language\": \"de\"") != std::string::npos);
     m.set_language("");
-    unsetenv("RECOMP_LAUNCHER_GAMES_DIR");
-    unsetenv("RECOMP_LAUNCHER_SKIN");
+    os_unsetenv("RECOMP_LAUNCHER_GAMES_DIR");
+    os_unsetenv("RECOMP_LAUNCHER_SKIN");
 }
 
 // A 4 x 4 uncompressed DDS in one colour.
@@ -487,8 +502,8 @@ void test_skinned_screens() {
     }
     CHECK(mz_zip_writer_finalize_archive(&zip));
     mz_zip_writer_end(&zip);
-    setenv("RECOMP_LAUNCHER_GAMES_DIR", games.c_str(), 1);
-    setenv("XDG_CACHE_HOME", (g_scratch + "/cache").c_str(), 1); // the skin's bake
+    os_setenv("RECOMP_LAUNCHER_GAMES_DIR", games.c_str());
+    os_setenv("XDG_CACHE_HOME", (g_scratch + "/cache").c_str()); // the skin's bake
     Model m(c, "alpha", "", g_scratch + "/saves", g_scratch + "/manifests",
             g_scratch + "/profile2/launcher.json");
     m.refresh();
@@ -541,8 +556,8 @@ void test_skinned_screens() {
     CHECK(canvas.pixels()[(400 * 1280 + 640) * 4] != centre);
     v.dragging(false);
     m.set_language("");
-    unsetenv("RECOMP_LAUNCHER_GAMES_DIR");
-    unsetenv("XDG_CACHE_HOME");
+    os_unsetenv("RECOMP_LAUNCHER_GAMES_DIR");
+    os_unsetenv("XDG_CACHE_HOME");
 }
 
 } // namespace

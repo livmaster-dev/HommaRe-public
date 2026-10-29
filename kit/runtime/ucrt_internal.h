@@ -6,6 +6,23 @@
 #ifdef __APPLE__
 #include <xlocale.h>
 #endif
+#ifdef _WIN32
+#include <wctype.h>
+// The Windows C runtime spells POSIX's locale objects with an underscore and
+// builds a locale for one category at a time rather than from a mask.
+typedef _locale_t locale_t;
+#define LC_CTYPE_MASK LC_CTYPE
+#define LC_ALL_MASK LC_ALL
+inline locale_t newlocale(int category, const char *name, locale_t) {
+    return _create_locale(category, name);
+}
+#define strtod_l _strtod_l
+#define iswalpha_l _iswalpha_l
+#define iswalnum_l _iswalnum_l
+#define iswpunct_l _iswpunct_l
+#define iswprint_l _iswprint_l
+#define iswgraph_l _iswgraph_l
+#endif
 
 // Registers every UCRT, VCRUNTIME140 and MSVCP140 table. Called by imports_init().
 void ucrt_register();

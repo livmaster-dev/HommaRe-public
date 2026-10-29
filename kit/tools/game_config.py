@@ -253,8 +253,8 @@ def load(game_dir):
             isinstance(k, str) and isinstance(v, str) and k and ".." not in k.split("/")
             for k, v in files.items()):
         raise ValueError('%s: [ios] profile_files maps profile paths to source files' % source)
-    # [macos] and [linux] profile_files: the same for the desktop apps (no phone/ files there).
-    for section in ("macos", "linux"):
+    # [macos], [linux] and [windows] profile_files: the same for the desktop apps (no phone/ files there).
+    for section in ("macos", "linux", "windows"):
         desktop_files = cfg.setdefault(section, {}).setdefault("profile_files", {})
         if not isinstance(desktop_files, dict) or not all(
                 isinstance(k, str) and isinstance(v, str) and k and ".." not in k.split("/")
@@ -262,8 +262,8 @@ def load(game_dir):
             raise ValueError('%s: [%s] profile_files maps profile paths to source files' % (source, section))
     # ui_mods: the game's interface mods made on the player's device from its
     # own install (host/ui_mods.cpp), by name: the game directory's
-    # ui-mods/<name>.recipe goes into the app. Per platform, [ios], [macos] and [linux].
-    for section in ("ios", "macos", "linux"):
+    # ui-mods/<name>.recipe goes into the app. Per platform, [ios], [macos], [linux] and [windows].
+    for section in ("ios", "macos", "linux", "windows"):
         mods = cfg[section].setdefault("ui_mods", [])
         if not isinstance(mods, list) or not all(
                 isinstance(m, str) and m and "/" not in m and m not in (".", "..") for m in mods):

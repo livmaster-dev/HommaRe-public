@@ -52,6 +52,47 @@ std::string join(const std::string &dir, const std::string &name) {
     return dir.empty() || dir.back() == '/' ? dir + name : dir + "/" + name;
 }
 
+#ifdef _WIN32
+// A path from the registry or a Steam file, in '/' like the rest.
+std::string forward(std::string path) {
+    std::replace(path.begin(), path.end(), '\\', '/');
+    while (path.size() > 3 && path.back() == '/')
+        path.pop_back();
+    return path;
+}
+
+std::string registry(const std::string &key, const char *value) {
+    char buf[4096];
+    return os_registry_read(key.c_str(), value, buf, sizeof buf) == 0 ? forward(buf) : "";
+}
+
+// Steam's libraries: its own folder and every "path" in
+// steamapps/libraryfolders.vdf, each with its steamapps/common.
+std::vector<std::string> steam_libraries() {
+    std::vector<std::string> out;
+    const std::string steam = registry("HKCU\\Software\\Valve\\Steam", "SteamPath");
+    if (steam.empty())
+        return out;
+    out.push_back(steam + "/steamapps/common");
+    std::string vdf;
+    if (!read_text(steam + "/steamapps/libraryfolders.vdf", &vdf))
+        return out;
+    for (size_t at = vdf.find("\"path\""); at != std::string::npos;
+         at = vdf.find("\"path\"", at + 6)) {
+        const size_t open = vdf.find('"', at + 6), close = vdf.find('"', open + 1);
+        if (open == std::string::npos || close == std::string::npos)
+            break;
+        std::string path = vdf.substr(open + 1, close - open - 1);
+        for (size_t i = path.find("\\\\"); i != std::string::npos; i = path.find("\\\\", i + 1))
+            path.erase(i, 1); // the file escapes its backslashes
+        const std::string common = forward(path) + "/steamapps/common";
+        if (std::find(out.begin(), out.end(), common) == out.end())
+            out.push_back(common);
+    }
+    return out;
+}
+#endif
+
 std::string lower(std::string s) {
     for (char &c : s)
         if (c >= 'A' && c <= 'Z')
@@ -115,10 +156,14 @@ std::shared_ptr<const Skin> skin_for(const std::map<std::string, Found> &found,
     std::stable_sort(ranked.begin(), ranked.end(),
                      [](const auto &a, const auto &b) { return a.first < b.first; });
     std::string cache;
+#ifdef _WIN32
+    cache = forward(env("LOCALAPPDATA"));
+#else
     if (const std::string xdg = env("XDG_CACHE_HOME"); !xdg.empty())
         cache = xdg;
     else if (const std::string home = env("HOME"); !home.empty())
         cache = home + "/.cache";
+#endif
     if (!cache.empty())
         cache += std::string("/") + RECOMP_APP_NAME + "/LauncherSkin";
     for (const auto &r : ranked) {
@@ -363,7 +408,9 @@ std::string Model::import_base() {
 
 // Where a copy may be: folders the player picked, the Games folder, the
 // executable the host already knows, and the usual places on Linux: the
-// home folder, ~/Games (Lutris, Heroic) and Wine prefixes' GOG folders.
+// home folder, ~/Games (Lutris, Heroic) and Wine prefixes' GOG folders. On
+// Windows: where GOG's registry entries say each game is, GOG Galaxy's and
+// the offline installers' folders, Ubisoft's and Steam's libraries.
 std::vector<std::string> Model::candidate_roots() const {
     std::vector<std::string> roots;
     auto add = [&](const std::string &p) {
@@ -389,6 +436,27 @@ std::vector<std::string> Model::candidate_roots() const {
     }
     for (const std::string &c : children(import_base()))
         add(c);
+#ifdef _WIN32
+    for (const GameSpec &g : config_.games)
+        if (!g.gog_id.empty())
+            add(registry("HKLM\\SOFTWARE\\GOG.com\\Games\\" + g.gog_id, "path"));
+    for (const InstallerSpec &i : config_.installers)
+        if (!i.gog_id.empty())
+            add(registry("HKLM\\SOFTWARE\\GOG.com\\Games\\" + i.gog_id, "path"));
+    std::vector<std::string> bases = steam_libraries();
+    const std::string home = forward(env("USERPROFILE"));
+    if (!home.empty())
+        for (const char *sub : {"", "/Games", "/GOG Games", "/Documents/Games"})
+            bases.push_back(home + sub);
+    for (const char *var : {"ProgramFiles(x86)", "ProgramFiles"})
+        if (const std::string pf = forward(env(var)); !pf.empty())
+            for (const char *sub : {"/GOG Galaxy/Games", "/GOG.com", "/Ubisoft",
+                                    "/Ubisoft/Ubisoft Game Launcher/games", ""})
+                bases.push_back(pf + sub);
+    const std::string drive = env("SystemDrive").empty() ? "C:" : env("SystemDrive");
+    for (const char *sub : {"/GOG Games", "/Games", "/GOG Galaxy/Games"})
+        bases.push_back(drive + sub);
+#else
     const std::string home = env("HOME");
     if (home.empty())
         return roots;
@@ -406,6 +474,7 @@ std::vector<std::string> Model::candidate_roots() const {
          {"/.local/share/bottles/bottles", "/.var/app/com.usebottles.bottles/data/bottles/bottles"})
         for (const std::string &b : children(home + bottles))
             prefix(b + "/drive_c");
+#endif
     std::vector<std::string> names;
     for (const std::string &n : config_.install_names)
         names.push_back(lower(n));

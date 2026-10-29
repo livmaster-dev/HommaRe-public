@@ -6,11 +6,10 @@
 // here keeps a connection, follows a redirect or speaks TLS. A server that
 // answers chunked anyway is read correctly.
 //
-// http_get_posix.cpp does it over the host's sockets (getaddrinfo, so a name
-// in /etc/hosts or a literal IPv4/IPv6 address works as well as DNS), with
-// every step - the lookup excepted - bounded by one deadline. A build with no
-// such sockets (Windows, http_get_none.cpp) fails every request, which is
-// what the game saw before.
+// http_get.cpp does it over the platform layer's sockets on every platform
+// (os_net_resolve, so a name in the hosts file or a literal IPv4 address works
+// as well as DNS), with every step - the lookup excepted - bounded by one
+// deadline.
 #pragma once
 #include <cstddef>
 #include <cstdint>

@@ -1,7 +1,9 @@
 """The host's platform boundary: Objective-C++ and Apple frameworks live only
-under host/gpu/metal/ and in the host's own platform file for iPadOS,
-host/sdl/platform_ui_ios.mm (see host/sdl/platform_ui.h). Everything else in
-the host is portable C++ over gpu/gpu.h, SDL3 and the platform layer."""
+under host/gpu/metal/ and in the host's own platform files: for iPadOS,
+host/sdl/platform_ui_ios.mm (see host/sdl/platform_ui.h); the Mac's trackpad,
+host/sdl/trackpad_mac.mm (sdl/trackpad_mac.h); and the power state the energy
+policy reads, host/energy.mm. Everything else in the host is portable C++ over
+gpu/gpu.h, SDL3 and the platform layer."""
 import re
 import unittest
 from pathlib import Path
@@ -11,7 +13,7 @@ HOST = ROOT / "host"
 APPLE = re.compile(r"#import\b|<Metal/|<AppKit/|<Cocoa/|<AVFoundation/|<AudioToolbox/|<CoreText/|<CoreVideo/|<QuartzCore/")
 
 
-PLATFORM_FILES = {"host/sdl/platform_ui_ios.mm"}
+PLATFORM_FILES = {"host/sdl/platform_ui_ios.mm", "host/sdl/trackpad_mac.mm", "host/energy.mm"}
 
 
 def outside_metal(path: Path) -> bool:

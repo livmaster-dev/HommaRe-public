@@ -36,7 +36,8 @@ bool host_gate_menu_pointer(int32_t x, int32_t y, int button, bool down, int32_t
 
 // One ordinary key, gated and then delivered: the DirectInput state, the
 // posted key message; TranslateMessage generates WM_CHAR. `character` is
-// the unmodified character the key produced, or 0 when it produced none.
+// the character the key typed in the player's layout, Shift and Caps Lock
+// applied (sdl/main.cpp), or 0 when it typed none.
 // Returns true when the mod layer consumed it, in which case nothing was
 // delivered on any path.
 bool host_key_event(uint16_t mac_keycode, bool down, uint32_t character);

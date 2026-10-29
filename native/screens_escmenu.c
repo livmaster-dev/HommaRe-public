@@ -11,10 +11,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include "native_screens.h"
 #include "x86.h"
+#include "platform/os.h"
 
 #ifdef RECOMP_OVERRIDE_HEADER
 #include RECOMP_OVERRIDE_HEADER
@@ -76,9 +76,7 @@ static uint32_t g_windows[ITEM_COUNT];
 static char g_captions[ITEM_COUNT][64];
 
 static void read_menu(Scratch *s, uint32_t screen) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    const int64_t now = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000, last = g_menu_ms;
+    const int64_t now = (int64_t)(os_monotonic_ns() / 1000000), last = g_menu_ms;
     g_menu_ms = now;
     if (g_menu == screen && now - last < 500)
         return;

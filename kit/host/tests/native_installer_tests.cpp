@@ -21,6 +21,9 @@
 #include <string>
 #include <sys/stat.h>
 #include <vector>
+#ifdef _WIN32
+#include <thread>
+#endif
 
 static int g_failures = 0, g_checks = 0;
 #define CHECK(c)                                                                                   \
@@ -123,6 +126,7 @@ std::string noise(size_t n, uint32_t seed) {
 // innoextract as the launcher runs it, answering from <installer>.fake/:
 // "id" holds the GOG id, files/ what the installer holds. Each file it
 // unpacks is logged to "extracted"; with "slow" there it takes its time.
+#ifndef _WIN32
 const char *kFakeInnoextract = R"sh(#!/bin/sh
 mode= out= incl=
 while [ $# -gt 1 ]; do
@@ -166,6 +170,91 @@ extract)
 esac
 exit 0
 )sh";
+#endif
+
+#ifdef _WIN32
+// Windows runs no shell script: this suite's own executable, copied as
+// innoextract.exe, plays the helper above when it finds itself so named.
+void fake_tree(const std::string &dir, const std::string &rel, std::vector<std::string> *out) {
+    std::vector<std::string> names;
+    os_listdir(
+        dir.c_str(),
+        [](const char *name, void *user) {
+            static_cast<std::vector<std::string> *>(user)->push_back(name);
+            return 0;
+        },
+        &names);
+    for (const std::string &n : names) {
+        OsStat st{};
+        if (os_stat((dir + "/" + n).c_str(), &st) != 0)
+            continue;
+        if (st.is_dir)
+            fake_tree(dir + "/" + n, rel + n + "/", out);
+        else
+            out->push_back(rel + n);
+    }
+}
+
+int fake_innoextract(int argc, char **argv) {
+    std::string mode, out;
+    std::vector<std::string> include;
+    for (int i = 1; i < argc - 1; ++i) {
+        const std::string a = argv[i];
+        if (a == "--gog-game-id")
+            mode = "id";
+        else if (a == "--list")
+            mode = "list";
+        else if (a == "--extract")
+            mode = "extract";
+        else if (a == "--output-dir" && i + 1 < argc - 1)
+            out = argv[++i];
+        else if (a == "--include" && i + 1 < argc - 1)
+            include.push_back(argv[++i]);
+    }
+    std::string fake = argc > 1 ? argv[argc - 1] : "";
+    if (fake.size() > 4 && fake.compare(fake.size() - 4, 4, ".exe") == 0)
+        fake.resize(fake.size() - 4);
+    fake += ".fake";
+    OsStat st{};
+    if (os_stat(fake.c_str(), &st) != 0 || !st.is_dir) {
+        fprintf(stderr, "Not a supported Inno Setup installer!\nDone with 1 error.\n");
+        return 1;
+    }
+    if (mode == "id") {
+        printf("Inspecting \"Fake\" - setup data version 5.6.2 (unicode)\n");
+        if (std::string id = read_file(fake + "/id"); !id.empty())
+            printf("GOG.com game ID is %s", id.c_str());
+        printf("Done.\n");
+    } else if (mode == "list") {
+        printf("Listing \"Fake\" - setup data version 5.6.2 (unicode)\n");
+        std::vector<std::string> files;
+        fake_tree(fake + "/files", "", &files);
+        for (const std::string &f : files)
+            printf(" - \"%s\" [en-US] (1 KiB)\n", f.c_str());
+    } else if (mode == "extract") {
+        for (const std::string &p : include) {
+            const std::string src = fake + "/files" + p;
+            if (os_stat(src.c_str(), &st) == 0 && st.is_dir) {
+                std::vector<std::string> files;
+                fake_tree(src, "", &files);
+                for (const std::string &f : files)
+                    write_file(out + p + "/" + f, read_file(src + "/" + f));
+                continue;
+            }
+            if (os_stat(src.c_str(), &st) != 0)
+                continue;
+            printf(" - \"%s\"\n", p.c_str() + 1);
+            fflush(stdout);
+            write_file(out + p, read_file(src));
+            write_file(fake + "/extracted",
+                       read_file(fake + "/extracted") + (p.c_str() + 1) + "\n");
+            if (os_stat((fake + "/slow").c_str(), &st) == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        }
+    }
+    return 0;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 
@@ -354,10 +443,17 @@ Fixture make_fixture() {
     fx.dir = fresh("install");
     fx.manifests = fx.dir + "/manifests";
     fx.base = fx.dir + "/Games";
+#ifdef _WIN32
+    const std::string helper = fx.dir + "/innoextract.exe";
+    char self[4096];
+    CHECK(os_exe_path(self, sizeof self) == 0);
+    write_file(helper, read_file(self));
+#else
     const std::string helper = fx.dir + "/innoextract";
     write_file(helper, kFakeInnoextract);
     chmod(helper.c_str(), 0755);
-    setenv("RECOMP_INNOEXTRACT", helper.c_str(), 1);
+#endif
+    os_setenv("RECOMP_INNOEXTRACT", helper.c_str());
 
     fx.files = {{"bin/Game.exe", "game-exe-bytes"},
                 {"data/data.pak", noise(300000, 1)},
@@ -408,11 +504,11 @@ void test_install() {
     o = gog::plan(lean, fx.config, fx.manifests, fx.base, &plan);
     CHECK(!o.ok && o.error.find("is another build of the installer") != std::string::npos);
     const std::string helper = getenv("RECOMP_INNOEXTRACT");
-    setenv("RECOMP_INNOEXTRACT", (fx.dir + "/no-such-helper").c_str(), 1);
+    os_setenv("RECOMP_INNOEXTRACT", (fx.dir + "/no-such-helper").c_str());
     CHECK(gog::helper().empty());
     o = gog::plan(setup, fx.config, fx.manifests, fx.base, &plan);
     CHECK(!o.ok && o.error == t("noHelper"));
-    setenv("RECOMP_INNOEXTRACT", helper.c_str(), 1);
+    os_setenv("RECOMP_INNOEXTRACT", helper.c_str());
     CHECK(gog::helper() == helper);
 
     // A fresh install: every phase, every file, no marker left.
@@ -544,8 +640,15 @@ void test_patches() {
 
 } // namespace
 
-int main() {
-    setenv("RECOMP_LAUNCHER_LANG", "en", 1);
+int main(int argc, char **argv) {
+#ifdef _WIN32
+    if (file_name(argv[0]).rfind("innoextract", 0) == 0)
+        return fake_innoextract(argc, argv);
+#else
+    (void)argc;
+    (void)argv;
+#endif
+    os_setenv("RECOMP_LAUNCHER_LANG", "en");
     const char *base = getenv("RECOMP_LAUNCHER_TEST_DIR");
     g_scratch = std::string(base && *base ? base : "build/recomp") + "/native-installer-test";
     for (size_t i = g_scratch.find('/'); i != std::string::npos; i = g_scratch.find('/', i + 1))

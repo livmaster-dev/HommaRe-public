@@ -1,5 +1,27 @@
 # Changelog
 
+## Windows
+
+- The llvm-mingw cross build (`windows-cross`, `LLVM_MINGW_ROOT`) compiles again: zlib
+  is fetched and built statically, the UCRT shims map POSIX's `*_l` locale functions
+  to the CRT's, and the clocks, sleeps and `setenv` of the native sources come from the
+  platform layer. An MSVC-ABI build (CI's Windows runner) builds too.
+- `tools/build_app.py --target windows`: the three games in one folder and a zip,
+  `HommaRe.exe` with the expansions as game modules (`modules/libgame.<id>.dll`,
+  `host/game_modules.cpp`), `SDL3.dll`, FFmpeg's DLLs and `innoextract.exe`; the
+  DWARF is stripped from the packaged files. `game.toml` gains `[windows]`.
+- Every Windows executable carries `platform/windows/app.manifest`: UTF-8 as the
+  process's code page, so the narrow paths the kit passes around open under a
+  Cyrillic user name. The app is a GUI program (no console) with the game's icon and
+  a VERSIONINFO.
+- The native launcher is the Windows one too: installing from GOG's offline installers
+  with `innoextract.exe`, finding GOG, Galaxy and Steam installs, the Windows display
+  languages; `launcher-games.json` `taglines` gains `windows`.
+- libcurl's stand-in has one HTTP GET (`runtime/http_get.cpp`) on the platform
+  layer's sockets for every platform, so the ubi-gs prompt fetches on Windows too.
+- Paths the platform layer hands out on Windows (the profile, the temporary folder)
+  use '/'; a game path with backslashes finds its game root and texts.
+
 ## Sockets on every platform
 
 - `runtime/winsock.cpp` runs on the platform layer's sockets: `platform/os.h`

@@ -23,10 +23,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "native_seam.h"
 #include "x86.h"
+#include "platform/os.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -408,9 +408,7 @@ void HOMM5_CAMERA_UPDATE_ORIG(X86 *c);
 static volatile int64_t g_map_frame_ms, g_map_since_ms;
 
 static int64_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (int64_t)(os_monotonic_ns() / 1000000);
 }
 
 /* When a zoom-only camera last ran its frame (zoom_view_camera found it). */

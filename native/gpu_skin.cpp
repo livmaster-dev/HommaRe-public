@@ -49,11 +49,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <time.h>
 #include <unordered_map>
 #include <vector>
 
 #include "gpu_skin_math.h"
+#include "platform/os.h"
 
 extern "C" {
 void H5SKIN_FILL_ORIG(X86 *c);
@@ -141,9 +141,7 @@ int skin_mode() {
 }
 
 int64_t now_ms() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (int64_t)(os_monotonic_ns() / 1000000);
 }
 
 float rdf(uint32_t a) {

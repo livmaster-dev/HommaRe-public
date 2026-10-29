@@ -1,6 +1,8 @@
 // installer.cpp - see installer.h. innoextract runs as a child process, as the
 // Mac's bundled helper does; the system's 1.9 prints the same listing and GOG
-// id lines (the Mac helper's patches are build fixes only).
+// id lines (the Mac helper's patches are build fixes only). On Windows it is
+// innoextract.exe beside the app (innoextract's own 1.9 build), run through
+// CreateProcess with its output read from pipes as here.
 #include "installer.h"
 
 #include "../../../platform/os.h"
@@ -17,17 +19,23 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <map>
 #include <mutex>
-#include <poll.h>
 #include <regex>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 extern char **environ;
+#endif
 
 namespace launcher::native {
 
@@ -160,45 +168,43 @@ bool write_all(const std::string &path, const std::string &data) {
 }
 
 bool copy_file(const std::string &from, const std::string &to) {
-    const int in = open(from.c_str(), O_RDONLY | O_CLOEXEC);
+    const int in = os_fd_open(from.c_str(), OS_O_RDONLY);
     if (in < 0)
         return false;
-    const int out = open(to.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    const int out = os_fd_open(to.c_str(), OS_O_WRONLY | OS_O_CREAT | OS_O_TRUNC);
     if (out < 0) {
-        close(in);
+        os_fd_close(in);
         return false;
     }
     std::vector<char> buf(1 << 20);
     bool ok = true;
-    for (ssize_t n; ok && (n = read(in, buf.data(), buf.size())) != 0;) {
+    for (int64_t n; ok && (n = os_fd_read(in, buf.data(), buf.size())) != 0;) {
         if (n < 0) {
-            ok = errno == EINTR;
+            ok = false;
             continue;
         }
-        for (ssize_t done = 0; ok && done < n;) {
-            const ssize_t w = write(out, buf.data() + done, size_t(n - done));
+        for (int64_t done = 0; ok && done < n;) {
+            const int64_t w = os_fd_write(out, buf.data() + done, size_t(n - done));
             ok = w > 0;
             done += w;
         }
     }
-    close(in);
-    return close(out) == 0 && ok;
+    os_fd_close(in);
+    return os_fd_close(out) == 0 && ok;
 }
 
 // SHA-256 of `path`, reporting each megabyte read; false when unreadable or
 // when `chunk` says stop (then *cancelled).
 bool digest(const std::string &path, std::string *out, const std::function<bool(int64_t)> &chunk,
             bool *cancelled = nullptr) {
-    const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = os_fd_open(path.c_str(), OS_O_RDONLY);
     if (fd < 0)
         return false;
     Sha256 h;
     std::vector<uint8_t> buf(1 << 20);
     bool ok = true;
     for (;;) {
-        const ssize_t n = read(fd, buf.data(), buf.size());
-        if (n < 0 && errno == EINTR)
-            continue;
+        const int64_t n = os_fd_read(fd, buf.data(), buf.size());
         if (n <= 0) {
             ok = n == 0;
             break;
@@ -211,7 +217,7 @@ bool digest(const std::string &path, std::string *out, const std::function<bool(
             break;
         }
     }
-    close(fd);
+    os_fd_close(fd);
     if (ok)
         *out = h.hex();
     return ok;
@@ -323,6 +329,175 @@ std::string last_lines(const std::string &text) {
     return lines.size() == 1 ? lines.back() : lines[lines.size() - 2] + " " + lines.back();
 }
 
+#ifdef _WIN32
+std::wstring wide(const std::string &s) {
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w(n > 0 ? size_t(n - 1) : 0, L'\0');
+    if (n > 1)
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+    return w;
+}
+
+std::string narrow(const wchar_t *w) {
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    std::string s(n > 0 ? size_t(n - 1) : 0, '\0');
+    if (n > 1)
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+// One argument as the child's CommandLineToArgvW reads it back: quoted when
+// it has spaces (a path under C:\Program Files), backslashes doubled only
+// before a quote.
+std::wstring quoted(const std::wstring &arg) {
+    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos)
+        return arg;
+    std::wstring out = L"\"";
+    for (size_t i = 0;; ++i) {
+        size_t slashes = 0;
+        for (; i < arg.size() && arg[i] == L'\\'; ++i)
+            ++slashes;
+        if (i == arg.size()) {
+            out.append(slashes * 2, L'\\');
+            break;
+        }
+        out.append(arg[i] == L'"' ? slashes * 2 + 1 : slashes, L'\\');
+        out += arg[i];
+    }
+    return out + L"\"";
+}
+
+// A child process with its output read through pipes. Windows' anonymous
+// pipes cannot be polled, so pump peeks at both until one has something.
+struct Child {
+    int64_t pid = -1;
+    HANDLE process = nullptr, out = nullptr, err = nullptr;
+
+    bool start(const std::string &program, const std::vector<std::string> &args) {
+        SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
+        HANDLE o[2] = {}, e[2] = {};
+        if (!CreatePipe(&o[0], &o[1], &sa, 1 << 16))
+            return false;
+        if (!CreatePipe(&e[0], &e[1], &sa, 1 << 16)) {
+            CloseHandle(o[0]);
+            CloseHandle(o[1]);
+            return false;
+        }
+        // Only the write ends, and nothing to read, go to the child.
+        SetHandleInformation(o[0], HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(e[0], HANDLE_FLAG_INHERIT, 0);
+        HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                                 OPEN_EXISTING, 0, nullptr);
+        std::wstring command = quoted(wide(program));
+        for (const std::string &a : args)
+            command += L" " + quoted(wide(a));
+        STARTUPINFOW si{};
+        si.cb = sizeof si;
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = nul;
+        si.hStdOutput = o[1];
+        si.hStdError = e[1];
+        PROCESS_INFORMATION pi{};
+        const BOOL ok = CreateProcessW(wide(program).c_str(), command.data(), nullptr, nullptr,
+                                       TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+        const DWORD error = GetLastError();
+        CloseHandle(o[1]);
+        CloseHandle(e[1]);
+        if (nul != INVALID_HANDLE_VALUE)
+            CloseHandle(nul);
+        if (!ok) {
+            CloseHandle(o[0]);
+            CloseHandle(e[0]);
+            errno =
+                error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? ENOENT : EACCES;
+            return false;
+        }
+        CloseHandle(pi.hThread);
+        process = pi.hProcess;
+        pid = int64_t(pi.dwProcessId);
+        out = o[0];
+        err = e[0];
+        return true;
+    }
+
+    // Reads what is there, waiting up to `ms`; false once both pipes are done.
+    bool pump(int ms, std::string *out_text, std::string *err_text) {
+        const uint64_t until = os_monotonic_ns() + uint64_t(ms) * 1000000ull;
+        for (;;) {
+            bool got = false;
+            for (HANDLE *h : {&out, &err}) {
+                std::string *text = h == &out ? out_text : err_text;
+                while (*h) {
+                    DWORD ready = 0, n = 0;
+                    char buf[65536];
+                    if (!PeekNamedPipe(*h, nullptr, 0, nullptr, &ready, nullptr) ||
+                        (ready &&
+                         !ReadFile(*h, buf, std::min<DWORD>(ready, sizeof buf), &n, nullptr))) {
+                        CloseHandle(*h); // the child closed its end
+                        *h = nullptr;
+                        break;
+                    }
+                    if (!n)
+                        break;
+                    text->append(buf, n);
+                    got = true;
+                }
+            }
+            if (!out && !err)
+                return false;
+            if (got || os_monotonic_ns() >= until)
+                return true;
+            os_sleep_us(5000);
+        }
+    }
+
+    // True once it has ended, with its exit status in *status.
+    bool exited(int *status) {
+        DWORD code = 0;
+        if (WaitForSingleObject(process, 0) != WAIT_OBJECT_0 || !GetExitCodeProcess(process, &code))
+            return false;
+        *status = int(code);
+        return true;
+    }
+
+    void terminate() {
+        TerminateProcess(process, 1);
+    }
+
+    void close_pipes() {
+        for (HANDLE *h : {&out, &err})
+            if (*h) {
+                CloseHandle(*h);
+                *h = nullptr;
+            }
+    }
+
+    // The exit status (-1 when it could not be read).
+    int wait() {
+        WaitForSingleObject(process, INFINITE);
+        DWORD code = 0;
+        const int status = GetExitCodeProcess(process, &code) ? int(code) : -1;
+        close_pipes();
+        CloseHandle(process);
+        process = nullptr;
+        return status;
+    }
+
+    ~Child() {
+        close_pipes();
+        if (process)
+            CloseHandle(process);
+    }
+};
+
+// Ends the process `pid`, if it is still there.
+void terminate_pid(int64_t pid) {
+    if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, DWORD(pid))) {
+        TerminateProcess(h, 1);
+        CloseHandle(h);
+    }
+}
+#else
 // A child process with its output read through pipes.
 struct Child {
     pid_t pid = -1;
@@ -400,24 +575,48 @@ struct Child {
         return out >= 0 || err >= 0;
     }
 
-    // The exit status (-1 when it did not exit normally).
-    int wait() {
-        int status = 0;
-        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-        }
+    // True once it has ended, with its exit status in *status (-1 when it did
+    // not exit normally).
+    bool exited(int *status) {
+        int st = 0;
+        if (waitpid(pid, &st, WNOHANG) != pid)
+            return false;
+        *status = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+        return true;
+    }
+
+    void terminate() {
+        kill(pid, SIGTERM);
+    }
+
+    void close_pipes() {
         if (out >= 0)
             close(out);
         if (err >= 0)
             close(err);
         out = err = -1;
+    }
+
+    // The exit status (-1 when it did not exit normally).
+    int wait() {
+        int status = 0;
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
+        close_pipes();
         return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     }
 };
 
-std::mutex g_running_lock;
-pid_t g_running = -1;
+// Ends the process `pid`, if it is still there.
+void terminate_pid(int64_t pid) {
+    kill(pid_t(pid), SIGTERM);
+}
+#endif
 
-void set_running(pid_t pid) {
+std::mutex g_running_lock;
+int64_t g_running = -1;
+
+void set_running(int64_t pid) {
     std::lock_guard<std::mutex> lock(g_running_lock);
     g_running = pid;
 }
@@ -523,6 +722,20 @@ Outcome check(const std::vector<ManifestFile> &files, const std::string &dest,
 void stop_stale(int64_t pid, const std::string &helper) {
     if (pid <= 0)
         return;
+#ifdef _WIN32
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
+                           FALSE, DWORD(pid));
+    if (!h)
+        return;
+    wchar_t image[32768];
+    DWORD n = 32768;
+    if (QueryFullProcessImageNameW(h, 0, image, &n) &&
+        canonical(narrow(image)) == canonical(helper)) {
+        TerminateProcess(h, 1);
+        WaitForSingleObject(h, 2000);
+    }
+    CloseHandle(h);
+#else
     char buf[4096];
     const ssize_t n =
         readlink(("/proc/" + std::to_string(pid) + "/exe").c_str(), buf, sizeof buf - 1);
@@ -534,6 +747,7 @@ void stop_stale(int64_t pid, const std::string &helper) {
     kill(pid_t(pid), SIGTERM);
     for (int i = 0; i < 40 && kill(pid_t(pid), 0) == 0; ++i)
         os_sleep_us(50000);
+#endif
 }
 
 Outcome extract(const std::vector<ManifestFile> &files, const gog::Plan &plan,
@@ -588,11 +802,8 @@ Outcome extract(const std::vector<ManifestFile> &files, const gog::Plan &plan,
     int status = 0;
     while (running) {
         c.pump(50, &out, &err);
-        int st = 0;
-        const pid_t r = waitpid(c.pid, &st, WNOHANG);
-        if (r == c.pid) {
+        if (c.exited(&status)) {
             running = false;
-            status = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
             while (c.pump(0, &out, &err)) {
             }
             break;
@@ -602,17 +813,13 @@ Outcome extract(const std::vector<ManifestFile> &files, const gog::Plan &plan,
         last = now_ns();
         poll_files();
         if (!progress(p)) {
-            kill(c.pid, SIGTERM);
+            c.terminate();
             c.wait();
             set_running(-1);
             return Outcome::cancel();
         }
     }
-    if (c.out >= 0)
-        close(c.out);
-    if (c.err >= 0)
-        close(c.err);
-    c.out = c.err = -1;
+    c.close_pipes();
     set_running(-1);
     poll_files();
     progress(p);
@@ -938,28 +1145,41 @@ std::string describe(const Problem &problem) {
 
 namespace gog {
 
+// A program file this launcher may run.
+bool runnable(const std::string &path) {
+#ifdef _WIN32
+    OsStat st{};
+    return os_stat(path.c_str(), &st) == 0 && st.is_regular;
+#else
+    return access(path.c_str(), X_OK) == 0 && !is_dir(path);
+#endif
+}
+
 std::string helper() {
+#ifdef _WIN32
+    const char *name = "innoextract.exe", separator = ';', *fallback = "";
+#else
+    const char *name = "innoextract", separator = ':', *fallback = "/usr/local/bin:/usr/bin:/bin";
+#endif
     if (const char *p = getenv("RECOMP_INNOEXTRACT"); p && *p)
-        return access(p, X_OK) == 0 && !is_dir(p) ? std::string(p) : std::string();
+        return runnable(p) ? std::string(p) : std::string();
     // One the app carries beside its executable, then the system's.
     char self[4096];
-    const ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
-    if (n > 0) {
-        self[n] = 0;
-        const std::string beside = join(parent_dir(self), "innoextract");
-        if (access(beside.c_str(), X_OK) == 0 && !is_dir(beside))
+    if (os_exe_path(self, sizeof self) == 0) {
+        const std::string beside = join(parent_dir(self), name);
+        if (runnable(beside))
             return beside;
     }
     const char *path = getenv("PATH");
-    const std::string dirs = path && *path ? path : "/usr/local/bin:/usr/bin:/bin";
+    const std::string dirs = path && *path ? path : fallback;
     for (size_t start = 0; start <= dirs.size();) {
-        const size_t colon = std::min(dirs.find(':', start), dirs.size());
-        const std::string dir = dirs.substr(start, colon - start);
-        start = colon + 1;
+        const size_t end = std::min(dirs.find(separator, start), dirs.size());
+        const std::string dir = dirs.substr(start, end - start);
+        start = end + 1;
         if (dir.empty())
             continue;
-        const std::string candidate = join(dir, "innoextract");
-        if (access(candidate.c_str(), X_OK) == 0 && !is_dir(candidate))
+        const std::string candidate = join(dir, name);
+        if (runnable(candidate))
             return candidate;
     }
     return "";
@@ -968,7 +1188,7 @@ std::string helper() {
 void stop_running() {
     std::lock_guard<std::mutex> lock(g_running_lock);
     if (g_running > 0)
-        kill(g_running, SIGTERM);
+        terminate_pid(g_running);
 }
 
 std::set<std::string> listed_paths(const std::string &listing) {

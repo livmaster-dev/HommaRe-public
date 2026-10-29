@@ -181,6 +181,14 @@
       "cacheVariables": {
         "CMAKE_OSX_SYSROOT": "iphonesimulator"
       }
+    },
+    {
+      "name": "ios-sim-stub",
+      "inherits": "ios-sim",
+      "binaryDir": "${sourceDir}/build/cmake/ios-sim-stub",
+      "cacheVariables": {
+        "POP_TRANSLATE": "STUB"
+      }
     }
   ],
   "buildPresets": [
@@ -241,6 +249,11 @@
     {
       "name": "ios-sim",
       "configurePreset": "ios-sim",
+      "configuration": "Release"
+    },
+    {
+      "name": "ios-sim-stub",
+      "configurePreset": "ios-sim-stub",
       "configuration": "Release"
     }
   ],

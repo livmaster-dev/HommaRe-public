@@ -14,11 +14,6 @@
 #include "../win32.h"
 #include "../../platform/os.h"
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
@@ -46,65 +41,95 @@ static void section(const char *s) {
 }
 
 // ---------------------------------------------------------------------------
-// A one-shot HTTP server on 127.0.0.1: it accepts `connections` connections
-// and answers each with `reply` (or, with reply empty, never answers).
+// A one-shot HTTP server on 127.0.0.1, on the platform layer's sockets like
+// the client, so the suite runs wherever the kit does: it accepts
+// `connections` connections and answers each with `reply` (or, with reply
+// empty, never answers).
 // ---------------------------------------------------------------------------
+static const uint32_t kLoopback = __builtin_bswap32(0x7f000001); // network order
+
 struct TestServer {
-    int fd = -1;
+    OsSocket fd = OS_SOCKET_INVALID;
     uint16_t port = 0;
     std::thread thread;
     std::string last_request;
     std::atomic<int> served{0};
+    std::atomic<bool> stopping{false};
+
+    // Waits until `s` can do `events`; false once the server is stopping.
+    bool wait(OsSocket s, int events) {
+        while (!stopping) {
+            OsSockPoll p{s, events, 0};
+            if (os_sock_poll(&p, 1, 20) != 0)
+                return true;
+        }
+        return false;
+    }
+    // recv, waiting while there is nothing yet: >0 bytes, 0 closed, -1 failed or stopping.
+    int64_t receive(OsSocket c, char *buf, size_t cap) {
+        for (;;) {
+            const int64_t n = os_sock_recv(c, buf, cap, 0);
+            if (n >= 0 || os_net_error() != OS_NET_WOULDBLOCK)
+                return n;
+            if (!wait(c, OS_POLL_IN))
+                return -1;
+        }
+    }
+    void serve(const std::string &reply, int connections) {
+        for (int i = 0; i < connections; ++i) {
+            OsSocket c = OS_SOCKET_INVALID;
+            while (c == OS_SOCKET_INVALID) {
+                if (!wait(fd, OS_POLL_IN))
+                    return;
+                c = os_sock_accept(fd, nullptr, nullptr);
+            }
+            std::string req;
+            char buf[1024];
+            while (req.find("\r\n\r\n") == std::string::npos) {
+                const int64_t n = receive(c, buf, sizeof buf);
+                if (n <= 0)
+                    break;
+                req.append(buf, size_t(n));
+            }
+            last_request = req;
+            if (reply.empty()) {
+                // Never answer: hold the connection until the client gives up.
+                while (receive(c, buf, sizeof buf) > 0) {
+                }
+            } else {
+                for (size_t sent = 0; sent < reply.size();) {
+                    const int64_t n = os_sock_send(c, reply.data() + sent, reply.size() - sent, 0);
+                    if (n > 0)
+                        sent += size_t(n);
+                    else if (n == 0 || os_net_error() != OS_NET_WOULDBLOCK || !wait(c, OS_POLL_OUT))
+                        break;
+                }
+            }
+            os_sock_close(c);
+            ++served;
+        }
+    }
 
     bool start(const std::string &reply, int connections = 1) {
-        fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0)
+        fd = os_sock_open(OS_SOCK_STREAM);
+        if (fd == OS_SOCKET_INVALID)
             return false;
-        int one = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-        sockaddr_in a{};
-        a.sin_family = AF_INET;
-        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        if (bind(fd, (sockaddr *)&a, sizeof a) != 0 || listen(fd, 4) != 0)
+        uint16_t p = 0;
+        if (os_sock_bind(fd, kLoopback, 0) != 0 || os_sock_listen(fd, 4) != 0 ||
+            os_sock_name(fd, nullptr, &p) != 0)
             return false;
-        socklen_t len = sizeof a;
-        getsockname(fd, (sockaddr *)&a, &len);
-        port = ntohs(a.sin_port);
-        thread = std::thread([this, reply, connections] {
-            for (int i = 0; i < connections; ++i) {
-                const int c = accept(fd, nullptr, nullptr);
-                if (c < 0)
-                    return;
-                std::string req;
-                char buf[1024];
-                while (req.find("\r\n\r\n") == std::string::npos) {
-                    const ssize_t n = recv(c, buf, sizeof buf, 0);
-                    if (n <= 0)
-                        break;
-                    req.append(buf, size_t(n));
-                }
-                last_request = req;
-                if (reply.empty()) {
-                    // Never answer: hold the connection until the client gives up.
-                    while (recv(c, buf, sizeof buf, 0) > 0) {
-                    }
-                } else {
-                    send(c, reply.data(), reply.size(), 0);
-                }
-                close(c);
-                ++served;
-            }
-        });
+        port = __builtin_bswap16(p);
+        thread = std::thread([this, reply, connections] { serve(reply, connections); });
         return true;
     }
     void stop() {
-        if (fd >= 0) {
-            shutdown(fd, SHUT_RDWR);
-            close(fd);
-            fd = -1;
-        }
+        stopping = true;
         if (thread.joinable())
             thread.join();
+        if (fd != OS_SOCKET_INVALID) {
+            os_sock_close(fd);
+            fd = OS_SOCKET_INVALID;
+        }
     }
     ~TestServer() {
         stop();
@@ -113,15 +138,12 @@ struct TestServer {
 
 // A port nothing listens on: bound, then let go.
 static uint16_t closed_port() {
-    const int fd = socket(AF_INET, SOCK_STREAM, 0);
-    sockaddr_in a{};
-    a.sin_family = AF_INET;
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    bind(fd, (sockaddr *)&a, sizeof a);
-    socklen_t len = sizeof a;
-    getsockname(fd, (sockaddr *)&a, &len);
-    close(fd);
-    return ntohs(a.sin_port);
+    const OsSocket fd = os_sock_open(OS_SOCK_STREAM);
+    uint16_t p = 0;
+    os_sock_bind(fd, kLoopback, 0);
+    os_sock_name(fd, nullptr, &p);
+    os_sock_close(fd);
+    return __builtin_bswap16(p);
 }
 
 static const char *kIni = "[Servers]\r\nRouterIP0=127.0.0.1\r\nRouterPort0=7777\r\n";
@@ -250,17 +272,26 @@ static void test_http_get() {
               "Host names the server and its port");
     }
     {
-        // A name from /etc/hosts; localhost may be ::1 first, which nothing
-        // listens on here, so the next address is tried.
+        // A name from the hosts file, resolved to its IPv4 address.
         TestServer server;
         server.start(ok_reply("x"));
         const HttpGetResult r = http_get("localhost", server.port, "/", 5000);
         server.stop();
-        check(r.ok && r.body == "x", "a name resolves, every address is tried (%s)",
-              r.error.c_str());
+        check(r.ok && r.body == "x", "a name resolves (%s)", r.error.c_str());
     }
     {
-        const HttpGetResult r = http_get("127.0.0.1", closed_port(), "/", 3000);
+        const HttpGetResult r = http_get("::1", 8080, "/", 3000);
+        check(!r.ok && r.unresolved && r.error.find("IPv6") != std::string::npos,
+              "an IPv6 address is refused with a reason (%s)", r.error.c_str());
+    }
+    {
+        const HttpGetResult r = http_get("no-such-host.invalid", 80, "/", 3000);
+        check(!r.ok && r.unresolved && r.error.find("no-such-host.invalid") != std::string::npos,
+              "an unknown name does not resolve (%s)", r.error.c_str());
+    }
+    {
+        // Windows retries a refused connect for about two seconds.
+        const HttpGetResult r = http_get("127.0.0.1", closed_port(), "/", 5000);
         check(!r.ok && !r.timed_out && r.error.find("refused") != std::string::npos,
               "nothing listening: refused (%s)", r.error.c_str());
     }

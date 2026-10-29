@@ -243,7 +243,12 @@ the stub). These presets enable FFmpeg movies
 and file-backed music, building the three shared media DLLs with llvm-mingw and
 copying them beside the executable. The build host needs a POSIX shell and GNU
 make; MSYS2 is only required when building on Windows itself. Translated app
-packages, including the DLLs and their notice, land in `build/windows/package/`.
+packages, including the DLLs and their notice, land in `build/windows/package/`
+with a zip beside them; a multi-game build (`--game-modules`) adds `SDL3.dll`,
+and `tools/assemble_games.py --platform windows` puts the other games'
+`libgame.<id>.dll` into its `modules/`. Every Windows executable carries a
+manifest that makes UTF-8 its code page (`platform/windows/app.manifest`), and
+the native launcher runs the `innoextract.exe` the build places beside the app.
 
 ## Check a change
 

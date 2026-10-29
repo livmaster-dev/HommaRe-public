@@ -35,6 +35,26 @@ FetchContent_Declare(SDL3
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(SDL3)
 
+# zlib1.dll's stand-in (runtime/legacy_dlls.cpp) runs on the host's zlib.
+# Windows has none to find, so its build compiles one in statically: only the
+# library's sources, never zlib's own CMake project with its install rules and
+# examples (SOURCE_SUBDIR names a directory that does not exist).
+if(WIN32)
+  FetchContent_Declare(zlib
+    URL https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.xz
+    URL_HASH SHA256=d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    SOURCE_SUBDIR no-cmake)
+  FetchContent_MakeAvailable(zlib)
+  set(_zlib_sources adler32 compress crc32 deflate gzclose gzlib gzread gzwrite infback
+      inffast inflate inftrees trees uncompr zutil)
+  list(TRANSFORM _zlib_sources PREPEND ${zlib_SOURCE_DIR}/)
+  list(TRANSFORM _zlib_sources APPEND .c)
+  add_library(recomp_zlib STATIC ${_zlib_sources})
+  target_include_directories(recomp_zlib SYSTEM PUBLIC ${zlib_SOURCE_DIR})
+  add_library(ZLIB::ZLIB ALIAS recomp_zlib)
+endif()
+
 # glslang compiles the Direct3D 9 renderer's GLSL to SPIR-V at run time
 # (host/gpu/vulkan/d3d9_vulkan.cpp): every platform that renders on Vulkan.
 set(RECOMP_D9_VULKAN OFF)
@@ -190,6 +210,10 @@ if(RECOMP_VIDEO)
       # FFmpeg's compat/windows/mslink finds the right link.exe when MSYS2's
       # coreutils link comes first on PATH.
       list(APPEND RECOMP_FFMPEG_CONFIGURE --toolchain=msvc --target-os=win64 --arch=x86_64)
+      # The AC-3 decoder's object carries E-AC-3's code too; gcc and clang
+      # drop it with CONFIG_EAC3_DECODER off, cl links it and wants E-AC-3's
+      # tables (eac3_data.o, ff_eac3_*), which only that decoder builds.
+      list(APPEND RECOMP_FFMPEG_CONFIGURE --enable-decoder=eac3)
     else()
       list(APPEND RECOMP_FFMPEG_CONFIGURE --cc=${CMAKE_C_COMPILER})
       if(WIN32)

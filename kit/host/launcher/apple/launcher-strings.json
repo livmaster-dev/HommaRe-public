@@ -1,5 +1,5 @@
 {
- "_comment": "The launcher's own words (L10n in LauncherStrings.swift): key = L10n member ('.ios'/'.mac'/'.iosInstaller' = #if os() variants; '.linux' = the native launcher on Linux, host/launcher/linux/), one text per language, {name} = the member's arguments listed in 'args'. kit/tools/launcher_strings.py checks it and writes LauncherCatalog.swift from it.",
+ "_comment": "The launcher's own words (L10n in LauncherStrings.swift): key = L10n member ('.ios'/'.mac'/'.iosInstaller' = #if os() variants; '.linux' = the native launcher on Linux and Windows, host/launcher/linux/, and '.windows' its Windows-only variant before that), one text per language, {name} = the member's arguments listed in 'args'. kit/tools/launcher_strings.py checks it and writes LauncherCatalog.swift from it.",
  "languages": [
   {
    "code": "en",
@@ -1156,6 +1156,18 @@
    "hu": "Az innoextract nincs telepítve. Telepítsd a disztribúciód csomagjaiból (például dnf install innoextract vagy apt install innoextract), majd próbáld újra.",
    "pl": "innoextract nie jest zainstalowany. Zainstaluj go z pakietów swojej dystrybucji (na przykład dnf install innoextract lub apt install innoextract) i spróbuj ponownie.",
    "zh-Hans": "未安装 innoextract。请从你的发行版软件包中安装（例如 dnf install innoextract 或 apt install innoextract），然后重试。"
+  },
+  "noHelper.windows": {
+   "en": "innoextract.exe is missing from the app's folder. Unpack the whole folder from the downloaded zip again, then try again.",
+   "ru": "В папке приложения нет innoextract.exe. Распакуйте всю папку из скачанного zip-архива заново и попробуйте снова.",
+   "cs": "Ve složce aplikace chybí innoextract.exe. Znovu rozbalte celou složku ze staženého archivu zip a zkuste to znovu.",
+   "de": "Im Ordner der App fehlt innoextract.exe. Entpacke den ganzen Ordner erneut aus dem heruntergeladenen ZIP-Archiv und versuche es erneut.",
+   "es": "Falta innoextract.exe en la carpeta de la app. Vuelve a descomprimir toda la carpeta del zip descargado y vuelve a intentarlo.",
+   "fr": "innoextract.exe manque dans le dossier de l’app. Décompressez à nouveau tout le dossier depuis le zip téléchargé, puis réessayez.",
+   "it": "Nella cartella dell’app manca innoextract.exe. Estrai di nuovo l’intera cartella dallo zip scaricato e riprova.",
+   "hu": "Az app mappájából hiányzik az innoextract.exe. Csomagold ki újra a teljes mappát a letöltött zip-fájlból, majd próbáld újra.",
+   "pl": "W folderze aplikacji brakuje innoextract.exe. Rozpakuj ponownie cały folder z pobranego archiwum zip i spróbuj ponownie.",
+   "zh-Hans": "应用文件夹中缺少 innoextract.exe。请从下载的 zip 文件中重新解压整个文件夹，然后重试。"
   },
   "missingSlice": {
    "args": [

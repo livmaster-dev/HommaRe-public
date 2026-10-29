@@ -1155,6 +1155,12 @@ static void test_game_path() {
         CHECK(first.exe == RECOMP_DEVELOPER_EXE);
     // A flag wins without any check.
     CHECK(game_path_resolve("/x/D3DPopTB.exe").source == GamePathSource::Flag);
+    // Windows' own spelling is split at '/' like the rest; elsewhere '\' is a name's.
+#ifdef _WIN32
+    CHECK(game_path_resolve("C:\\G V\\bin\\x.exe").exe == "C:/G V/bin/x.exe");
+#else
+    CHECK(game_path_normal("/x/a\\b.exe") == "/x/a\\b.exe");
+#endif
     // A saved path to a wrong file is ignored.
     std::string wrong = std::string(dir) + "/wrong.exe";
     FILE *f = fopen(wrong.c_str(), "wb");
@@ -8203,7 +8209,7 @@ static void test_input_gate() {
     g_consume_next = false;
     uint32_t notifies = host_input_notify_count();
 
-    CHECK(!host_key_event(kMacG, true, 'G'));
+    CHECK(!host_key_event(kMacG, true, 'g'));
     CHECK(dik_down() == 0x80); // 1. DirectInput state
     if (kb)
         CHECK(gate_buffered_events(&ctx, kb) == 1); // 2. buffered event
@@ -8234,8 +8240,8 @@ static void test_input_gate() {
     g_consume_next = true;
     notifies = host_input_notify_count();
 
-    CHECK(host_key_event(kMacG, true, 'G')); // the press
-    CHECK(host_key_event(kMacG, true, 'G')); // its auto-repeat
+    CHECK(host_key_event(kMacG, true, 'g')); // the press
+    CHECK(host_key_event(kMacG, true, 'g')); // its auto-repeat
     CHECK(host_key_event(kMacG, false, 0));  // and its release
     CHECK(dik_down() == 0);                  // 1. no state
     if (kb)

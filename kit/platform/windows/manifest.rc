@@ -1,0 +1,3 @@
+// The application manifest (app.manifest) as resource 1 of type RT_MANIFEST,
+// the one Windows reads when it starts an executable.
+1 24 "app.manifest"

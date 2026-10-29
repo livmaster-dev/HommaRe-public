@@ -27,6 +27,7 @@
 #include "../boot.h"
 #include "../../runtime/display_seam.h"
 #include "../d3d_render.h"
+#include "../game_modules.h"
 #include "../game_path.h"
 #include "../launcher/launcher_sdl.h"
 #include "../launcher/native_launcher.h"
@@ -71,9 +72,6 @@
 #define SDL_MAIN_HANDLED
 #endif
 #include <SDL3/SDL_main.h> // on iOS this supplies the UIKit entry point and renames main
-#if defined(RECOMP_GAME_MODULE) || defined(RECOMP_GAME_MODULES)
-#include <dlfcn.h>
-#endif
 #ifdef __EMSCRIPTEN__
 #include "../gpu/d3d9_backend.h"
 #include <emscripten/emscripten.h>
@@ -2616,27 +2614,14 @@ static const char *const kIntroFiles[] = {"video/intro.xml", "video/intro_a1.xml
 
 #if defined(RECOMP_GAME_MODULES)
 // A multi-game app (RECOMP_GAME_MODULES): the other games' modules sit in the
-// app's Frameworks as libgame.<id>.dylib, on Linux in modules/ beside the
-// executable as libgame.<id>.so (tools/assemble_games.py).
-#ifdef __APPLE__
-static const char kModuleSuffix[] = ".dylib";
-#else
-static const char kModuleSuffix[] = ".so";
-#endif
+// app's Frameworks as libgame.<id>.dylib, on Linux and Windows in modules/
+// beside the executable as libgame.<id>.so (.dll) (host/game_modules.h,
+// tools/assemble_games.py).
 static std::string modules_dir() {
     char path[4096];
     if (os_exe_path(path, sizeof path) != 0)
         return "";
-    std::string dir = path;
-    dir = dir.substr(0, dir.find_last_of('/'));
-#ifdef __APPLE__
-    static const std::string mac = "/Contents/MacOS";
-    if (dir.size() > mac.size() && dir.compare(dir.size() - mac.size(), mac.size(), mac) == 0)
-        return dir.substr(0, dir.size() - mac.size()) + "/Contents/Frameworks";
-    return dir + "/Frameworks"; // iOS: a flat bundle
-#else
-    return dir + "/modules";
-#endif
+    return game_modules_dir(kModuleLayout, path);
 }
 
 // This game's id and those of the modules beside it, for the launcher.
@@ -2652,11 +2637,8 @@ static std::string available_modules() {
                 return 0;
             },
             &names);
-    static const std::string prefix = "libgame.", suffix = kModuleSuffix;
-    for (const std::string &name : names)
-        if (name.size() > prefix.size() + suffix.size() && name.compare(0, prefix.size(), prefix) == 0 &&
-            name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
-            list += "," + name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+    for (const std::string &id : game_module_ids(kModuleLayout, names))
+        list += "," + id;
     return list;
 }
 
@@ -2664,14 +2646,14 @@ static std::string available_modules() {
 // go (the module brings up its own on the same SDL), then the module's
 // recomp_game_main runs the chosen executable. Only returns when that game does.
 static int run_game_module(const launcher::NativeChoice &choice, const char *argv0) {
-    const std::string path = modules_dir() + "/libgame." + choice.module + kModuleSuffix;
-    void *module = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    const std::string path = modules_dir() + "/" + game_module_file(kModuleLayout, choice.module);
+    void *module = os_dlopen(path.c_str());
     if (!module) {
-        fprintf(stderr, RECOMP_APP_NAME ": cannot load %s: %s\n", path.c_str(), dlerror());
+        fprintf(stderr, RECOMP_APP_NAME ": cannot load %s: %s\n", path.c_str(), os_dlerror());
         return 3;
     }
     using Entry = int (*)(int, char **);
-    const Entry entry = reinterpret_cast<Entry>(dlsym(module, "recomp_game_main"));
+    const Entry entry = reinterpret_cast<Entry>(os_dlsym(module, "recomp_game_main"));
     if (!entry) {
         fprintf(stderr, RECOMP_APP_NAME ": %s has no recomp_game_main\n", path.c_str());
         return 3;
@@ -2756,21 +2738,16 @@ static void module_take_launcher_choices() {
 #endif
 
 static void module_prepare() {
-    Dl_info info{};
-    if (dladdr(reinterpret_cast<const void *>(&module_prepare), &info) && info.dli_fname) {
-        std::string dir = info.dli_fname;
-        dir = dir.substr(0, dir.find_last_of('/')); // Frameworks (modules/ on Linux)
-        dir = dir.substr(0, dir.find_last_of('/')); // Contents (macOS), the app (iOS) or its folder (Linux)
-        OsStat st{};
-#ifdef __APPLE__
-        const std::string mac = dir + "/Resources/games/" RECOMP_APP_NAME;
-        const std::string flat = dir + "/games/" RECOMP_APP_NAME;
-        const std::string resources = os_stat(mac.c_str(), &st) == 0 ? mac : flat;
-#else
-        const std::string resources = dir + "/resources/games/" RECOMP_APP_NAME;
-#endif
-        if (os_stat(resources.c_str(), &st) == 0 && st.is_dir)
-            os_setenv("RECOMP_RESOURCES_DIR", resources.c_str());
+    char self[4096];
+    if (os_module_path(reinterpret_cast<const void *>(&module_prepare), self, sizeof self) == 0) {
+        for (const std::string &dir :
+             game_module_resource_dirs(kModuleLayout, self, RECOMP_APP_NAME)) {
+            OsStat st{};
+            if (os_stat(dir.c_str(), &st) == 0 && st.is_dir) {
+                os_setenv("RECOMP_RESOURCES_DIR", dir.c_str());
+                break;
+            }
+        }
     }
     if (const char *profile = recomp_env("PROFILE_DIR"); !profile || !*profile) {
         host_migrate_own_user_data(); // the module's own former names
@@ -3148,7 +3125,14 @@ int web_main(int argc, char **argv) {
 
 #if defined(RECOMP_GAME_MODULE)
 static int host_main(int argc, char **argv);
-extern "C" __attribute__((visibility("default"))) int recomp_game_main(int argc, char **argv) {
+// The module's one export: by visibility in ELF and Mach-O (sdl/game_module.map),
+// by dllexport in PE, which also keeps MinGW from exporting everything else.
+#ifdef _WIN32
+#define RECOMP_GAME_EXPORT __declspec(dllexport)
+#else
+#define RECOMP_GAME_EXPORT __attribute__((visibility("default")))
+#endif
+extern "C" RECOMP_GAME_EXPORT int recomp_game_main(int argc, char **argv) {
     module_prepare();
     module_take_launcher_choices();
     return host_main(argc, argv);
@@ -3159,6 +3143,12 @@ extern "C" __attribute__((visibility("default"))) int recomp_game_main(int argc,
 int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     return web_main(argc, argv);
+#endif
+    os_attach_parent_console();
+#ifdef _WIN32
+    // The window and the taskbar take the executable's icon (resource 1).
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
 #endif
     // --version and --probe-layout answer before SDL or the GPU come up, so a
     // packaged build can be checked on a machine with neither a display nor
@@ -3398,7 +3388,7 @@ int main(int argc, char **argv) {
             if (const char *keys = recomp_env("LAUNCHER_KEYS"))
                 options.keys = keys;
             const std::string chosen =
-                launcher::run(g_window, g_gpu.get(), g_surface, *platform, options);
+                game_path_normal(launcher::run(g_window, g_gpu.get(), g_surface, *platform, options));
             if (chosen.empty())
                 return 2;
             if (chosen != game.exe && !game_path_save(chosen))

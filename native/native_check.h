@@ -7,9 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "x86.h"
+#include "platform/os.h"
 
 enum { NC_ORIGINAL = 0, NC_NATIVE = 1, NC_ALTERNATE = 2, NC_CHECK = 3 };
 
@@ -23,9 +23,7 @@ static inline int nc_mode(int *mode, int *shown, const char *var, const char *ta
     }
     if (*mode != NC_ALTERNATE)
         return *mode;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    const int on = (int)((ts.tv_sec / 10) & 1);
+    const int on = (int)((os_monotonic_ns() / 10000000000ull) & 1);
     if (on != *shown) {
         *shown = on;
         fprintf(stderr, "[%s] %s\n", tag, on ? "native" : "original");

@@ -12,18 +12,39 @@ project(PopulousRecomp LANGUAGES C CXX)
 if(APPLE)
   enable_language(OBJCXX)
 endif()
+if(WIN32)
+  enable_language(RC) # the manifest, the app's icon and version (platform/windows/)
+endif()
+# An MSVC-ABI link embeds a manifest of its own, which in an executable is a
+# second resource 1 of type RT_MANIFEST beside manifest.rc's (the platform
+# layer gives that one, UTF-8 as the code page, to every image linking it).
+# CMake's rules for clang put /MANIFEST:EMBED after the objects, and Ninja's
+# response file takes the libraries there too, so no option of a target's
+# comes later: the rules themselves turn it off. vs_link_exe (cl, clang-cl)
+# reads /MANIFEST:NO wherever it is.
+if(WIN32 AND NOT MINGW)
+  if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    add_link_options(/MANIFEST:NO)
+  else()
+    foreach(lang C CXX)
+      foreach(rule LINK_EXECUTABLE CREATE_SHARED_LIBRARY CREATE_SHARED_MODULE)
+        string(REPLACE "/MANIFEST:EMBED" "/MANIFEST:NO" CMAKE_${lang}_${rule} "${CMAKE_${lang}_${rule}}")
+      endforeach()
+    endforeach()
+  endif()
+endif()
 # The SwiftUI launcher (host/launcher/apple/) on macOS and iOS, the same one
-# drawn by the host on Linux (host/launcher/linux/); the canvas launcher
-# everywhere else and with this off.
-option(RECOMP_NATIVE_LAUNCHER "Build the native launcher (SwiftUI on Apple platforms, the host's on Linux)" ON)
-# Several games in one app (Apple, Linux): each game also builds as a module,
-# libgame.<id>.dylib (.so) with recomp_game_main for an entry, and the app the
-# launcher runs in loads the module of the game the player picks
-# (host/sdl/main.cpp run_game_module, tools/assemble_games.py). Modules and the
-# app share one SDL, so SDL links as a shared library in this mode.
-option(RECOMP_GAME_MODULES "Build the game as a loadable module and link SDL shared (Apple, Linux)" OFF)
-if(RECOMP_GAME_MODULES AND NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "RECOMP_GAME_MODULES is for Apple and Linux builds")
+# drawn by the host on Linux and Windows (host/launcher/linux/); the canvas
+# launcher everywhere else and with this off.
+option(RECOMP_NATIVE_LAUNCHER "Build the native launcher (SwiftUI on Apple platforms, the host's on Linux and Windows)" ON)
+# Several games in one app (Apple, Linux, Windows): each game also builds as a
+# module, libgame.<id>.dylib (.so, .dll) with recomp_game_main for an entry,
+# and the app the launcher runs in loads the module of the game the player
+# picks (host/sdl/main.cpp run_game_module, tools/assemble_games.py). Modules
+# and the app share one SDL, so SDL links as a shared library in this mode.
+option(RECOMP_GAME_MODULES "Build the game as a loadable module and link SDL shared (Apple, Linux, Windows)" OFF)
+if(RECOMP_GAME_MODULES AND NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT WIN32)
+  message(FATAL_ERROR "RECOMP_GAME_MODULES is for Apple, Linux and Windows builds")
 endif()
 if(APPLE AND RECOMP_NATIVE_LAUNCHER)
   if(IOS AND NOT CMAKE_GENERATOR STREQUAL "Xcode" AND NOT CMAKE_Swift_COMPILER_TARGET)
@@ -31,6 +52,9 @@ if(APPLE AND RECOMP_NATIVE_LAUNCHER)
   elseif(NOT IOS AND CMAKE_OSX_DEPLOYMENT_TARGET AND NOT CMAKE_Swift_COMPILER_TARGET)
     set(CMAKE_Swift_COMPILER_TARGET "${CMAKE_SYSTEM_PROCESSOR}-apple-macos${CMAKE_OSX_DEPLOYMENT_TARGET}")
   endif()
+  # Swift 5 for every target. Xcode 16 otherwise gets CMake's default, 4,
+  # after the targets' own -swift-version 5, and the launcher fails there.
+  set(CMAKE_Swift_LANGUAGE_VERSION 5.0)
   enable_language(Swift)
 endif()
 
@@ -47,6 +71,19 @@ if(EMSCRIPTEN)
   set(CMAKE_CXX_EXTENSIONS ON)
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if(WIN32)
+  # Windows' headers, MinGW's and Microsoft's, keep M_PI behind this; glibc's
+  # and Apple's declare it by default.
+  add_compile_definitions(_USE_MATH_DEFINES)
+endif()
+if(MINGW)
+  # And MinGW's keep localtime_r/gmtime_r behind this.
+  add_compile_definitions(_POSIX_THREAD_SAFE_FUNCTIONS=200112L)
+elseif(WIN32)
+  # The Microsoft C runtime spells POSIX's fseeko and ftello _fseeki64 and
+  # _ftelli64.
+  add_compile_definitions(fseeko=_fseeki64 ftello=_ftelli64)
+endif()
 if(ANDROID OR (RECOMP_GAME_MODULES AND CMAKE_SYSTEM_NAME STREQUAL "Linux"))
   # All static and object libraries feed the shared SDL application (Android)
   # or a game module (Linux; Apple's code is position independent already).
@@ -78,6 +115,8 @@ if(ANDROID AND POP_TRANSLATE STREQUAL "STUB")
   set(POP_BUILD_DIR ${POP_BUILD_ROOT}/android-stub)
 elseif(ANDROID)
   set(POP_BUILD_DIR ${POP_BUILD_ROOT}/android)
+elseif(IOS AND POP_TRANSLATE STREQUAL "STUB" AND CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+  set(POP_BUILD_DIR ${POP_BUILD_ROOT}/ios-sim-stub)
 elseif(IOS AND POP_TRANSLATE STREQUAL "STUB")
   set(POP_BUILD_DIR ${POP_BUILD_ROOT}/ios-stub)
 # Cross builds (the web, Windows from macOS or Linux) keep theirs apart from

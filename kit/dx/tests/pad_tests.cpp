@@ -605,12 +605,14 @@ static void test_joy_device_state() {
     wr32(caps, 16);
     CHECK_EQ(call_method(dev, DID_GetCapabilities, {caps}), DIERR_INVALIDPARAM);
 
-    // Device info names the pad.
+    // Device info names the pad as enumeration does: tszProductName at 300.
     uint32_t info = sc(0x800);
     wr32(info, 580);
     CHECK_EQ(call_method(dev, DID_GetDeviceInfo, {info}), DI_OK);
     CHECK_EQ(rd32(info + 36), 0x0404u);
-    CHECK_EQ(rd8(info + 300), (uint32_t)'R');
+    const char *product = "Controller";
+    for (uint32_t i = 0; i <= strlen(product); ++i)
+        CHECK_EQ(rd8(info + 300 + i), (uint32_t)(uint8_t)product[i]);
 }
 
 static uint32_t g_obj_calls = 0;

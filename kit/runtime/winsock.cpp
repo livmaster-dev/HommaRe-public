@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <set>

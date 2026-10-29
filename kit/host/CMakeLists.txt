@@ -130,6 +130,13 @@ pop_optimize(ui_layer_tests 1)
 pop_test_binary(ui_layer_tests)
 add_test(NAME ui_layer_tests COMMAND ui_layer_tests WORKING_DIRECTORY ${POP_ROOT})
 set_tests_properties(ui_layer_tests PROPERTIES LABELS nogame)
+
+add_executable(game_modules_tests ${HOST}/game_modules.cpp ${HOST}/tests/game_modules_tests.cpp)
+target_compile_options(game_modules_tests PRIVATE ${POP_WARN_WERROR})
+pop_optimize(game_modules_tests 1)
+pop_test_binary(game_modules_tests)
+add_test(NAME game_modules_tests COMMAND game_modules_tests WORKING_DIRECTORY ${POP_ROOT})
+set_tests_properties(game_modules_tests PROPERTIES LABELS nogame)
 endif()
 
 # The hosts and the full host suite build on every platform over gpu_backend.
@@ -273,11 +280,25 @@ if(APPLE AND RECOMP_NATIVE_LAUNCHER)
     endif()
   endif()
 endif()
-# The same launcher on Linux, drawn by the host itself (host/launcher/linux/):
-# the canvas launcher's window with the game's own textures and TrueType
-# text, installing from GOG installers with the system's innoextract. Its
-# words are the SwiftUI launcher's, apple/launcher-strings.json, embedded.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RECOMP_NATIVE_LAUNCHER)
+# The same launcher on Linux and Windows, drawn by the host itself
+# (host/launcher/linux/): the canvas launcher's window with the game's own
+# textures and TrueType text, installing from GOG installers with the
+# system's innoextract (on Windows the innoextract.exe below, beside the app).
+# Its words are the SwiftUI launcher's, apple/launcher-strings.json, embedded.
+if((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32) AND RECOMP_NATIVE_LAUNCHER)
+  if(WIN32)
+    # Windows has no innoextract to run: the app carries innoextract 1.9's own
+    # Windows build (third_party/innoextract/NOTICE.md), pinned by SHA-256,
+    # beside its executable; tools/package_desktop.py packs it and its licenses.
+    set(pop_inno_dir ${CMAKE_BINARY_DIR}/innoextract-windows)
+    if(NOT EXISTS ${pop_inno_dir}/files/innoextract.exe)
+      file(DOWNLOAD https://constexpr.org/innoextract/files/innoextract-1.9/innoextract-1.9-windows.zip
+           ${pop_inno_dir}/innoextract-1.9-windows.zip
+           EXPECTED_HASH SHA256=6989342c9b026a00a72a38f23b62a8e6a22cc5de69805cf47d68ac2fec993065)
+      file(ARCHIVE_EXTRACT INPUT ${pop_inno_dir}/innoextract-1.9-windows.zip DESTINATION ${pop_inno_dir}/files)
+    endif()
+    file(COPY ${pop_inno_dir}/files/innoextract.exe DESTINATION ${POP_OUT})
+  endif()
   set(pop_strings_cpp ${CMAKE_CURRENT_BINARY_DIR}/generated/launcher_strings.cpp)
   add_custom_command(
     OUTPUT ${pop_strings_cpp}
@@ -375,7 +396,7 @@ if(TARGET recomp_gen)
   set(POP_APP_SOURCES ${HOST}/sdl/main.cpp ${HOST}/sdl/keymap.cpp ${POP_PLATFORM_UI} ${POP_LAUNCHER_SOURCES}
             ${HOST}/controls/controls_host.cpp ${HOST}/controls/gamepad_sdl.cpp
             ${HOST}/controls/vpad_host_api.cpp
-            ${HOST}/game_path.cpp ${HOST}/present.cpp ${HOST}/text_overrides.cpp ${HOST}/ui_mods.cpp
+            ${HOST}/game_modules.cpp ${HOST}/game_path.cpp ${HOST}/present.cpp ${HOST}/text_overrides.cpp ${HOST}/ui_mods.cpp
             ${HOST}/server_prompt.cpp
             ${HOST}/page_overlay.cpp
             ${POP_PRESENT_SOURCES}
@@ -481,6 +502,38 @@ if(TARGET recomp_gen)
       # Keep staged FFmpeg libraries (and the shared SDL) discoverable beside the executable.
       set_target_properties(recomp_app PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
     endif()
+    if(WIN32)
+      # A windowed program, so no console opens beside it (one started from a
+      # terminal logs there: os_attach_parent_console), with the game's
+      # icon.png as its icon and its name and version in its resources.
+      set_target_properties(recomp_app PROPERTIES WIN32_EXECUTABLE TRUE)
+      set(pop_app_rc ${CMAKE_CURRENT_BINARY_DIR}/generated/app.rc)
+      set(POP_APP_ICON_RESOURCE "")
+      if(EXISTS ${RECOMP_GAME_DIR}/icon.png)
+        set(pop_app_ico ${CMAKE_CURRENT_BINARY_DIR}/generated/app.ico)
+        add_custom_command(
+          OUTPUT ${pop_app_ico}
+          COMMAND ${Python3_EXECUTABLE} ${POP_ROOT}/tools/extract_icon.py
+                  --image ${RECOMP_GAME_DIR}/icon.png --ico ${pop_app_ico}
+          DEPENDS ${RECOMP_GAME_DIR}/icon.png ${POP_ROOT}/tools/extract_icon.py
+          COMMENT "Making the app's icon"
+          VERBATIM)
+        set(POP_APP_ICON_RESOURCE "1 ICON \"${pop_app_ico}\"")
+        set_source_files_properties(${pop_app_rc} PROPERTIES OBJECT_DEPENDS ${pop_app_ico})
+      endif()
+      configure_file(${POP_ROOT}/platform/windows/app.rc.in ${pop_app_rc} @ONLY)
+      target_sources(recomp_app PRIVATE ${pop_app_rc})
+      # The translation's symbol table, which the mods load, lives in
+      # build/recomp; a cross build's executable is in build/windows/recomp,
+      # where tools/package_desktop.py takes it from beside the binary.
+      if(POP_REAL_GEN AND EXISTS ${POP_BUILD_ROOT}/recomp/symbols.json
+         AND NOT POP_OUT STREQUAL "${POP_BUILD_ROOT}/recomp")
+        add_custom_command(TARGET recomp_app POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different ${POP_BUILD_ROOT}/recomp/symbols.json
+                  ${POP_OUT}/symbols.json
+          VERBATIM)
+      endif()
+    endif()
   endif()
 
   # The game as a module of a multi-game app (RECOMP_GAME_MODULES): the same
@@ -513,7 +566,14 @@ if(TARGET recomp_gen)
     if(IOS OR NOT APPLE)
       pop_builtin_mods(recomp_game)
     endif()
-    if(NOT APPLE)
+    if(WIN32)
+      # A DLL is a runtime output on Windows: libgame.<id>.dll into modules/.
+      # PE resolves every import per DLL, so the module's runtime binds to its
+      # own as on macOS; recomp_game_main, the one dllexport, is its only
+      # export. SDL3.dll and FFmpeg's DLLs are found in the executable's
+      # folder, which Windows searches for a loaded DLL's imports.
+      set_target_properties(recomp_game PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${POP_BUILD_DIR}/modules)
+    elseif(NOT APPLE)
       # ELF has one symbol namespace: the module's runtime and translation
       # carry the same names as the app's, and must bind to their own
       # (Mach-O's two-level namespace does this by itself), so the module

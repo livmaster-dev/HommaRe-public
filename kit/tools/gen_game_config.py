@@ -234,10 +234,11 @@ def render_cmake(cfg):
 
 
 def write_if_changed(path, text):
+    """UTF-8 whatever the locale: game.toml's strings are (Windows' would be cp1252)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.is_file() or path.read_text() != text:
-        path.write_text(text)
+    if not path.is_file() or path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
 
 
 def main():

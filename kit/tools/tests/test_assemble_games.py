@@ -1,8 +1,13 @@
-"""The other games' modules reach the Linux package's tarball, not only its folder."""
+"""The other games' modules reach the Linux package's tarball and the Windows
+package's zip, not only their folders."""
 
 import importlib.util
 from pathlib import Path
+import sys
 import tarfile
+import zipfile
+
+import pytest
 
 spec = importlib.util.spec_from_file_location("assemble_games", Path(__file__).parents[1] / "assemble_games.py")
 assemble_games = importlib.util.module_from_spec(spec)
@@ -71,3 +76,74 @@ def test_no_tarball_is_fine(tmp_path):
     app.mkdir()
     assemble_games.add_to_tarballs(app, add_game(app, "hof", "StubHoF", b"hof"))
     assert not list(tmp_path.glob("*.tar.gz"))
+
+
+def make_windows_package(tmp_path):
+    """The Windows package folder and zip tools/package_desktop.py makes for the base game."""
+    app = tmp_path / "build/windows/package/StubRecomp"
+    (app / "resources").mkdir(parents=True)
+    (app / "StubRecomp.exe").write_bytes(b"MZ app")
+    (app / "SDL3.dll").write_bytes(b"MZ sdl")
+    (app / "resources/symbols.json").write_text("{}")
+    archive = app.parent / "StubRecomp-windows-x86_64.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        for path in (app / "StubRecomp.exe", app / "SDL3.dll", app / "resources/symbols.json"):
+            z.write(path, "StubRecomp/" + path.relative_to(app).as_posix())
+    return app, archive
+
+
+def make_windows_game(tmp_path, key, game_id, app_name):
+    """An expansion built with --preset windows-cross --game-modules: its DLL and its own package."""
+    game = tmp_path / "games" / key
+    game.mkdir(parents=True)
+    (game / "game.toml").write_text('[game]\nid = "%s"\napp_name = "%s"\n' % (game_id, app_name))
+    module = game / "build/windows/modules" / ("libgame.%s.dll" % game_id)
+    module.parent.mkdir(parents=True)
+    module.write_bytes(b"MZ " + game_id.encode())
+    own = game / "build/windows/package" / app_name
+    (own / "resources/ui-mods").mkdir(parents=True)
+    (own / (app_name + ".exe")).write_bytes(b"MZ its own app")
+    (own / "resources/symbols.json").write_text(game_id)
+    (own / "resources/ui-mods/Widescreen.recipe").write_text("recipe")
+    return game
+
+
+def test_windows_paths():
+    root = Path("/b")
+    assert assemble_games.built_app(root, "App", "windows") == root / "windows/package/App"
+
+
+def test_windows_modules_and_resources_reach_the_folder_and_the_zip(tmp_path, monkeypatch):
+    app, archive = make_windows_package(tmp_path)
+    hof = make_windows_game(tmp_path, "hof", "second", "StubHoF")
+    toe = make_windows_game(tmp_path, "toe", "third", "StubToE")
+    (app / "player-notes.txt").write_text("not part of the package")
+    monkeypatch.setattr(sys, "argv", ["assemble_games.py", "--app", str(app), "--platform", "windows",
+                                      "--game", str(hof), "--game", str(toe)])
+    assemble_games.main()
+    assert (app / "modules/libgame.second.dll").read_bytes() == b"MZ second"
+    assert (app / "resources/games/StubToE/symbols.json").read_text() == "third"
+    assert not (app / "resources/games/StubHoF/StubHoF.exe").exists()
+    with zipfile.ZipFile(archive) as z:
+        got = z.namelist()
+        assert z.read("StubRecomp/modules/libgame.third.dll") == b"MZ third"
+    for name in ("StubRecomp/StubRecomp.exe", "StubRecomp/SDL3.dll",
+                 "StubRecomp/modules/libgame.second.dll",
+                 "StubRecomp/resources/games/StubHoF/symbols.json",
+                 "StubRecomp/resources/games/StubHoF/ui-mods/Widescreen.recipe"):
+        assert name in got
+    assert "StubRecomp/player-notes.txt" not in got
+    # Again: replaced, not duplicated.
+    assemble_games.main()
+    with zipfile.ZipFile(archive) as z:
+        got = z.namelist()
+    assert len(got) == len(set(got))
+    assert not list(archive.parent.glob("tmp*"))
+
+
+def test_windows_app_without_shared_sdl_is_refused(tmp_path, monkeypatch):
+    app, _ = make_windows_package(tmp_path)
+    (app / "SDL3.dll").unlink()
+    monkeypatch.setattr(sys, "argv", ["assemble_games.py", "--app", str(app), "--platform", "windows"])
+    with pytest.raises(SystemExit):
+        assemble_games.main()

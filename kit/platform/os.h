@@ -100,7 +100,7 @@ int os_set_mtime(const char *path, int64_t mtime);
 // "HKCU\" and is read from the 64- and then the 32-bit view. -1 elsewhere.
 int os_registry_read(const char *key, const char *value, char *buf, size_t cap);
 // Per-user data directory for `app` (not created): ~/Library/Application Support/<app>,
-// %APPDATA%\<app>, $XDG_DATA_HOME/<app> or ~/.local/share/<app>. 0 or -1.
+// %APPDATA%/<app>, $XDG_DATA_HOME/<app> or ~/.local/share/<app>. 0 or -1.
 int os_user_data_dir(const char *app, char *buf, size_t cap);
 // Runs argv[0] with argv (NULL-terminated), inheriting stdio; 0 and a pid, or -1.
 int os_spawn(const char *const argv[], int64_t *pid_out);
@@ -136,6 +136,12 @@ void *os_fdopen(int fd, const char *mode);
 // Process.
 // ---------------------------------------------------------------------------
 int os_exe_path(char *buf, size_t cap); // 0 or -1; NUL-terminated
+// Windows: a windowed program started from a terminal writes stdout and
+// stderr to that terminal, unless they go somewhere already. A no-op elsewhere.
+void os_attach_parent_console(void);
+// The file of the executable or shared library that holds `address` (one of
+// the caller's own functions): how a game module finds its folder. 0 or -1.
+int os_module_path(const void *address, char *buf, size_t cap);
 // Report a fatal signal inside guest code. `what` is "SIGSEGV", "SIGBUS" or
 // "an abort from the runtime". Returns 1 when handlers were installed and 0
 // where the platform has no equivalent yet.

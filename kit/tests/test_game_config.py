@@ -69,19 +69,20 @@ class LoadTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r"\[macos\] profile_files"):
                 game_config.load(game)
 
-    def test_linux_section_defaults_and_rejects_escapes(self):
+    def test_linux_and_windows_sections_default_and_reject_escapes(self):
         with tempfile.TemporaryDirectory() as tmp:
             game = Path(tmp)
             stub = (ROOT / "games/stub/game.toml").read_text()
             (game / "globals.toml").write_text("")
-            (game / "game.toml").write_text(stub)
-            self.assertEqual(game_config.load(game)["linux"], {"profile_files": {}, "ui_mods": []})
-            (game / "game.toml").write_text(stub + '\n[linux]\nui_mods = ["Widescreen"]\n')
-            self.assertEqual(game_config.load(game)["linux"]["ui_mods"], ["Widescreen"])
-            for bad in ('ui_mods = ["../W"]', 'profile_files = { "../W.h5u" = "build/w.h5u" }'):
-                (game / "game.toml").write_text(stub + '\n[linux]\n' + bad + '\n')
-                with self.assertRaisesRegex(ValueError, r"\[linux\]"):
-                    game_config.load(game)
+            for section in ("linux", "windows"):
+                (game / "game.toml").write_text(stub)
+                self.assertEqual(game_config.load(game)[section], {"profile_files": {}, "ui_mods": []})
+                (game / "game.toml").write_text(stub + '\n[%s]\nui_mods = ["Widescreen"]\n' % section)
+                self.assertEqual(game_config.load(game)[section]["ui_mods"], ["Widescreen"])
+                for bad in ('ui_mods = ["../W"]', 'profile_files = { "../W.h5u" = "build/w.h5u" }'):
+                    (game / "game.toml").write_text(stub + '\n[%s]\n' % section + bad + '\n')
+                    with self.assertRaisesRegex(ValueError, r"\[%s\]" % section):
+                        game_config.load(game)
 
     def test_online_section_defaults_renders_and_rejects_a_url(self):
         with tempfile.TemporaryDirectory() as tmp:

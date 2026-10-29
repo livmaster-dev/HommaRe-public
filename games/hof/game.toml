@@ -224,6 +224,10 @@ ui_mods = ["Widescreen"]
 [linux]
 ui_mods = ["Widescreen"]
 
+# And on Windows.
+[windows]
+ui_mods = ["Widescreen"]
+
 [launcher]
 title = "Heroes of Might and Magic V: Hammers of Fate"
 # The base game's launcher config: a standalone build shows the same launcher.

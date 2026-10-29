@@ -4,12 +4,14 @@
     tools/extract_icon.py --exe original/gog/D3DPopTB.exe --dest App.app
     tools/extract_icon.py --image icon.png --dest App.app
     tools/extract_icon.py --image icon.png --icns App.app/Contents/Resources/AppIcon.icns
+    tools/extract_icon.py --image icon.png --ico build/app.ico
 
 Reads the first RT_GROUP_ICON resource and its RT_ICON frames, picks the
 largest frame, and writes the PNG sizes iPadOS reads from CFBundleIconFiles
 (Icon-<points>@2x.png). The game's own art is the icon, scaled up; no icon
 is invented. A game repository may ship its own square artwork (icon.png at
-its root) instead; that image then also becomes the macOS AppIcon.icns."""
+its root) instead; that image then also becomes the macOS AppIcon.icns and
+the Windows executable's icon (an .ico the app's resources take in)."""
 
 import argparse
 from pathlib import Path
@@ -28,6 +30,8 @@ IOS_ICONS = (("Icon-29", 58), ("Icon-40", 80), ("Icon-60", 120), ("Icon-76", 152
 # (iconset name, pixels): what iconutil packs into a macOS .icns.
 MAC_ICONS = tuple(("icon_%dx%d%s" % (pt, pt, suffix), pt * scale)
                   for pt in (16, 32, 128, 256, 512) for suffix, scale in (("", 1), ("@2x", 2)))
+# The frames of a Windows .ico: the shell picks one per view and DPI.
+WINDOWS_ICONS = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
 # macOS app icon grid (1024 canvas): an 824 px rounded square, 100 px margin.
 MAC_CANVAS, MAC_TILE = 1024, 824
 
@@ -164,12 +168,22 @@ def write_icns(image_path, icns_path):
     return icns_path
 
 
+def write_ico(image_path, ico_path):
+    """The artwork as a Windows .ico, every size in WINDOWS_ICONS, alpha kept."""
+    art = square_artwork(image_path)
+    ico_path = Path(ico_path)
+    ico_path.parent.mkdir(parents=True, exist_ok=True)
+    art.resize((256, 256), Image.LANCZOS).save(ico_path, "ICO", sizes=[(px, px) for px in WINDOWS_ICONS])
+    return ico_path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, help="Windows executable whose icon group is used")
     parser.add_argument("--image", type=Path, help="Square artwork used instead of the executable's icon")
     parser.add_argument("--dest", type=Path, help="Directory for the iPadOS Icon-*@2x.png files")
     parser.add_argument("--icns", type=Path, help="Write a macOS .icns here (needs --image)")
+    parser.add_argument("--ico", type=Path, help="Write a Windows .ico here (needs --image)")
     args = parser.parse_args()
     if args.image is not None and not args.image.is_file():
         # The game repository has no artwork of its own: keep the executable's icon.
@@ -184,6 +198,10 @@ def main():
             print("icon: no artwork for %s; the app keeps the generic icon" % args.icns)
         else:
             print("icon: %s from %s" % (write_icns(args.image, args.icns), args.image))
+    if args.ico is not None:
+        if args.image is None:
+            parser.error("--ico needs an existing --image")
+        print("icon: %s from %s" % (write_ico(args.image, args.ico), args.image))
 
 
 if __name__ == "__main__":

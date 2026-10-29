@@ -122,6 +122,7 @@ This is an early, active project. What works today:
 | iPhone | Playable with the phone interface | Phone interface, tried on an iPhone 15 Pro Max | Phone interface, tried on an iPhone 15 Pro Max |
 | Ultrawide (21:9) | Hor+ view, HUD at the edges, interface bounds, wide dialogues | The same | The same |
 | Mac trackpad | Map; battle zoom and pan | Map; battle zoom and pan | Map; battle zoom and pan |
+| Windows (x86-64) | Main menu through the launcher, under Wine; not yet tried on a Windows PC | The same | The same |
 
 Tested on a MacBook Pro (M1 Max, macOS 27) with a 3440x1440 ultrawide, an iPad Pro 13"
 (M5) and an iPhone 15 Pro Max (iOS 27), mostly with the **Russian GOG releases** of the
@@ -143,7 +144,24 @@ haven't been tested yet: reports welcome.
 | Mac (Apple silicon) | [Download the DMG](../../releases/latest), or [build it yourself](#building-from-source). |
 | iPad and iPhone | [Sideload the IPA](../../releases/latest) with Sideloadly, AltStore or SideStore, or build it yourself on a Mac with Xcode. |
 | Linux (x86-64) | [Build it yourself](#building-from-source); it draws with Vulkan. |
-| Windows, Android | Not planned for now: the original game already runs on Windows. |
+| Windows (x86-64) | [Build it yourself](#building-from-source) on Linux or a Mac; it draws with Vulkan. See [Why on Windows](#why-on-windows). |
+| Android | Not planned for now. |
+
+### Why on Windows?
+
+The original game runs on Windows, so why this one? Over the 2006 game it adds:
+
+- **ubi-gs in Multi Player.** The menu asks for a [ubi-gs](https://github.com/michal-kapala/ubi-gs)
+  community server by address and remembers it; no editing of the hosts file to send
+  `gsconnect.ubisoft.com` somewhere else.
+- **The launcher:** the three games in one app, installed from your GOG offline installers
+  or found where GOG, GOG Galaxy or Steam put them, each with its own profiles.
+- **Wide screens:** the Hor+ view, the HUD at the screen's edges and *Interface bounds*,
+  the frame limit and the 30 fps idle mode.
+
+It is a static recompilation like the other builds, not a patch of the original
+executable: it is built for 64-bit Windows 10 or 11 with a Vulkan driver, and keeps its
+profiles in `%APPDATA%\HommaRe` (`HommaRe-HoF`, `HommaRe-ToE` for the expansions).
 
 ### System requirements
 
@@ -152,6 +170,8 @@ haven't been tested yet: reports welcome.
   East*. About 4 GB of free space for Heroes V with Hammers of Fate, and 2.2 GB more for
   Tribes of the East, plus room for the installers while you install.
 - **Mac:** Apple silicon, macOS 14 Sonoma or later. There is no Intel Mac build.
+- **Windows:** 64-bit Windows 10 or 11 and a graphics driver with Vulkan (any current
+  NVIDIA, AMD or Intel driver).
 - **iPad and iPhone:** an M-series iPad or a recent iPhone (tested on iPhone 15 Pro Max).
   The app asks iOS for more memory than most apps. The game plays in landscape.
 
@@ -446,6 +466,21 @@ it): the `HommaRe` executable with the expansions in `modules/`, started from th
 performance overlay (F11). Translation takes about 10–15 minutes per game and
 compilation about 25 minutes per game and platform on an M1 Max; later builds are
 incremental. Use `--regenerate` with `kit/tools/build.py` after changing the translator.
+
+**Windows** is built on Linux or a Mac, from the same translation, with
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases) (clang for Windows; download a
+release for your build machine and unpack it anywhere):
+
+```bash
+export LLVM_MINGW_ROOT=/path/to/llvm-mingw-<version>-ucrt-<host>
+.venv/bin/python tools/build_app.py --target windows
+```
+
+It leaves `build/windows/package/HommaRe` and `HommaRe-windows-x86_64.zip` beside it:
+`HommaRe.exe` with `SDL3.dll`, FFmpeg's DLLs, `innoextract.exe` for installing from GOG's
+installers and the expansions in `modules/`. Copy or unzip the whole folder anywhere on the
+Windows PC and start `HommaRe.exe`. It isn't signed, so SmartScreen warns the first time
+(*More info → Run anyway*), and Windows Firewall asks once when you play on a local network.
 
 ### Useful switches
 

@@ -23,10 +23,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "native_seam.h"
 #include "x86.h"
+#include "platform/os.h"
 
 #ifdef RECOMP_OVERRIDE_HEADER
 #include RECOMP_OVERRIDE_HEADER
@@ -1261,9 +1261,7 @@ static void text_at_scale(X86 *c, uint32_t part) {
 static volatile int64_t g_placing_ms;
 
 static int64_t now_ms_(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (int64_t)(os_monotonic_ns() / 1000000);
 }
 
 static void note_placement_bar(uint32_t win) {

@@ -1,6 +1,8 @@
 // Small, synthetic effects exercise the real guest ABI and CTAB binding.
 // No game files, window, physical controller or sound device are involved.
+#ifndef _WIN32
 #include <sys/resource.h>
+#endif
 #include "../dx.h"
 #include "../d3d9_ffp.h"
 #include "../d3d9_glsl.h"
@@ -492,6 +494,21 @@ static void test_state_getters_and_readback(uint32_t dev) {
     call_method(rt, 2);
 }
 
+// The process's peak resident memory, in bytes. Not measured on Windows,
+// whose <windows.h> cannot share a file with the kit's own Win32 types.
+static uint64_t peak_memory_bytes() {
+#ifdef _WIN32
+    return 0;
+#else
+    struct rusage r{};
+    getrusage(RUSAGE_SELF, &r);
+#ifdef __APPLE__
+    return (uint64_t)r.ru_maxrss; // bytes on macOS
+#else
+    return (uint64_t)r.ru_maxrss * 1024; // kilobytes on Linux
+#endif
+#endif
+}
 
 // Test155: the four draw calls refuse a primitive count above the MaxPrimitiveCount this device reports in its caps
 // (and indexed draws a vertex count above MaxVertexIndex + 1) with D3DERR_INVALIDCALL, before any size arithmetic,
@@ -502,8 +519,7 @@ static void test_draw_limits(uint32_t dev) {
     const uint32_t max_prims = rd32(sc(0x800) + 180), max_index = rd32(sc(0x800) + 184);
     CHECK(max_prims == 1048575 && max_index == 1048575);
     memset(gm_ptr(sc(0x1000)), 0, 0x1000); // degenerate vertices and indices
-    struct rusage before{}, after{};
-    getrusage(RUSAGE_SELF, &before);
+    const uint64_t before = peak_memory_bytes();
     for (uint32_t prim = 1; prim <= 6; ++prim) {
         for (uint32_t count : {max_prims + 1, 0x7fffffffu, 0x80000000u, 0x80000000u + 350u, 0xffffffffu}) {
             CHECK(call_method(dev, 83, {prim, count, sc(0x1000), 16}) == invalid);          // DrawPrimitiveUP
@@ -524,9 +540,8 @@ static void test_draw_limits(uint32_t dev) {
         CHECK(call_method(dev, 81, {1, 0, count}) == 0);
         CHECK(call_method(dev, 83, {1, count, 0x00100000u, 16}) == 0);
     }
-    getrusage(RUSAGE_SELF, &after);
-    // ru_maxrss: bytes on macOS, kilobytes on Linux; either way far below a runaway allocation
-    CHECK((uint64_t)(after.ru_maxrss - before.ru_maxrss) < (uint64_t)512 * 1024 * 1024);
+    // Far below a runaway allocation.
+    CHECK(peak_memory_bytes() - before < (uint64_t)512 * 1024 * 1024);
 }
 
 // Test155: with no depth-stencil surface set, GetDepthStencilSurface returns D3DERR_NOTFOUND and a null pointer
