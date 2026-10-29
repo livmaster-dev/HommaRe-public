@@ -83,6 +83,23 @@ class LoadTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, r"\[linux\]"):
                     game_config.load(game)
 
+    def test_web_section_ui_mods(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp)
+            stub = (ROOT / "games/stub/game.toml").read_text()
+            (game / "globals.toml").write_text("")
+            (game / "game.toml").write_text(stub)
+            self.assertEqual(game_config.load(game)["web"], {"ui_mods": []})
+            self.assertIn('set(RECOMP_WEB_UI_MODS "")', gen_game_config.render_cmake(game_config.load(game)))
+            (game / "game.toml").write_text(stub + '\n[web]\nui_mods = ["Widescreen"]\n')
+            cfg = game_config.load(game)
+            self.assertEqual(cfg["web"]["ui_mods"], ["Widescreen"])
+            recipe = (game / "ui-mods/Widescreen.recipe").resolve().as_posix()
+            self.assertIn('set(RECOMP_WEB_UI_MODS "%s")' % recipe, gen_game_config.render_cmake(cfg))
+            (game / "game.toml").write_text(stub + '\n[web]\nui_mods = ["../W"]\n')
+            with self.assertRaisesRegex(ValueError, r"\[web\]"):
+                game_config.load(game)
+
     def test_online_section_defaults_renders_and_rejects_a_url(self):
         with tempfile.TemporaryDirectory() as tmp:
             game = Path(tmp)

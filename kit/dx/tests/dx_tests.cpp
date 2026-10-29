@@ -7185,9 +7185,9 @@ static void test_fmod_api() {
 }
 
 // Ogg Vorbis streams and samples from memory: open, play, pause, seek, time,
-// end and the end callback, all through the frame seam.
+// end and the end callback, all through the frame seam. Through FFmpeg, or
+// stb_vorbis in a build without it (dx/ogg_source.cpp).
 static void test_fmod_ogg() {
-#ifdef RECOMP_HAVE_FFMPEG
     cpu_reset();
     dx_register_shims();
     auto f = [](const char *name, std::initializer_list<uint32_t> args) {
@@ -7345,7 +7345,6 @@ static void test_fmod_ogg() {
     g_stream_played = 0;
     heap_free(ogg);
     CHECK_EQ(f("Close@0", {}), 0u);
-#endif
 }
 
 static void test_soundlib_stub() {

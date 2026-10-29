@@ -458,6 +458,27 @@ performance overlay (F11). Translation takes about 10–15 minutes per game and
 compilation about 25 minutes per game and platform on an M1 Max; later builds are
 incremental. Use `--regenerate` with `kit/tools/build.py` after changing the translator.
 
+**In a browser (experimental).** With the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)
+in the environment (`source emsdk_env.sh`), `--target web` builds each game for the
+browser (a browser cannot load a game module, so each is a whole build) and puts the three
+in one site, `build/web-site`, with no game file in it:
+
+```bash
+.venv/bin/python tools/build_app.py --target web            # build, check
+.venv/bin/python tools/build_app.py --target web --skip-build --serve 8000
+```
+
+Open `http://localhost:8000/` in Chrome (or Edge) 113 or later with WebGPU, import your
+GOG install's folder on a game's card (the whole `Heroes of Might and Magic V` folder for
+the base game and Hammers of Fate, the `Tribes of the East` one for the expansion; the
+files stay in the browser's private storage, about 2.4 GB per game), then Play. The site
+must be served from localhost or over HTTPS with `Cross-Origin-Opener-Policy: same-origin`
+and `Cross-Origin-Embedder-Policy: require-corp`, which `--serve` sends. Each game's build
+is about 270 MB of WebAssembly (35 MB with gzip, 20 MB with Brotli) and needs some 3 GB
+of memory in its tab. Where the page says the browser has no WebGPU (Chrome on Linux on
+some GPUs), enable `chrome://flags/#enable-unsafe-webgpu` and `#enable-vulkan`.
+Multiplayer does not work in a browser.
+
 ### Useful switches
 
 | Variable | What it does |

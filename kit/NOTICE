@@ -29,6 +29,11 @@ stb_truetype (third_party/stb/stb_truetype.h, v1.26, upstream commit
 the MIT License or as public domain; see third_party/stb/LICENSE. It rasterizes
 fonts a game registers from its own resources, and the Open Sans faces below.
 
+stb_vorbis (third_party/stb/stb_vorbis.c, v1.22, upstream commit
+003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5) by Sean Barrett is available under
+the MIT License or as public domain; see third_party/stb/LICENSE. It decodes a
+game's own Ogg Vorbis music and sounds in builds without FFmpeg (the web).
+
 Open Sans 1.101 (third_party/fonts/opensans/OpenSans-Regular.ttf and
 OpenSans-Semibold.ttf), Digitized data copyright 2010-2011 Google Corporation,
 is included unmodified under the Apache License, Version 2.0; see

@@ -135,6 +135,9 @@ int g_mode_w = 640, g_mode_h = 480;
 bool g_mode_dirty = false;
 int g_window_mode = 0, g_wanted_window_mode = 0;
 bool g_fullscreen_transition = false;
+// The web: the page sizes the canvas (the whole viewport), so a display mode
+// the game sets scales into it, as in full screen, and never resizes it.
+bool g_page_sized_window = false;
 HostRect g_pointer_confinement; // window points; main thread only
 bool g_pointer_sample_valid = false;
 int32_t g_pointer_sample_x = 0, g_pointer_sample_y = 0;
@@ -2411,8 +2414,9 @@ void apply_mode_change() {
     // The minimum first, since a window cannot shrink below the one it had. It
     // is the guest's frame when that fits the screen, so integer scaling always
     // has a whole multiple to take, and never more than the window.
-    SDL_SetWindowMinimumSize(g_window, size.min_w, size.min_h);
-    if (g_window_mode == 0 && !g_fullscreen_transition) {
+    if (!g_page_sized_window)
+        SDL_SetWindowMinimumSize(g_window, size.min_w, size.min_h);
+    if (g_window_mode == 0 && !g_fullscreen_transition && !g_page_sized_window) {
         SDL_SetWindowSize(g_window, size.w, size.h);
         SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
         post_drawable_size();
@@ -3092,6 +3096,16 @@ void web_guest() {
     std::string dir = g_web_exe.substr(0, g_web_exe.find_last_of('/'));
     if (!dir.empty() && os_chdir(dir.c_str()) != 0)
         fprintf(stderr, "[host] could not enter %s\n", dir.c_str());
+    {
+        // As the desktop does before its game starts: game.toml [web] ui_mods
+        // and [texts], made from the imported install into the profile. The
+        // page names the install root above the EXE (RECOMP_GAME_ROOT).
+        const char *root_env = recomp_env("GAME_ROOT");
+        const std::string root = root_env && *root_env ? root_env : dir;
+        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), false);
+        host_text_overrides(root, host_layout().profile_dir, RECOMP_TEXTS_PAK, RECOMP_TEXTS_FILES,
+                            RECOMP_TEXTS_REPLACE);
+    }
     BootOptions options;
     options.name = "web";
     options.exe = g_web_exe.c_str();
@@ -3114,6 +3128,7 @@ void web_guest() {
 }
 
 int web_main(int argc, char **argv) {
+    g_page_sized_window = true;
     for (int i = 1; i < argc; ++i) {
         if (strncmp(argv[i], "--exe=", 6) == 0)
             g_web_exe = argv[i] + 6;

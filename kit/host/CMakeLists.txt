@@ -463,6 +463,16 @@ if(TARGET recomp_gen)
       file(COPY ${RECOMP_GAME_DIR}/mods/core DESTINATION ${web_resources}/mods FILES_MATCHING PATTERN "*.toml"
            PATTERN "*.json" PATTERN "*.lua" PATTERN "*.png" PATTERN "*.bmp" PATTERN "*.txt")
     endif()
+    # game.toml [web] ui_mods: the recipes the page makes the interface mods
+    # from at the game's start (host/ui_mods.cpp), as the desktop apps carry theirs.
+    foreach(recipe IN LISTS RECOMP_WEB_UI_MODS)
+      if(EXISTS "${recipe}")
+        file(COPY "${recipe}" DESTINATION ${web_resources}/ui-mods)
+        set_property(TARGET recomp_app APPEND PROPERTY LINK_DEPENDS "${recipe}")
+      else()
+        message(WARNING "[web] ui_mods: ${recipe} is not there")
+      endif()
+    endforeach()
     # The player page (tools/web_launcher.py --web-build places it beside the launcher).
     set(APP ${RECOMP_APP_NAME})
     set(TITLE ${RECOMP_GAME_NAME})
@@ -472,7 +482,7 @@ if(TARGET recomp_gen)
       -sINITIAL_MEMORY=1073741824 -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4294967296
       -sSTACK_SIZE=8388608 -sDEFAULT_PTHREAD_STACK_SIZE=16777216
       -sENVIRONMENT=web,worker -sEXIT_RUNTIME=0 -sINVOKE_RUN=0
-      -sEXPORTED_RUNTIME_METHODS=ENV,callMain,FS
+      -sEXPORTED_RUNTIME_METHODS=ENV,callMain,FS --profiling-funcs
       --preload-file ${web_resources}@/app/resources)
   elseif(APPLE)
     pop_mac_bundle(recomp_app)

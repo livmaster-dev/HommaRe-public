@@ -48,6 +48,12 @@ if(EMSCRIPTEN)
   # EM_ASM and EM_JS, in SDL and in the web host, need the GNU dialects.
   set(CMAKE_C_EXTENSIONS ON)
   set(CMAKE_CXX_EXTENSIONS ON)
+  # WebAssembly's tail calls (return_call): the translation continues a guest
+  # jump into another function with JUMP_FN, a call in tail position that a
+  # native build makes a jump. Without them each one grows the browser's
+  # stack, and a loop spread over two functions overflows it.
+  add_compile_options(-mtail-call)
+  add_link_options(-mtail-call)
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(ANDROID OR (RECOMP_GAME_MODULES AND CMAKE_SYSTEM_NAME STREQUAL "Linux"))
@@ -66,6 +72,12 @@ set(CMAKE_LINK_LIBRARY_USING_AS_NEEDED_SUPPORTED TRUE)
 foreach(lang C CXX OBJCXX)
   set(CMAKE_${lang}_FLAGS_RELEASE "-g")
   set(CMAKE_${lang}_FLAGS_DEBUG "-g -O0")
+  if(EMSCRIPTEN)
+    # The web keeps function names (--profiling-funcs at link, host/CMakeLists.txt)
+    # instead of DWARF: a translated game's debug sections are several times its
+    # code, and the browser downloads and parses whatever the module carries.
+    set(CMAKE_${lang}_FLAGS_RELEASE "")
+  endif()
 endforeach()
 
 set(POP_ROOT ${CMAKE_SOURCE_DIR})

@@ -52,11 +52,17 @@ async function start() {
   if (!game) throw new Error(`No game "${id}" in the launcher's games.json.`);
   document.title = game.title;
 
-  // The game must have been imported by the launcher first.
-  let dir = await navigator.storage.getDirectory();
+  // The game must have been imported by the launcher first. Its manifest says
+  // where the executable is: bin/<exe> when the game's folder is the one above
+  // it (web/launcher/core.js planImport).
+  let exeRelative = game.executable;
   try {
+    let dir = await navigator.storage.getDirectory();
     for (const p of [id, "game"]) dir = await dir.getDirectoryHandle(p);
-    await dir.getFileHandle(game.executable);
+    const manifest = JSON.parse(await (await (await dir.getFileHandle(".manifest.json")).getFile()).text());
+    if (manifest.exe) exeRelative = manifest.exe;
+    for (const p of exeRelative.split("/").slice(0, -1)) dir = await dir.getDirectoryHandle(p);
+    await dir.getFileHandle(exeRelative.split("/").pop());
   } catch {
     throw new Error(`${game.title} has not been imported yet.`);
   }
@@ -78,7 +84,8 @@ async function start() {
   device.lost.then((info) => status(`The graphics device was lost: ${info.message}`, true));
   device.addEventListener("uncapturederror", (e) => console.error("WebGPU:", e.error.message));
 
-  const exe = `/opfs/${id}/game/${game.executable}`;
+  const root = `/opfs/${id}/game`;
+  const exe = `${root}/${exeRelative}`;
   const Module = {
     canvas,
     preinitializedWebGPUDevice: device,
@@ -90,6 +97,9 @@ async function start() {
     preRun: [() => {
       const m = Module;
       m.ENV.RECOMP_PROFILE_DIR = `/opfs/${id}/profile`;
+      // The guest root maps onto the game's folder, and the game starts in
+      // the executable's (runtime/loader.cpp).
+      if (exeRelative.includes("/")) m.ENV.RECOMP_GAME_ROOT = root;
       const extra = new URLSearchParams(location.search);
       for (const [k, v] of extra) if (k.startsWith("RECOMP_")) m.ENV[k] = v;
     }],

@@ -222,6 +222,10 @@ ui_mods = ["Widescreen"]
 [linux]
 ui_mods = ["Widescreen"]
 
+# And in a browser, whose window is as wide as the player makes it.
+[web]
+ui_mods = ["Widescreen"]
+
 [launcher]
 title = "Heroes of Might and Magic V: Tribes of the East"
 # The base game's launcher config: a standalone build shows the same launcher.

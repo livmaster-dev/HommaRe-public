@@ -96,6 +96,38 @@ test("plan: shallowest executable, exclusions, required folders", () => {
   });
 });
 
+test("plan: the folder above a bin/ executable when it holds the required folders", async () => {
+  const gog = {
+    "Game/bin/game.exe": EXE, "Game/bin/helper.dll": enc.encode("skip"), "Game/bin/run.cfg": enc.encode("cfg"),
+    "Game/DATA/sprites.bin": enc.encode("s"), "Game/levels/one.lvl": enc.encode("level one"),
+  };
+  const plan = planImport(game, await memorySource(gog).list());
+  assert.equal(plan.base, "Game");
+  assert.equal(plan.exe, "bin/game.exe");
+  assert.deepEqual(plan.missing, []);
+  assert.deepEqual(plan.files.map((f) => f.relative).sort(),
+                   ["DATA/sprites.bin", "bin/game.exe", "bin/run.cfg", "levels/one.lvl"]);
+  // Between two as shallow, the one in a required folder (an expansion's EXE beside it).
+  const both = planImport({ ...game, requiredDirs: ["bin", "data"] },
+                          await memorySource({ "G/addon/game.exe": EXE, "G/bin/game.exe": EXE, "G/data/x": EXE }).list());
+  assert.equal(both.exe, "bin/game.exe");
+  assert.equal(both.base, "G");
+  // The executable's own folder wins when it holds them itself.
+  const own = await memorySource({ ...gog, "Game/bin/data/x": EXE, "Game/bin/levels/y": EXE }).list();
+  assert.equal(planImport(game, own).base, "Game/bin");
+  // Neither folder holds them: the executable's is reported incomplete.
+  const bare = planImport(game, await memorySource({ "Game/bin/game.exe": EXE, "Game/data/x": EXE }).list());
+  assert.equal(bare.base, "Game/bin");
+  assert.deepEqual(bare.missing, ["data", "levels"]);
+
+  const store = new MemoryStore();
+  assert.equal((await importGame(game, memorySource(gog), store)).result, "done");
+  assert.ok(store.files.has("bin/game.exe"));
+  const status = await gameStatus(game, store);
+  assert.equal(status.state, "ready");
+  assert.equal(status.exe, "bin/game.exe");
+});
+
 test("import, status, resume and wrong versions", async () => {
   const store = new MemoryStore();
   assert.equal((await gameStatus(game, store)).state, "notFound");

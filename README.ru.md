@@ -465,6 +465,27 @@ tools/analyze.py
 инкрементальные. После изменений в трансляторе запускайте `kit/tools/build.py` с
 `--regenerate`.
 
+**В браузере (экспериментально).** С [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)
+в окружении (`source emsdk_env.sh`) `--target web` собирает каждую игру для браузера
+(браузер не загружает модули игр, поэтому каждая — отдельная полная сборка) и кладёт все
+три в один сайт, `build/web-site`, без файлов игры:
+
+```bash
+.venv/bin/python tools/build_app.py --target web            # сборка, проверка
+.venv/bin/python tools/build_app.py --target web --skip-build --serve 8000
+```
+
+Откройте `http://localhost:8000/` в Chrome (или Edge) 113 или новее с WebGPU, на карточке
+игры импортируйте папку вашей установки GOG (всю папку `Heroes of Might and Magic V` для
+основной игры и Владык Севера, папку `Tribes of the East` для дополнения; файлы остаются
+в закрытом хранилище браузера, около 2,4 ГБ на игру) и нажмите Play. Сайт нужно отдавать с
+localhost или по HTTPS с заголовками `Cross-Origin-Opener-Policy: same-origin` и
+`Cross-Origin-Embedder-Policy: require-corp` — их отправляет `--serve`. Сборка каждой
+игры — около 270 МБ WebAssembly (35 МБ с gzip, 20 МБ с Brotli), во вкладке ей нужно
+около 3 ГБ памяти. Если страница пишет, что в браузере нет WebGPU (Chrome на Linux с
+некоторыми видеокартами), включите `chrome://flags/#enable-unsafe-webgpu` и
+`#enable-vulkan`. Сетевая игра в браузере не работает.
+
 ### Полезные переключатели
 
 | Переменная | Что делает |

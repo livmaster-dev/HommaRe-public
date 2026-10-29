@@ -1,7 +1,10 @@
 // core.js - the web launcher's import logic, the same rules as
 // host/launcher/launcher.cpp: find the folder holding the executable, skip
-// what [bundle] exclude names, copy with resume, stamp last. No DOM: the page,
-// its worker and the Node tests all load it.
+// what [bundle] exclude names, copy with resume, stamp last. One addition: the
+// folder above the executable's is the game's when it, not the executable's,
+// holds the required folders (a GOG install keeps its EXE in bin/ beside
+// data/), the layout host/sdl/main.cpp's apply_game_root starts such a game
+// from. No DOM: the page, its worker and the Node tests all load it.
 
 export function wildcardMatch(pattern, name) {
   const p = pattern.toLowerCase();
@@ -58,38 +61,70 @@ function unsafe(relative) {
     relative.split("/").some((part) => part === "..");
 }
 
-// Which of the source's entries are the game: {base, files, dirs, missing, exe}.
-// `entries` are {path, size, mtime, isDir}; paths use "/".
-export function planImport(game, entries) {
-  const exeName = game.executable.toLowerCase();
-  let exe = null;
-  let exeDepth = Infinity;
-  for (const e of entries) {
-    if (e.isDir || junk(e.path) || unsafe(e.path)) continue;
-    const parts = e.path.split("/");
-    if (parts[parts.length - 1].toLowerCase() !== exeName) continue;
-    const depth = parts.length - 1;
-    if (depth < exeDepth && depth <= 3) {
-      exe = e;
-      exeDepth = depth;
-    }
-  }
-  if (!exe) return { error: "noExecutable" };
-  const base = exe.path.includes("/") ? exe.path.slice(0, exe.path.lastIndexOf("/")) : "";
+function parentOf(path) {
+  return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+}
+
+// The first-level folders under `base` that the import would keep, lowercased.
+function topFolders(game, entries, base) {
   const prefix = base ? base + "/" : "";
-  const files = [];
   const tops = new Set();
-  let exeRelative = null;
   for (const e of entries) {
     if (junk(e.path) || unsafe(e.path) || !e.path.startsWith(prefix)) continue;
     const relative = e.path.slice(prefix.length);
     if (!relative || excluded(relative, game.exclude || [])) continue;
     if (e.isDir || relative.includes("/")) tops.add(relative.split("/")[0].toLowerCase());
-    if (e.isDir) continue;
-    if (relative.toLowerCase() === exeName) exeRelative = relative;
+  }
+  return tops;
+}
+
+function missingDirs(game, tops) {
+  return (game.requiredDirs || []).filter((d) => !tops.has(d.toLowerCase()));
+}
+
+// Which of the source's entries are the game: {base, files, missing, exe}.
+// `entries` are {path, size, mtime, isDir}; paths use "/". `exe` is the
+// executable's path under `base`. The shallowest executable is the game's;
+// between two as shallow, one in a folder the game requires (an install with
+// the game in bin/ and its expansion's same-named EXE in bina1/).
+export function planImport(game, entries) {
+  const exeName = game.executable.toLowerCase();
+  const required = new Set((game.requiredDirs || []).map((d) => d.toLowerCase()));
+  let exe = null;
+  let exeRank = Infinity;
+  for (const e of entries) {
+    if (e.isDir || junk(e.path) || unsafe(e.path)) continue;
+    const parts = e.path.split("/");
+    if (parts[parts.length - 1].toLowerCase() !== exeName) continue;
+    const depth = parts.length - 1;
+    const inRequired = depth > 0 && required.has(parts[depth - 1].toLowerCase());
+    const rank = depth * 2 + (inRequired ? 0 : 1);
+    if (rank < exeRank && depth <= 3) {
+      exe = e;
+      exeRank = rank;
+    }
+  }
+  if (!exe) return { error: "noExecutable" };
+  let base = parentOf(exe.path);
+  let missing = missingDirs(game, topFolders(game, entries, base));
+  if (missing.length && base) {
+    const up = parentOf(base);
+    const above = missingDirs(game, topFolders(game, entries, up));
+    if (!above.length) {
+      base = up;
+      missing = above;
+    }
+  }
+  const prefix = base ? base + "/" : "";
+  const files = [];
+  let exeRelative = null;
+  for (const e of entries) {
+    if (e.isDir || junk(e.path) || unsafe(e.path) || !e.path.startsWith(prefix)) continue;
+    const relative = e.path.slice(prefix.length);
+    if (!relative || excluded(relative, game.exclude || [])) continue;
+    if (e === exe) exeRelative = relative;
     files.push({ entry: e, relative, size: e.size, mtime: e.mtime || 0 });
   }
-  const missing = (game.requiredDirs || []).filter((d) => !tops.has(d.toLowerCase()));
   return { base, files, missing, exe: exeRelative };
 }
 
@@ -351,6 +386,7 @@ export async function importGame(game, source, store, { onProgress, signal, free
   if (plan.missing.length) return { result: "incomplete", missing: plan.missing };
   await store.remove(STAMP);
   const manifest = JSON.parse((await store.readText(MANIFEST)) || '{"files":{}}');
+  manifest.exe = plan.exe;
   const progress = { filesDone: 0, filesTotal: plan.files.length, bytesDone: 0, bytesTotal: 0, current: "" };
   let needed = 0;
   for (const f of plan.files) {
@@ -427,17 +463,21 @@ export async function importGame(game, source, store, { onProgress, signal, free
   return { result: "done", copied, skipped };
 }
 
+// {state, files, bytes, exe}: `exe` is the executable's path in the store
+// (bin/H5_Game.exe when the game's folder is the one above it).
 export async function gameStatus(game, store) {
   const stamp = ((await store.readText(STAMP)) || "").trim();
   const manifest = JSON.parse((await store.readText(MANIFEST)) || '{"files":{}}');
   const names = Object.keys(manifest.files);
-  if (!names.some((n) => n.toLowerCase() === game.executable.toLowerCase())) return { state: "notFound" };
+  const exe = manifest.exe && manifest.files[manifest.exe] ? manifest.exe
+    : names.find((n) => n.toLowerCase() === game.executable.toLowerCase());
+  if (!exe) return { state: "notFound" };
   const tops = new Set(names.filter((n) => n.includes("/")).map((n) => n.split("/")[0].toLowerCase()));
   const missing = (game.requiredDirs || []).filter((d) => !tops.has(d.toLowerCase()));
   if (stamp !== game.sha256) return { state: stamp ? "wrongVersion" : "incomplete", missing };
   if (missing.length) return { state: "incomplete", missing };
   const bytes = Object.values(manifest.files).reduce((n, f) => n + f.size, 0);
-  return { state: "ready", files: names.length, bytes };
+  return { state: "ready", files: names.length, bytes, exe };
 }
 
 export function humanBytes(n) {

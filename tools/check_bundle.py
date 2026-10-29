@@ -2,12 +2,14 @@
 """Check that an app carries nothing of the game: no game file, no mod made from one.
 
     tools/check_bundle.py build/HommaRe.app [--game ~/Heroes\\ V/game --game ~/Heroes\\ V/game-toe]
+    tools/check_bundle.py build/web-site
 
 The app is to be distributable: the player's own GOG copy brings the game,
 the launcher installs it, and the interface mods are made on the device from
 recipes (ui-mods/*.recipe, tools/ui_recipe.py). This walks the bundle (a
 macOS .app or a flat iOS one, the games' modules' resources under games/ too,
-and the entries of any zip inside it) and fails on:
+a web site with each game's build in its folder, the entries of any zip
+inside it and the files packed into a web build's .data) and fails on:
 
 - the game's own kinds of files (archives .pak/.h5u/.h5m/.h5c/.h5s, the UI's
   .xdb, textures .dds/.tga, videos .bik/.wmv, the executables and DLLs, ...),
@@ -28,6 +30,8 @@ What it lists without failing: the repository's own artwork the app shows
 import argparse
 import hashlib
 import io
+import json
+import re
 import subprocess
 import sys
 import zipfile
@@ -52,8 +56,25 @@ ART_NOTES = {"launcher-splash.jpg", "AppIcon.icns"}
 MIN_MATCH = 64
 
 
+def packed_files(path, data):
+    """The files Emscripten's file packager put in a web build's .data, as
+    (name, bytes): the loader beside it (<app>.js) lists each one's place in
+    the loadPackage({"files": [...]}) call it makes."""
+    loader = path.with_suffix(".js")
+    if path.suffix != ".data" or not loader.is_file():
+        return
+    text = loader.read_text(errors="replace")
+    call = re.search(r'loadPackage\(\s*(\{\s*"files")', text)  # pretty-printed or not
+    if not call:
+        return
+    meta, _ = json.JSONDecoder().raw_decode(text, call.start(1))
+    for f in meta["files"]:
+        yield f["filename"].lstrip("/"), data[f["start"]:f["end"]]
+
+
 def walk(app):
-    """(relative path, bytes) of every file in the bundle; zip entries as path!entry."""
+    """(relative path, bytes) of every file in the bundle; zip entries and the
+    files packed in a web build's .data as path!entry."""
     for path in sorted(p for p in app.rglob("*") if p.is_file() and not p.is_symlink()):
         rel = path.relative_to(app).as_posix()
         data = path.read_bytes()
@@ -66,6 +87,8 @@ def walk(app):
                             yield rel + "!" + info.filename, z.read(info)
             except zipfile.BadZipFile:
                 pass
+        for name, entry in packed_files(path, data):
+            yield rel + "!" + name, entry
 
 
 def repo_hashes():
@@ -149,7 +172,7 @@ def check_recipe(rel, data):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("app", type=Path, help="the .app")
+    p.add_argument("app", type=Path, help="the .app, or a web site's folder")
     p.add_argument("--game", type=Path, action="append", default=[],
                    help="a game install to compare every file with (repeatable)")
     args = p.parse_args()

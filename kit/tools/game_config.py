@@ -262,9 +262,10 @@ def load(game_dir):
             raise ValueError('%s: [%s] profile_files maps profile paths to source files' % (source, section))
     # ui_mods: the game's interface mods made on the player's device from its
     # own install (host/ui_mods.cpp), by name: the game directory's
-    # ui-mods/<name>.recipe goes into the app. Per platform, [ios], [macos] and [linux].
-    for section in ("ios", "macos", "linux"):
-        mods = cfg[section].setdefault("ui_mods", [])
+    # ui-mods/<name>.recipe goes into the app. Per platform, [ios], [macos],
+    # [linux] and [web].
+    for section in ("ios", "macos", "linux", "web"):
+        mods = cfg.setdefault(section, {}).setdefault("ui_mods", [])
         if not isinstance(mods, list) or not all(
                 isinstance(m, str) and m and "/" not in m and m not in (".", "..") for m in mods):
             raise ValueError('%s: [%s] ui_mods must be a list of recipe names' % (source, section))

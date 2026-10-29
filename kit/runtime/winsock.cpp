@@ -555,6 +555,12 @@ bool winsock_real() {
     if (on < 0) {
         const char *v = getenv("RECOMP_SOCKETS");
         on = v && *v ? *v == '1' : RECOMP_GAME_SOCKETS;
+#ifdef __EMSCRIPTEN__
+        // A page has no sockets of its own: Emscripten's would be WebSockets
+        // to a proxy that is not there, and a LAN lobby's broadcasts would go
+        // nowhere. The stand-ins fail every call, as the game expects offline.
+        on = 0;
+#endif
         if (on)
             fprintf(stderr, "[sockets] WinSock on the host's sockets\n");
     }

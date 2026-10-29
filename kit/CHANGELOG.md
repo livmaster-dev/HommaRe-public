@@ -49,6 +49,40 @@
 - `RECOMP_AUTO_KEYS` takes `text:...`, typed into such a prompt.
 - The settings menu's TrueType canvas moved to `runtime/gdi32_canvas.h`, shared with it.
 
+## The web: a whole game in the browser
+
+- The web build builds again: zlib (`runtime/legacy_dlls.cpp`) is Emscripten's
+  port, and the web keeps function names (`--profiling-funcs`) instead of DWARF,
+  whose sections for a translated game would be several times its code.
+- The translation's tail calls (`JUMP_FN`) are WebAssembly tail calls
+  (`-mtail-call`). The backend emits `return_call` only where the call and the
+  return share a block, so `tools/wasm_tail_calls.py` rewrites the
+  `call; return` pairs left before a shared return block in the translation's
+  archives, in place, after each build of them. Without it a guest loop spread
+  over two functions overflowed the browser's stack within a second.
+- WebAssembly has no page protection, so a game with `[translate] write_track =
+  "protect"` builds for the web with stores that mark the lazy vertex buffers
+  (mode 1) instead of falling back to comparing every page a draw reads.
+- A display mode the game sets no longer resizes the web page's canvas: the page
+  sizes it (the viewport) and the presenter scales the game's frame into it, as
+  in full screen.
+- Ogg Vorbis decodes without FFmpeg (the web, and a Windows build without
+  MSYS2) through stb_vorbis 1.22 (`third_party/stb/stb_vorbis.c`), sample-exact
+  in its seeks as the FFmpeg path is: FMOD streams and samples in Ogg (Heroes V's
+  music) play there instead of being refused. `test_fmod_ogg` runs in every build.
+- The web launcher imports an install whose executable sits below its data (a
+  GOG install's `bin/` beside `data/`): the folder above the executable's is the
+  game's when it, not the executable's, holds the `[setup] required_dirs`, and of
+  two executables as shallow the one in a required folder is the game's. The
+  manifest records where the executable is; the player page starts it there with
+  `RECOMP_GAME_ROOT` on the folder above.
+- `[web] ui_mods` names the interface mods' recipes the web build carries; the
+  web host makes them, and the `[texts]` pak, from the imported install before
+  the game starts, as the desktop does.
+- `tools/web_smoke.mjs` drives a web site's game in Chrome over the DevTools
+  protocol: import, start, keys, clicks and text at given seconds, the pages' and
+  workers' consoles, screenshots, the module's instantiation time and the memory.
+
 ## Linux
 
 - The kit builds and runs on Linux (x86-64): Vulkan for Direct3D 9, GPU skinning

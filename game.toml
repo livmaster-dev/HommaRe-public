@@ -237,6 +237,10 @@ ui_mods = ["Widescreen"]
 [linux]
 ui_mods = ["Widescreen"]
 
+# And in a browser, whose window is as wide as the player makes it.
+[web]
+ui_mods = ["Widescreen"]
+
 [launcher]
 title = "Heroes of Might and Magic V"
 install_names = ["Heroes of Might and Magic V", "Heroes V", "HoMM5"]
