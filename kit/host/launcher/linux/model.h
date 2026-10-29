@@ -158,12 +158,18 @@ class Model {
     void pick_installer(const std::string &message = "");
     void reveal_selected();
     void reveal_saves();
+    // Whether this platform has a file manager to show a folder in (not on
+    // Android, where the game and the saves are in the app's own storage).
+    static bool can_reveal();
 
   private:
     struct Shared;
     using Task = std::function<void(Model &)>;
     static void post(const std::shared_ptr<Shared> &shared, Task task);
     void apply(const std::map<std::string, Found> &found);
+    // Android: what the system's picker handed back, made into paths on a
+    // worker (a copy shows as one), then accepted (android_files.h).
+    void import_picked(std::function<Outcome(const ProgressFn &, std::vector<std::string> *)> materialize);
     std::vector<std::string> candidate_roots() const;
     void remember(const std::string &root);
     void install_next();

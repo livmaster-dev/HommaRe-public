@@ -1,0 +1,158 @@
+--- a/src/util/fstream.hpp
++++ b/src/util/fstream.hpp
+@@ -27,7 +27,154 @@
+ #ifndef INNOEXTRACT_UTIL_FSTREAM_HPP
+ #define INNOEXTRACT_UTIL_FSTREAM_HPP
+ 
+-#if !defined(_WIN32)
++#if defined(__ANDROID__)
++
++/*
++ * recomp (Android): added for the Android launcher, which hands innoextract
++ * the documents the player picked as inherited descriptors, each named by a
++ * link to /proc/self/fd/<n> (kit host/launcher/linux/android_files.cpp).
++ * Android lets the app read such a document through its descriptor but not
++ * open it again by name, so a path that is such a link is read with pread()
++ * on a duplicate of the descriptor, at an offset of its own; any other path
++ * is opened as before.
++ */
++
++#include <cerrno>
++#include <cstdlib>
++#include <cstring>
++#include <istream>
++#include <fstream>
++
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include <boost/filesystem/fstream.hpp>
++#include <boost/iostreams/categories.hpp>
++#include <boost/iostreams/positioning.hpp>
++#include <boost/iostreams/stream_buffer.hpp>
++
++namespace util {
++
++//! A readable, seekable descriptor read with pread(), so two of them on one file never share an offset.
++class descriptor_device {
++
++public:
++
++	typedef char char_type;
++	struct category : boost::iostreams::input_seekable, boost::iostreams::device_tag,
++	                  boost::iostreams::closable_tag { };
++
++	explicit descriptor_device(int fd = -1) : fd_(fd), pos_(0) { }
++
++	std::streamsize read(char * s, std::streamsize n) {
++		ssize_t r;
++		do {
++			r = ::pread(fd_, s, size_t(n), off_t(pos_));
++		} while(r < 0 && errno == EINTR);
++		if(r <= 0) {
++			return -1;
++		}
++		pos_ += r;
++		return std::streamsize(r);
++	}
++
++	std::streampos seek(boost::iostreams::stream_offset off, std::ios_base::seekdir way) {
++		if(way == std::ios_base::beg) {
++			pos_ = off;
++		} else if(way == std::ios_base::cur) {
++			pos_ += off;
++		} else {
++			struct stat st;
++			pos_ = (::fstat(fd_, &st) == 0 ? boost::iostreams::stream_offset(st.st_size) : 0) + off;
++		}
++		return boost::iostreams::offset_to_position(pos_);
++	}
++
++	void close() {
++		if(fd_ >= 0) {
++			::close(fd_);
++		}
++		fd_ = -1;
++	}
++
++private:
++
++	int fd_;
++	boost::iostreams::stream_offset pos_;
++
++};
++
++//! The descriptor a link to /proc/self/fd/<n> names, duplicated; -1 for any other path.
++inline int linked_descriptor(const boost::filesystem::path & p) {
++	char target[64];
++	ssize_t n = ::readlink(p.c_str(), target, sizeof(target) - 1);
++	if(n <= 14 || std::strncmp(target, "/proc/self/fd/", 14) != 0) {
++		return -1;
++	}
++	target[n] = '\0';
++	return ::fcntl(std::atoi(target + 14), F_DUPFD_CLOEXEC, 0);
++}
++
++class ifstream : public std::istream {
++
++private: // disallow copying
++
++	ifstream(const ifstream &);
++	const ifstream & operator=(const ifstream &);
++
++	std::filebuf file_;
++	boost::iostreams::stream_buffer<descriptor_device> descriptor_;
++
++public:
++
++	ifstream() : std::istream(NULL) { }
++
++	explicit ifstream(const boost::filesystem::path & p,
++	                  std::ios_base::openmode mode = std::ios_base::in) : std::istream(NULL) {
++		open(p, mode);
++	}
++
++	void open(const boost::filesystem::path & p, std::ios_base::openmode mode = std::ios_base::in) {
++		close();
++		int fd = linked_descriptor(p);
++		if(fd >= 0) {
++			descriptor_.open(descriptor_device(fd));
++			rdbuf(&descriptor_);
++			if(mode & std::ios_base::ate) {
++				seekg(0, std::ios_base::end);
++			}
++		} else if(file_.open(p.c_str(), mode | std::ios_base::in)) {
++			rdbuf(&file_);
++		} else {
++			setstate(std::ios_base::failbit);
++		}
++	}
++
++	bool is_open() const {
++		return descriptor_.is_open() || file_.is_open();
++	}
++
++	void close() {
++		if(descriptor_.is_open()) {
++			descriptor_.close();
++		}
++		if(file_.is_open()) {
++			file_.close();
++		}
++		rdbuf(NULL);
++	}
++
++	virtual ~ifstream() { close(); }
++
++};
++
++typedef boost::filesystem::ofstream ofstream;
++typedef boost::filesystem::fstream  fstream;
++
++} // namespace util
++
++#elif !defined(_WIN32)
+ 
+ #include <boost/filesystem/fstream.hpp>
+ 

@@ -16,6 +16,9 @@ std::unique_ptr<Device> create_default_device() {
 const char *default_backend_name() {
     return "webgpu";
 }
+const char *graphics_needed() {
+    return "WebGPU";
+}
 void *test_native_surface(int, int) {
     return (void *)"#canvas";
 }
@@ -70,6 +73,14 @@ std::unique_ptr<Device> create_default_device() {
 
 const char *default_backend_name() {
     return chosen_backend();
+}
+
+const char *graphics_needed() {
+#ifdef __APPLE__
+    return "Metal";
+#else
+    return "Vulkan 1.1";
+#endif
 }
 
 void *test_native_surface(int w, int h) {

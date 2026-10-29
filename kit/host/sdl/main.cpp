@@ -2617,13 +2617,23 @@ static const char *const kIntroFiles[] = {"video/intro.xml", "video/intro_a1.xml
 #if defined(RECOMP_GAME_MODULES)
 // A multi-game app (RECOMP_GAME_MODULES): the other games' modules sit in the
 // app's Frameworks as libgame.<id>.dylib, on Linux in modules/ beside the
-// executable as libgame.<id>.so (tools/assemble_games.py).
+// executable as libgame.<id>.so, on Android beside libmain.so in the APK's
+// native library folder (tools/assemble_games.py).
 #ifdef __APPLE__
 static const char kModuleSuffix[] = ".dylib";
 #else
 static const char kModuleSuffix[] = ".so";
 #endif
 static std::string modules_dir() {
+#ifdef __ANDROID__
+    // The process is the system's app_process: this library's own folder,
+    // where the system unpacked the APK's libraries at install.
+    Dl_info info{};
+    if (!dladdr(reinterpret_cast<const void *>(&modules_dir), &info) || !info.dli_fname)
+        return "";
+    const std::string lib = info.dli_fname;
+    return lib.substr(0, lib.find_last_of('/'));
+#endif
     char path[4096];
     if (os_exe_path(path, sizeof path) != 0)
         return "";
@@ -2756,6 +2766,19 @@ static void module_take_launcher_choices() {
 #endif
 
 static void module_prepare() {
+#ifdef __ANDROID__
+    // The app that loaded this module named its own folders in the
+    // environment (main): a module's resources are modules/<app name> in the
+    // app's external files folder (RecompActivity unpacks the APK's there)
+    // and its profile is profiles/<app name> beside the app's profile/.
+    if (const char *external = SDL_GetAndroidExternalStoragePath(); external && *external) {
+        const std::string base = external;
+        os_setenv("RECOMP_RESOURCES_DIR", (base + "/modules/" RECOMP_APP_NAME).c_str());
+        os_setenv("RECOMP_PROFILE_DIR", (base + "/profiles/" RECOMP_APP_NAME).c_str());
+    }
+    os_setenv("RECOMP_MODULE", "1");
+    return;
+#endif
     Dl_info info{};
     if (dladdr(reinterpret_cast<const void *>(&module_prepare), &info) && info.dli_fname) {
         std::string dir = info.dli_fname;
@@ -3229,7 +3252,8 @@ int main(int argc, char **argv) {
     std::string game_error;
 #ifdef __ANDROID__
     platform_ui_init_hints(); // stdout and stderr reach logcat from here on
-    (void)exe_flag;           // The mobile app always uses its own external data root.
+    // The app uses its own external data root; only a game module is handed
+    // an executable, the one the app's launcher picked (run_game_module).
     // SDL's Java glue has initialized the app-specific external files path
     // before SDL_main. Resolve it before host_layout caches a profile path.
     const char *external = SDL_GetAndroidExternalStoragePath();
@@ -3250,7 +3274,8 @@ int main(int argc, char **argv) {
         const char *resources = recomp_env("RESOURCES_DIR");
         if (!resources || !*resources)
             os_setenv("RECOMP_RESOURCES_DIR", data_root.c_str());
-        game = game_path_resolve(nullptr, data_root.c_str());
+        game = exe_flag && *exe_flag ? game_path_resolve(exe_flag)
+                                     : game_path_resolve(nullptr, data_root.c_str());
         // Missing data is the launcher's to explain and import.
         if (!game.exe.empty())
             SDL_Log("[android] game data: %s", game.exe.c_str());
@@ -3331,10 +3356,10 @@ int main(int argc, char **argv) {
             auto platform = launcher::make_platform(g_window);
             launcher::RunOptions options;
             options.known = game.exe;
-            options.unplayable =
-                std::string("This device has no usable ") + gpu::default_backend_name() +
-                " graphics, which the game needs" +
-                (strcmp(gpu::default_backend_name(), "vulkan") == 0 ? " (Vulkan 1.1)." : ".");
+            // The backend's name is "none" here whenever none could start:
+            // name the graphics the build draws with instead.
+            options.unplayable = std::string("This device has no usable ") + gpu::graphics_needed() +
+                                 " graphics, which the game needs.";
             if (const char *keys = recomp_env("LAUNCHER_KEYS"))
                 options.keys = keys;
             if (const char *dump = recomp_env("LAUNCHER_DUMP")) {
@@ -3454,8 +3479,19 @@ int main(int argc, char **argv) {
         platform_ui_seed_profile(host_layout().profile_dir);
         // game.toml ui_mods: the interface mods (wide screen, the phone's and
         // the touch screen's), made from this install with the recipes the
-        // app carries.
-        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), platform_ui_phone_interface());
+        // app carries. An app for both kinds of device (Android: a Chromebook
+        // or a phone) carries a touch screen's apart, in ui-mods-touch; the
+        // mods only the other set makes leave the profile.
+        std::string recipes = host_resource("ui-mods"), other;
+        const std::string touch = host_resource("ui-mods-touch");
+        OsStat st{};
+        if (!touch.empty() && os_stat(touch.c_str(), &st) == 0 && st.is_dir) {
+            other = platform_ui_touch_device() ? recipes : touch;
+            if (platform_ui_touch_device())
+                recipes = touch;
+        }
+        host_ui_mods_retire(host_layout().profile_dir, other, recipes);
+        host_ui_mods(root, host_layout().profile_dir, recipes, platform_ui_phone_interface());
         host_text_overrides(root, host_layout().profile_dir, RECOMP_TEXTS_PAK, RECOMP_TEXTS_FILES,
                             RECOMP_TEXTS_REPLACE);
     }

@@ -652,10 +652,12 @@ void test_ui_mobile() {
         }
     }
 
-    // A device that cannot run the game still imports; Play explains why not.
+    // A device that cannot run the game says so at once, still imports, and
+    // Play explains why not.
     Launcher cannot(s, fp);
     cannot.start("");
     cannot.set_unplayable("No usable graphics.");
+    CHECK(cannot.screen() == Screen::Message && cannot.message() == "No usable graphics.");
     cannot.set_auto_play(1.5);
     CHECK(!cannot.counting_down());
     cannot.activate(kPlay);

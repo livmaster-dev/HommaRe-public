@@ -498,3 +498,22 @@ void host_ui_mods(const std::string &game_root, const std::string &profile_dir, 
         made[r.out] = std::move(files);
     }
 }
+
+void host_ui_mods_retire(const std::string &profile_dir, const std::string &other_dir,
+                         const std::string &kept_dir) {
+    std::error_code ec;
+    if (profile_dir.empty() || other_dir.empty() || !fs::is_directory(other_dir, ec))
+        return;
+    const fs::path profile(profile_dir);
+    for (const auto &e : fs::directory_iterator(other_dir, ec)) {
+        if (e.path().extension() != ".recipe" || fs::exists(fs::path(kept_dir) / e.path().filename(), ec))
+            continue;
+        Recipe r;
+        if (!parse(e.path(), r) || r.out.empty())
+            continue;
+        const fs::path out = profile / profile_path(r.out).first;
+        if (fs::remove(out, ec))
+            fprintf(stderr, "[host] ui mods: %s taken out (the other device form's)\n", out.string().c_str());
+        fs::remove(profile / ".ui-mods" / (r.name + ".stamp"), ec);
+    }
+}

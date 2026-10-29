@@ -84,11 +84,13 @@ std::unique_ptr<VulkanDevice> VulkanDevice::create() {
         inst_ext.push_back("VK_KHR_portability_enumeration");
         inst_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     }
-    // SDL's offscreen driver (unattended runs on Linux) makes a headless
-    // surface; without the extension the presenter has nothing to draw to.
+    // Every window system's surface the loader offers; SDL makes the one its
+    // window needs (Android's for an Android window, the headless one for
+    // SDL's offscreen driver, an unattended run's on Linux).
     for (const char *s :
          {"VK_KHR_surface", "VK_EXT_metal_surface", "VK_KHR_win32_surface", "VK_KHR_xlib_surface",
-          "VK_KHR_xcb_surface", "VK_KHR_wayland_surface", "VK_EXT_headless_surface",
+          "VK_KHR_xcb_surface", "VK_KHR_wayland_surface", "VK_KHR_android_surface",
+          "VK_EXT_headless_surface",
           "VK_KHR_get_physical_device_properties2"})
         if (has_inst(s))
             inst_ext.push_back(s);

@@ -15,7 +15,8 @@
 namespace launcher {
 namespace {
 
-constexpr int kPickTree = 0x5201, kPickZip = 0x5202, kPickSaves = 0x5203, kCreateExport = 0x5204;
+constexpr int kPickTree = 0x5201, kPickZip = 0x5202, kPickSaves = 0x5203, kCreateExport = 0x5204,
+              kPickFiles = 0x5205;
 
 // The activity class, resolved on the main thread: FindClass from a worker
 // thread sees only the system class loader.
@@ -25,6 +26,17 @@ std::map<int, PickDone> g_pending;
 
 JNIEnv *env() {
     return static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+}
+
+// Resolved once, from SDL's main thread (make_platform and the native
+// launcher's first pick both run there).
+void resolve_activity() {
+    if (g_activity)
+        return;
+    JNIEnv *e = env();
+    jclass local = e->FindClass("dev/recompkit/RecompActivity");
+    g_activity = static_cast<jclass>(e->NewGlobalRef(local));
+    e->DeleteLocalRef(local);
 }
 
 jstring jstr(JNIEnv *e, const std::string &s) {
@@ -153,6 +165,11 @@ class TreeSource final : public Source {
         }
         os_fd_close(fd);
         return ok;
+    }
+    // The document URI of a listed entry.
+    const std::string &document(uint32_t index) const {
+        static const std::string none;
+        return index < docs_.size() ? docs_[index] : none;
     }
 
   private:
@@ -319,14 +336,40 @@ class AndroidPlatform final : public Platform {
 } // namespace
 
 std::unique_ptr<Platform> make_platform(SDL_Window *) {
-    JNIEnv *e = env();
-    if (!g_activity) {
-        jclass local = e->FindClass("dev/recompkit/RecompActivity");
-        g_activity = static_cast<jclass>(e->NewGlobalRef(local));
-        e->DeleteLocalRef(local);
-    }
+    resolve_activity();
     const char *external = SDL_GetAndroidExternalStoragePath();
     return std::make_unique<AndroidPlatform>(external ? external : "");
+}
+
+void android_pick_documents(PickDone done) {
+    resolve_activity();
+    pick(kPickFiles, "", std::move(done));
+}
+
+void android_pick_tree(PickDone done) {
+    resolve_activity();
+    pick(kPickTree, "", [done](std::vector<Picked> picked, std::string error) {
+        for (Picked &p : picked)
+            p.tree = true;
+        done(picked, error);
+    });
+}
+
+int android_open_document(const std::string &uri) {
+    resolve_activity();
+    return open_fd(uri, "r");
+}
+
+bool android_list_tree(const std::string &tree, std::vector<Entry> *entries,
+                       std::vector<std::string> *documents, std::string *error) {
+    resolve_activity();
+    TreeSource source(tree);
+    if (!source.list(entries, error))
+        return false;
+    documents->clear();
+    for (const Entry &e : *entries)
+        documents->push_back(source.document(e.index));
+    return true;
 }
 
 } // namespace launcher

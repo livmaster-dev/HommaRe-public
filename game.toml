@@ -237,6 +237,15 @@ ui_mods = ["Widescreen"]
 [linux]
 ui_mods = ["Widescreen"]
 
+# Android, for a Chromebook first (keyboard and touchpad, a window): the
+# desktop's layout there. On a phone or tablet the host takes touch_ui_mods
+# instead: the dragged creature's icon framed for a finger as on iOS, but not
+# MobileOptions (the game keeps its resolution list; [ios] cfg_defaults are
+# iOS's) nor PhoneUI (no phone interface on Android).
+[android]
+ui_mods = ["Widescreen"]
+touch_ui_mods = ["Widescreen", "TouchUI"]
+
 [launcher]
 title = "Heroes of Might and Magic V"
 install_names = ["Heroes of Might and Magic V", "Heroes V", "HoMM5"]

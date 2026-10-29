@@ -149,7 +149,8 @@ haven't been tested yet: reports welcome.
 | Mac (Apple silicon) | [Download the DMG](../../releases/latest), or [build it yourself](#building-from-source). |
 | iPad and iPhone | [Sideload the IPA](../../releases/latest) with Sideloadly, AltStore or SideStore, or build it yourself on a Mac with Xcode. |
 | Linux (x86-64) | [Build it yourself](#building-from-source); it draws with Vulkan. |
-| Windows, Android | Not planned for now: the original game already runs on Windows. |
+| Android, Chromebook (experimental) | Build the APK yourself with `tools/build_app.py --target android` (the Android SDK, NDK r29 and a JDK 17+ in `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`); install `app-x86_64-debug.apk` (Intel Chromebooks) or `app-arm64-v8a-debug.apk` with `adb install`. It draws with Vulkan. |
+| Windows | Not planned for now: the original game already runs on Windows. |
 
 ### System requirements
 

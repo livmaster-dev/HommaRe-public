@@ -83,6 +83,25 @@ class LoadTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, r"\[linux\]"):
                     game_config.load(game)
 
+    def test_android_section_keeps_desktop_and_touch_mods_apart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp)
+            stub = (ROOT / "games/stub/game.toml").read_text()
+            (game / "globals.toml").write_text("")
+            (game / "game.toml").write_text(stub)
+            self.assertEqual(game_config.load(game)["android"],
+                             {"profile_files": {}, "ui_mods": [], "touch_ui_mods": []})
+            (game / "game.toml").write_text(
+                stub + '\n[android]\nui_mods = ["Widescreen"]\ntouch_ui_mods = ["Widescreen", "TouchUI"]\n')
+            android = game_config.load(game)["android"]
+            self.assertEqual(android["ui_mods"], ["Widescreen"])
+            self.assertEqual(android["touch_ui_mods"], ["Widescreen", "TouchUI"])
+            for bad, key in (('ui_mods = ["../W"]', "ui_mods"), ('touch_ui_mods = "TouchUI"', "touch_ui_mods"),
+                             ('profile_files = { "../W.h5u" = "build/w.h5u" }', "profile_files")):
+                (game / "game.toml").write_text(stub + '\n[android]\n' + bad + '\n')
+                with self.assertRaisesRegex(ValueError, r"\[android\] " + key):
+                    game_config.load(game)
+
     def test_online_section_defaults_renders_and_rejects_a_url(self):
         with tempfile.TemporaryDirectory() as tmp:
             game = Path(tmp)

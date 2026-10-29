@@ -1,5 +1,6 @@
 // platform_ui_desktop.cpp - the SDL host on desktop and Android. Desktop
-// uses a resizable window and file picker; Android uses fullscreen touch.
+// uses a resizable window and file picker; Android uses fullscreen touch, or
+// a resizable window on a desktop-class device (a Chromebook).
 #include "platform_ui.h"
 
 #include "../game_path.h"
@@ -19,6 +20,7 @@
 #include <jni.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -63,6 +65,22 @@ jclass haptics_activity_class(JNIEnv *env) {
         env->DeleteLocalRef(local);
     }
     return g_haptics_activity;
+}
+
+// A desktop-class device: a Chromebook, Android's desktop, or a keyboard and
+// mouse attached at start (RecompActivity.desktopForm, handed over as
+// RECOMP_ANDROID_DESKTOP before SDL_main). It plays as the desktop builds do:
+// in a window the player sizes, with the desktop's defaults and interface
+// mods and no on-screen controls unless asked for. RECOMP_DEVICE_FORM=desktop
+// or touch (switches.txt) overrides it. Read once.
+bool android_desktop() {
+    static const bool desktop = [] {
+        if (const char *form = getenv("RECOMP_DEVICE_FORM"); form && *form)
+            return strcmp(form, "desktop") == 0;
+        const char *v = getenv("RECOMP_ANDROID_DESKTOP");
+        return v && strcmp(v, "1") == 0;
+    }();
+    return desktop;
 }
 
 // An app has no console: the host's stdout and stderr go to logcat (tag
@@ -149,6 +167,17 @@ SDL_Window *platform_ui_create_window(const char *title, int window_w, int windo
     // again. RecompActivity.onCreate locks a tablet to landscape before SDL
     // ever runs; hinting landscape-only here on top of that keeps SDL from
     // ever asking the system for something wider once its own window exists.
+    if (android_desktop()) {
+        // A window on a Chromebook's desktop: the system places and sizes it
+        // (the manifest's <layout> gives its first size), the player resizes
+        // it and the presenter letterboxes the game in it, as on a desktop.
+        // No orientation is asked for, so the window stays freely resizable.
+        SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait PortraitUpsideDown");
+        if (window_mode)
+            *window_mode = 0;
+        return SDL_CreateWindow(title, window_w, window_h,
+                                surface_flag | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE);
+    }
     SDL_Rect bounds = {0, 0, 0, 0};
     SDL_GetDisplayBounds(SDL_GetPrimaryDisplay(), &bounds);
     const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -263,7 +292,7 @@ bool platform_ui_keypad_wanted() {
 
 bool platform_ui_touch_device() {
 #ifdef __ANDROID__
-    return true;
+    return !android_desktop();
 #else
     return false;
 #endif

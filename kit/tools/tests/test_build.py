@@ -41,11 +41,86 @@ def test_android_templates_render(tmp_path):
     feature = root.find("uses-feature")
     assert feature.get(android + "name") == "android.hardware.vulkan.version"
     assert int(feature.get(android + "version"), 16) == (1 << 22) | (1 << 12)
-    assert feature.get(android + "required") == "true"
+    # Installable without Vulkan: the launcher then says why the game cannot start.
+    assert feature.get(android + "required") == "false"
+    touch = [f for f in root.findall("uses-feature") if f.get(android + "name") == "android.hardware.touchscreen"]
+    assert touch and touch[0].get(android + "required") == "false"
+    permissions = {p.get(android + "name") for p in root.findall("uses-permission")}
+    assert {"android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.CHANGE_WIFI_MULTICAST_STATE"} <= permissions
     app = root.find("application")
     assert app.get(android + "label") == "@string/app_name"
     assert app.get(android + "requestLegacyExternalStorage") == "false"
-    assert app.find("activity").get(android + "screenOrientation") == "fullUser"
+    activity = app.find("activity")
+    assert activity.get(android + "screenOrientation") == "fullUser"
+    assert activity.get(android + "resizeableActivity") == "true"
+    assert activity.find("layout").get(android + "defaultWidth") == "1280dp"
+    # One ABI by default; the libraries go in stripped and are unpacked at install.
+    assert 'abiFilters += listOf("arm64-v8a")' in gradle
+    assert "isEnable = false" in gradle
+    assert "useLegacyPackaging = true" in gradle
+
+
+def test_android_project_carries_each_abi_and_drops_others(tmp_path):
+    cfg = {"game": {"app_name": "StubRecomp", "bundle_id": "dev.recompkit.stub", "id": "stub"}}
+    stale = tmp_path / "android/app/src/main/jniLibs/armeabi-v7a/libmain.so"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old")
+    out = build.android_project(tmp_path, cfg, gen_dir=tmp_path / "gen", abis=("x86_64", "arm64-v8a"))
+    gradle = (out / "app/build.gradle.kts").read_text()
+    assert 'abiFilters += listOf("x86_64", "arm64-v8a")' in gradle
+    assert 'include("x86_64", "arm64-v8a")' in gradle
+    assert "isEnable = true" in gradle
+    assert not stale.parent.exists()
+
+
+def test_android_stage_puts_each_abis_libraries_in_its_folder(tmp_path, monkeypatch):
+    cfg = {"game": {"app_name": "StubRecomp", "bundle_id": "dev.recompkit.stub", "id": "stub"}}
+    gen_dirs = {}
+    for abi, modules in (("x86_64", "ON"), ("arm64-v8a", "ON")):
+        gen = tmp_path / ("cmake-" + abi)
+        (gen / "host").mkdir(parents=True)
+        (gen / "host/libmain.so").write_text("main " + abi)
+        (gen / "_deps/sdl3-build").mkdir(parents=True)
+        (gen / "_deps/sdl3-build/libSDL3.so").write_text("sdl " + abi)
+        java = gen / "_deps/sdl3-src/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java"
+        java.parent.mkdir(parents=True)
+        java.write_text("class SDLActivity {}")
+        (gen / "CMakeCache.txt").write_text("RECOMP_VIDEO:BOOL=OFF\nRECOMP_GAME_MODULES:BOOL=%s\n" % modules)
+        gen_dirs[abi] = gen
+    # A module from an earlier multi-game build is not this build's.
+    left = tmp_path / "android/app/src/main/jniLibs/x86_64/libgame.other.so"
+    left.parent.mkdir(parents=True)
+    left.write_text("old")
+    monkeypatch.setattr(build, "android_strip_tool", lambda: None)
+    monkeypatch.delenv("ANDROID_NDK_HOME", raising=False)
+    out = build.android_stage(tmp_path, cfg, gen_dirs=gen_dirs, game_dir=tmp_path / "game")
+    jni = out / "app/src/main/jniLibs"
+    for abi in gen_dirs:
+        assert sorted(p.name for p in (jni / abi).iterdir()) == ["libSDL3.so", "libmain.so"]
+        assert (jni / abi / "libmain.so").read_text() == "main " + abi
+    assert not (out / "app/src/main/assets/ffmpeg-NOTICE.md").exists()
+    assert (out / "app/src/main/assets/resources/classic-modes.json").is_file()
+
+
+def test_android_resources_split_desktop_and_touch_mods(tmp_path):
+    game = tmp_path / "game"
+    (game / "ui-mods").mkdir(parents=True)
+    for name in ("Wide", "Touch"):
+        (game / "ui-mods" / (name + ".recipe")).write_text(name)
+    (game / "launcher-manifests").mkdir()
+    (game / "launcher-manifests/m.json").write_text("{}")
+    (game / "launcher-games.json").write_text("{}")
+    cfg = {"dir": str(game), "launcher_config_dir": game,
+           "android": {"ui_mods": ["Wide"], "touch_ui_mods": ["Wide", "Touch"], "profile_files": {}}}
+    out = build.android_write_resources(tmp_path / "res", cfg)
+    files = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    assert files == ["classic-modes.json", "launcher-games.json", "launcher-manifests/m.json",
+                     "ui-mods-touch/Touch.recipe", "ui-mods-touch/Wide.recipe", "ui-mods/Wide.recipe"]
+    # A module's resources: the launcher's files are the app's alone.
+    module = build.android_write_resources(tmp_path / "module", cfg, launcher=False)
+    assert not (module / "launcher-games.json").exists()
+    assert not (module / "launcher-manifests").exists()
 
 
 def test_android_core_assets_replace_stale_manifests_without_shipping_binaries(tmp_path):
@@ -103,6 +178,28 @@ def test_android_target_selects_the_ndk_preset(system):
         args, _ = build.parse_args(["--target", "android"] + extra, system=system)
         assert build.preset_name(args.preset, args.config, stub=args.stub, target=args.target) == preset
     assert build.TARGETS["android"] == ["recomp_app"]
+
+
+def test_android_builds_a_tree_per_abi():
+    args, _ = build.parse_args(["--target", "android"], system="Linux")
+    assert args.abi == ("x86_64", "arm64-v8a")
+    args, _ = build.parse_args(["--target", "android", "--abi", "arm64-v8a", "--abi", "arm64-v8a"], system="Linux")
+    assert args.abi == ("arm64-v8a",)
+    assert build.build_dir_for("/b", "android", "x86_64") == Path("/b/cmake/android-x86_64")
+    assert build.build_dir_for("/b", "android-stub", "arm64-v8a") == Path("/b/cmake/android-stub-arm64-v8a")
+    assert build.build_dir_for("/b", "linux") == Path("/b/cmake/linux")
+
+
+@pytest.mark.parametrize("extra, message", [
+    (["--target", "app", "--abi", "x86_64"], "are for --target android"),
+    (["--target", "app", "--stage-only"], "are for --target android"),
+    (["--target", "android", "--module-only"], "--module-only needs --game-modules"),
+    (["--target", "android", "--game-modules", "--module-only", "--push-game"], "--push-game installs an APK"),
+])
+def test_android_options_are_checked(capsys, extra, message):
+    with pytest.raises(SystemExit):
+        build.parse_args(extra, system="Linux")
+    assert message in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("devices, console, actions", [

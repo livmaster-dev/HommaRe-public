@@ -198,6 +198,11 @@ static void test_swapchain_from_surface() {
 }
 
 int main() {
+    // No backend at all ("none"): the player is still told which graphics
+    // the game needs, not "none" (host/sdl/main.cpp's no-GPU launcher).
+    os_setenv("RECOMP_GPU_BACKEND", "none-such");
+    CHECK(strcmp(default_backend_name(), "none") == 0);
+    CHECK(strcmp(graphics_needed(), strcmp(POP_GPU_TEST_BACKEND, "metal") == 0 ? "Metal" : "Vulkan 1.1") == 0);
     os_setenv("RECOMP_GPU_BACKEND", POP_GPU_TEST_BACKEND);
     if (strcmp(default_backend_name(), POP_GPU_TEST_BACKEND) != 0) {
         fprintf(stderr, "backend %s is not available here (got %s)\n", POP_GPU_TEST_BACKEND,

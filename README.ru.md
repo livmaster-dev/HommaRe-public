@@ -151,7 +151,8 @@ Pro 13" (M5) и iPhone 15 Pro Max (iOS 27), в основном с **русск�
 | Mac (Apple silicon) | [Скачайте DMG](../../releases/latest) или [соберите сами](#сборка-из-исходников). |
 | iPad и iPhone | [Установите IPA](../../releases/latest) через Sideloadly, AltStore или SideStore либо соберите сами на Mac в Xcode. |
 | Linux (x86-64) | [Соберите сами](#сборка-из-исходников); рисует через Vulkan. |
-| Windows, Android | Пока не планируется: на Windows оригинальная игра и так работает. |
+| Android, Chromebook (экспериментально) | Соберите APK сами: `tools/build_app.py --target android` (Android SDK, NDK r29 и JDK 17+ в `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`); установите `app-x86_64-debug.apk` (Chromebook на Intel) или `app-arm64-v8a-debug.apk` через `adb install`. Рисует через Vulkan. |
+| Windows | Пока не планируется: на Windows оригинальная игра и так работает. |
 
 ### Системные требования
 

@@ -228,6 +228,11 @@ ui_mods = ["Widescreen"]
 [linux]
 ui_mods = ["Widescreen"]
 
+# Android: a Chromebook's, then a phone's or tablet's (the base game's game.toml).
+[android]
+ui_mods = ["Widescreen"]
+touch_ui_mods = ["Widescreen", "TouchUI"]
+
 [launcher]
 title = "Heroes of Might and Magic V: Hammers of Fate"
 # The base game's launcher config: a standalone build shows the same launcher.

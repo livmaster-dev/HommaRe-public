@@ -16,14 +16,15 @@ endif()
 # drawn by the host on Linux (host/launcher/linux/); the canvas launcher
 # everywhere else and with this off.
 option(RECOMP_NATIVE_LAUNCHER "Build the native launcher (SwiftUI on Apple platforms, the host's on Linux)" ON)
-# Several games in one app (Apple, Linux): each game also builds as a module,
-# libgame.<id>.dylib (.so) with recomp_game_main for an entry, and the app the
-# launcher runs in loads the module of the game the player picks
+# Several games in one app (Apple, Linux, Android): each game also builds as a
+# module, libgame.<id>.dylib (.so) with recomp_game_main for an entry, and the
+# app the launcher runs in loads the module of the game the player picks
 # (host/sdl/main.cpp run_game_module, tools/assemble_games.py). Modules and the
-# app share one SDL, so SDL links as a shared library in this mode.
-option(RECOMP_GAME_MODULES "Build the game as a loadable module and link SDL shared (Apple, Linux)" OFF)
-if(RECOMP_GAME_MODULES AND NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "RECOMP_GAME_MODULES is for Apple and Linux builds")
+# app share one SDL, so SDL links as a shared library in this mode. On Android
+# the modules sit in the APK's native library folder beside libmain.so.
+option(RECOMP_GAME_MODULES "Build the game as a loadable module and link SDL shared (Apple, Linux, Android)" OFF)
+if(RECOMP_GAME_MODULES AND NOT APPLE AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "RECOMP_GAME_MODULES is for Apple, Linux and Android builds")
 endif()
 if(APPLE AND RECOMP_NATIVE_LAUNCHER)
   if(IOS AND NOT CMAKE_GENERATOR STREQUAL "Xcode" AND NOT CMAKE_Swift_COMPILER_TARGET)
@@ -77,10 +78,13 @@ set_property(CACHE POP_TRANSLATE PROPERTY STRINGS AUTO ON OFF STUB)
 set(POP_BUILD_ROOT ${POP_ROOT}/build CACHE PATH "Root of build outputs (build/recomp, build/ios, ...)")
 # A stub build (no game code) keeps its outputs apart from a real build so it
 # can never overwrite the archive or the bundle a player runs.
+# Android builds one tree per ABI (x86_64 for Intel Chromebooks and the
+# emulator, arm64-v8a for phones, tablets and ARM Chromebooks): their modules
+# must not overwrite each other's.
 if(ANDROID AND POP_TRANSLATE STREQUAL "STUB")
-  set(POP_BUILD_DIR ${POP_BUILD_ROOT}/android-stub)
+  set(POP_BUILD_DIR ${POP_BUILD_ROOT}/android-stub/${ANDROID_ABI})
 elseif(ANDROID)
-  set(POP_BUILD_DIR ${POP_BUILD_ROOT}/android)
+  set(POP_BUILD_DIR ${POP_BUILD_ROOT}/android-native/${ANDROID_ABI})
 elseif(IOS AND POP_TRANSLATE STREQUAL "STUB" AND CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
   set(POP_BUILD_DIR ${POP_BUILD_ROOT}/ios-sim-stub)
 elseif(IOS AND POP_TRANSLATE STREQUAL "STUB")

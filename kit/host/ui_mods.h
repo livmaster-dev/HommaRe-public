@@ -13,3 +13,10 @@
 // not), at the path without the prefix.
 void host_ui_mods(const std::string &game_root, const std::string &profile_dir, const std::string &recipe_dir,
                   bool phone);
+
+// An app with two sets of recipes (Android: a desktop-class device's and a
+// touch screen's) applies one: the mods only the other set makes (a recipe
+// in other_dir by a name kept_dir does not have) leave the profile, with
+// their stamps, so a device whose form changed plays without them.
+void host_ui_mods_retire(const std::string &profile_dir, const std::string &other_dir,
+                         const std::string &kept_dir);

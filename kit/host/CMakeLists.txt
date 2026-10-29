@@ -124,6 +124,15 @@ pop_test_binary(launcher_tests)
 add_test(NAME launcher_tests COMMAND launcher_tests WORKING_DIRECTORY ${POP_ROOT})
 set_tests_properties(launcher_tests PROPERTIES LABELS nogame)
 
+# The interface mods' bookkeeping over scratch folders; no game.
+add_executable(ui_mods_tests ${HOST}/ui_mods.cpp ${HOST}/tests/ui_mods_tests.cpp $<TARGET_OBJECTS:recomp_miniz>)
+target_include_directories(ui_mods_tests PRIVATE ${POP_ROOT} ${POP_ROOT}/third_party/miniz)
+target_compile_options(ui_mods_tests PRIVATE ${POP_WARN_STRICT})
+pop_optimize(ui_mods_tests 1)
+pop_test_binary(ui_mods_tests)
+add_test(NAME ui_mods_tests COMMAND ui_mods_tests WORKING_DIRECTORY ${POP_ROOT})
+set_tests_properties(ui_mods_tests PROPERTIES LABELS nogame)
+
 add_executable(ui_layer_tests ${HOST}/ui_layer.cpp ${HOST}/tests/test_frame_builder.cpp ${HOST}/tests/ui_layer_tests.cpp)
 target_compile_options(ui_layer_tests PRIVATE ${POP_WARN_WERROR})
 pop_optimize(ui_layer_tests 1)
@@ -279,7 +288,10 @@ endif()
 # the canvas launcher's window with the game's own textures and TrueType
 # text, installing from GOG installers with the system's innoextract. Its
 # words are the SwiftUI launcher's, apple/launcher-strings.json, embedded.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RECOMP_NATIVE_LAUNCHER)
+# Android draws the same one, with the system's pickers for the installers
+# and the game folders (launcher/linux/android_files.cpp) and innoextract
+# from the APK (third_party/innoextract/build-android.sh).
+if((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ANDROID) AND RECOMP_NATIVE_LAUNCHER)
   set(pop_strings_cpp ${CMAKE_CURRENT_BINARY_DIR}/generated/launcher_strings.cpp)
   add_custom_command(
     OUTPUT ${pop_strings_cpp}
@@ -296,6 +308,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RECOMP_NATIVE_LAUNCHER)
                                ${HOST}/launcher/linux/layout.cpp ${pop_strings_cpp})
   add_library(launcher_native OBJECT ${POP_NATIVE_LAUNCHER_CORE} ${HOST}/launcher/linux/model.cpp
                                      ${HOST}/launcher/linux/view.cpp ${HOST}/launcher/linux/bridge.cpp)
+  if(ANDROID)
+    target_sources(launcher_native PRIVATE ${HOST}/launcher/linux/android_files.cpp)
+  endif()
   target_include_directories(launcher_native PRIVATE ${POP_ROOT} ${POP_ROOT}/runtime ${CMAKE_BINARY_DIR}/generated)
   target_compile_options(launcher_native PRIVATE ${POP_WARN_STRICT})
   pop_link_sdl(launcher_native)
@@ -303,7 +318,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RECOMP_NATIVE_LAUNCHER)
 
   # Its portable part over fake installs and paks in a scratch folder: no
   # window, no game. The faces the app takes from the runtime (Open Sans),
-  # embedded again for them.
+  # embedded again for them. Desktop only: a device runs no CTest.
+  if(NOT ANDROID)
   set(pop_test_fonts_cpp ${CMAKE_CURRENT_BINARY_DIR}/generated/native_launcher_test_fonts.cpp)
   set(pop_fonts_dir ${POP_ROOT}/third_party/fonts/opensans)
   add_custom_command(
@@ -329,6 +345,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RECOMP_NATIVE_LAUNCHER)
   # The model and its screens too, drawn on a canvas; SDL for the key codes.
   target_sources(native_launcher_tests PRIVATE ${HOST}/launcher/linux/model.cpp ${HOST}/launcher/linux/view.cpp)
   pop_link_sdl(native_launcher_tests)
+  endif()
 endif()
 if(IOS)
   set(POP_PLATFORM_UI ${HOST}/sdl/platform_ui_ios.mm)
@@ -524,10 +541,16 @@ if(TARGET recomp_gen)
       # ELF has one symbol namespace: the module's runtime and translation
       # carry the same names as the app's, and must bind to their own
       # (Mach-O's two-level namespace does this by itself), so the module
-      # exports recomp_game_main alone. SDL and FFmpeg sit beside the
-      # executable, one folder up from modules/.
+      # exports recomp_game_main alone.
       target_link_options(recomp_game PRIVATE "-Wl,--version-script=${HOST}/sdl/game_module.map")
       set_property(TARGET recomp_game APPEND PROPERTY LINK_DEPENDS ${HOST}/sdl/game_module.map)
+    endif()
+    if(ANDROID)
+      # Beside libmain.so and libSDL3.so in the APK's native library folder,
+      # which the system's linker searches by itself.
+      target_link_libraries(recomp_game PRIVATE log)
+    elseif(NOT APPLE)
+      # SDL and FFmpeg sit beside the executable, one folder up from modules/.
       set_target_properties(recomp_game PROPERTIES BUILD_RPATH "$ORIGIN/.." INSTALL_RPATH "$ORIGIN/..")
     endif()
   endif()

@@ -404,6 +404,21 @@ class VkRenderer final : public D9Backend {
             bc_ = supports(VK_FORMAT_BC1_RGBA_UNORM_BLOCK, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT,
                            false) &&
                   supports(VK_FORMAT_BC3_UNORM_BLOCK, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT, false);
+        // What a phone's GPU may lack, turned off on one that has it, so the
+        // other path can be seen on any machine: RECOMP_VULKAN_BC=0 decodes
+        // DXT on upload (most Mali and PowerVR GPUs sample no BC formats),
+        // RECOMP_VULKAN_VFETCH=0 leaves the vertex fetch out (fewer than five
+        // storage buffers in the vertex stage), so the GPU skinning that
+        // needs it hands its work back to the CPU.
+        if (const char *v = recomp_env("VULKAN_BC"); v && v[0] == '0')
+            bc_ = false;
+        if (const char *v = recomp_env("VULKAN_VFETCH"); v && v[0] == '0')
+            vfetch_ = false;
+        fprintf(stderr,
+                "d3d9 vulkan: %s; BC textures %s; vertex fetch %s (%u storage buffers a vertex shader, "
+                "vertex stores %s)\n",
+                props_.deviceName, bc_ ? "sampled" : "decoded to BGRA8 on upload", vfetch_ ? "on" : "off",
+                props_.limits.maxPerStageDescriptorStorageBuffers, vertex_stores_ ? "yes" : "no");
         uniform_align_ = std::max<uint64_t>(props_.limits.minUniformBufferOffsetAlignment, 16);
         ok_ = init_layout();
         if (ok_) {
@@ -571,8 +586,17 @@ class VkRenderer final : public D9Backend {
             return;
         }
         if (is_dxt(t.desc.format)) {
-            // No BC support: decoded here.
-            decode_dxt(bytes, w, h, t.desc.format, scratch_);
+            // No BC support: decoded here, from block rows `pitch` apart as
+            // the path above copies them (the decoder reads them packed).
+            const uint32_t block = t.desc.format == FMT_DXT1 ? 8 : 16, bw = (w + 3) / 4, bh = (h + 3) / 4;
+            const uint8_t *blocks = bytes;
+            if (pitch != bw * block) {
+                packed.resize((size_t)bw * bh * block);
+                for (uint32_t y = 0; y < bh; ++y)
+                    memcpy(&packed[(size_t)y * bw * block], bytes + (size_t)y * pitch, (size_t)bw * block);
+                blocks = packed.data();
+            }
+            decode_dxt(blocks, w, h, t.desc.format, scratch_);
             src = scratch_.data();
             row = w * 4;
             bpp = 4;

@@ -36,20 +36,30 @@ public class RecompActivity extends SDLActivity {
     static final int PICK_ZIP = 0x5202;
     static final int PICK_SAVES = 0x5203;
     static final int CREATE_EXPORT = 0x5204;
+    static final int PICK_FILES = 0x5205;
 
     static RecompActivity sActivity;
     static String sViewUri;
+    static boolean sDesktop;
 
     /** A picker answered: `uris` is empty when the player cancelled. */
     static native void nativePicked(int request, String[] uris, String[] names);
 
+    /**
+     * libmain.so, after the shared libSDL3.so when the APK carries one: a
+     * multi-game build (RECOMP_GAME_MODULES) shares one SDL between the app
+     * and the game modules it loads (host/sdl/main.cpp run_game_module).
+     */
     @Override
     protected String[] getLibraries() {
-        return new String[] {"main"};
+        File sdl = new File(getApplicationInfo().nativeLibraryDir, "libSDL3.so");
+        return sdl.isFile() ? new String[] {"SDL3", "main"} : new String[] {"main"};
     }
 
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
+        sDesktop = desktopForm();
+        exportNativeEnvironment();
         // The manifest allows any orientation (phones rotate live to
         // portrait for the touch controls; tablets stay landscape). SDL sets
         // its own per-device-class orientation hint once it has a display to
@@ -58,8 +68,9 @@ public class RecompActivity extends SDLActivity {
         // SDL's (resizable) window exists. Before that - between this
         // activity starting and SDL's first window - there is no hint yet,
         // so this is the fallback that keeps a tablet from ever showing a
-        // frame in portrait.
-        if (getResources().getConfiguration().smallestScreenWidthDp >= 600)
+        // frame in portrait. A desktop-class device (a Chromebook) gets a
+        // window the player sizes, so nothing is locked there.
+        if (!sDesktop && getResources().getConfiguration().smallestScreenWidthDp >= 600)
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE);
         unpackControlLayouts();
         File resources = getExternalFilesDir(null);
@@ -69,10 +80,113 @@ public class RecompActivity extends SDLActivity {
             } catch (Exception e) {
                 android.util.Log.e("recomp", "Cannot unpack core mod resources", e);
             }
+            unpackResources(resources);
         }
         super.onCreate(savedInstanceState);
         sActivity = this;
         takeViewIntent(getIntent());
+    }
+
+    /**
+     * Whether this is a desktop-class device: a Chromebook (ChromeOS runs
+     * Android apps in its ARCVM, with the keyboard and touchpad and in
+     * windows the player resizes), Android's own desktop (a "pc"), or a
+     * device with a keyboard and a mouse attached at start. The host then
+     * behaves as the desktop builds do: a window rather than the whole
+     * screen, the desktop's defaults and interface mods, no on-screen
+     * controls unless asked for (platform_ui_touch_device). RECOMP_DEVICE_FORM
+     * in switches.txt (desktop or touch) overrides it on the native side.
+     */
+    private boolean desktopForm() {
+        android.content.pm.PackageManager pm = getPackageManager();
+        if (pm.hasSystemFeature("org.chromium.arc") || pm.hasSystemFeature("org.chromium.arc.device_management")
+                || pm.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PC))
+            return true;
+        boolean keyboard = getResources().getConfiguration().keyboard
+                == android.content.res.Configuration.KEYBOARD_QWERTY;
+        boolean mouse = false;
+        android.hardware.input.InputManager input =
+                (android.hardware.input.InputManager) getSystemService(Context.INPUT_SERVICE);
+        if (input != null) {
+            for (int id : input.getInputDeviceIds()) {
+                android.view.InputDevice device = input.getInputDevice(id);
+                if (device != null && !device.isVirtual()
+                        && (device.supportsSource(android.view.InputDevice.SOURCE_MOUSE)
+                            || device.supportsSource(android.view.InputDevice.SOURCE_TOUCHPAD)))
+                    mouse = true;
+            }
+        }
+        return keyboard && mouse;
+    }
+
+    /** Asked by the host (host/sdl/platform_ui_desktop.cpp) once, at start. */
+    public static boolean isDesktopForm() {
+        return sDesktop;
+    }
+
+    /**
+     * What the native side reads from its environment before SDL_main: the
+     * innoextract the launcher runs to install from GOG installers, unpacked
+     * by the system with the APK's libraries (the one folder an app may run
+     * a program from), and the device's form.
+     */
+    private void exportNativeEnvironment() {
+        try {
+            File inno = new File(getApplicationInfo().nativeLibraryDir, "libinnoextract.so");
+            if (inno.isFile())
+                android.system.Os.setenv("RECOMP_INNOEXTRACT", inno.getPath(), false);
+            android.system.Os.setenv("RECOMP_ANDROID_DESKTOP", sDesktop ? "1" : "0", true);
+        } catch (Exception e) {
+            android.util.Log.e("recomp", "Cannot set the native environment", e);
+        }
+    }
+
+    /**
+     * The APK's assets/resources (the launcher's files, the interface mods'
+     * recipes, the profile seed, the other games' resources) into the app's
+     * external files folder, which is the host's resources folder on Android.
+     * Only when the APK changed since the last copy (its install time is the
+     * stamp): an unchanged app starts without the work. Each top-level folder
+     * it ships is replaced whole, so a file a newer build dropped goes; what
+     * the player keeps there (profile/, Games/, game/) is never touched.
+     */
+    /** The player's own folders in the external files folder, in lower case. */
+    static final java.util.Set<String> PLAYER_FOLDERS = new HashSet<>(Arrays.asList(
+            "games", "game", "profile", "profiles", "switches.txt"));
+
+    private void unpackResources(File base) {
+        File stamp = new File(base, ".resources-stamp");
+        String want;
+        try {
+            want = Long.toString(getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime);
+        } catch (Exception e) {
+            want = "";
+        }
+        try {
+            if (stamp.isFile() && want.equals(new String(java.nio.file.Files.readAllBytes(stamp.toPath()))))
+                return;
+            String[] top = getAssets().list("resources");
+            if (top == null)
+                return;
+            for (String name : top) {
+                // Shared storage ignores case: a resource folder spelled like
+                // one of the player's would replace it. A build never ships
+                // one (tools/assemble_games.py puts modules' under modules/).
+                if (PLAYER_FOLDERS.contains(name.toLowerCase(java.util.Locale.ROOT))) {
+                    android.util.Log.e("recomp", "resources/" + name + " would replace the player's folder; left out");
+                    continue;
+                }
+                File target = new File(base, name);
+                removeCoreAsset(target);
+                unpackCoreAssets("resources/" + name, target);
+            }
+            try (OutputStream out = new FileOutputStream(stamp)) {
+                out.write(want.getBytes());
+            }
+            android.util.Log.i("recomp", "unpacked " + top.length + " resource entries into " + base);
+        } catch (Exception e) {
+            android.util.Log.e("recomp", "Cannot unpack the app's resources", e);
+        }
     }
 
     /**
@@ -200,6 +314,13 @@ public class RecompActivity extends SDLActivity {
             Intent intent;
             if (request == PICK_TREE) {
                 intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            } else if (request == PICK_FILES) {
+                // GOG offline installers: setup_*.exe with its .bin slices,
+                // several at once, of no particular type.
+                intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             } else if (request == CREATE_EXPORT) {
                 intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -222,8 +343,20 @@ public class RecompActivity extends SDLActivity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode < PICK_TREE || requestCode > CREATE_EXPORT) {
+        if (requestCode < PICK_TREE || requestCode > PICK_FILES) {
             super.onActivityResult(requestCode, resultCode, data);
+            return;
+        }
+        if (requestCode == PICK_FILES && resultCode == RESULT_OK && data != null && data.getClipData() != null) {
+            // Several documents: each one's URI and its name as the picker showed it.
+            android.content.ClipData clip = data.getClipData();
+            String[] uris = new String[clip.getItemCount()], names = new String[clip.getItemCount()];
+            for (int i = 0; i < clip.getItemCount(); ++i) {
+                Uri uri = clip.getItemAt(i).getUri();
+                uris[i] = uri.toString();
+                names[i] = displayName(uri);
+            }
+            nativePicked(requestCode, uris, names);
             return;
         }
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {

@@ -41,6 +41,10 @@ TARGETS = {
     "web": ["recomp_app"],
 }
 MACOS_ONLY = {"ios", "ios-sim"}
+# The Android ABIs an APK carries, each built in its own CMake tree: x86_64
+# first (Intel Chromebooks, whose Android apps run in ChromeOS's ARCVM, and
+# the emulator), then arm64-v8a (phones, tablets, ARM Chromebooks).
+ANDROID_ABIS = ("x86_64", "arm64-v8a")
 NEEDS_GEN = {"app", "smoke", "headless", "fixture", "gen", "ios", "ios-sim", "android", "web"}
 # Targets with presets of their own, whatever the host system.
 OWN_PRESET = {"ios", "ios-sim", "android", "web"}
@@ -70,9 +74,10 @@ def build_root_for(game_dir, root=ROOT):
         return game_dir / "build"
 
 
-def build_dir_for(build_root, preset):
-    """The CMake binary directory: what the presets name inside the kit, beside the game outside it."""
-    return Path(build_root) / "cmake" / preset
+def build_dir_for(build_root, preset, abi=None):
+    """The CMake binary directory: what the presets name inside the kit, beside the game outside it.
+    An Android build has one per ABI (android-x86_64, android-stub-arm64-v8a)."""
+    return Path(build_root) / "cmake" / (preset + "-" + abi if abi else preset)
 
 
 def archive_path(build_root, system=None, preset=None):
@@ -165,18 +170,29 @@ def install_and_launch(app, bundle_id, device, console):
     subprocess.run(launch, check=True)
 
 
-def android_project(build_root, cfg, *, gen_dir):
-    """Render the Gradle project without building it; gen_dir is the CMake binary directory.
+def android_project(build_root, cfg, *, gen_dir, abis=("arm64-v8a",)):
+    """Render the Gradle project without building it; gen_dir is a CMake binary directory.
 
     SDL's Java sources stay in that build's FetchContent checkout. Gradle
-    only packages the native library built by CMake, never invokes CMake.
+    only packages the native libraries built by CMake, never invokes CMake.
+    `abis` are the ABIs the APK carries (Gradle's abiFilters); with more than
+    one, Gradle also writes an APK per ABI beside the universal one.
     """
     template = ROOT / "platform/android"
     out = Path(build_root) / "android"
     shutil.copytree(template, out, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns(".gradle", "build", ".gitignore", "local.properties"))
+    # An ABI this build no longer carries must not ride along from an earlier one.
+    jni = out / "app/src/main/jniLibs"
+    if jni.is_dir():
+        for stale in jni.iterdir():
+            if stale.name not in abis:
+                shutil.rmtree(stale)
     values = {key: cfg["game"][key] for key in ("app_name", "bundle_id", "id")}
     values["sdl_java_dir"] = (Path(gen_dir).resolve() / "_deps/sdl3-src/android-project/app/src/main/java").as_posix()
+    # Kotlin script source, put in as it is rather than escaped as a string.
+    raw = {"abi_filters": ", ".join(json.dumps(abi) for abi in abis),
+           "abi_splits": "true" if len(abis) > 1 else "false"}
     for original in template.rglob("*.in"):
         source = out / original.relative_to(template)
         text = source.read_text()
@@ -186,9 +202,41 @@ def android_project(build_root, cfg, *, gen_dir):
             else:
                 value = json.dumps(value, ensure_ascii=False)[1:-1].replace("$", r"\$")
             text = text.replace("@%s@" % key, value)
+        for key, value in raw.items():
+            text = text.replace("@%s@" % key, value)
         source.with_suffix("").write_text(text)
         source.unlink()
     return out
+
+
+def android_strip_tool():
+    """The NDK's llvm-strip, or None (the libraries then go in as built)."""
+    ndk = os.environ.get("ANDROID_NDK_HOME")
+    if not ndk:
+        return None
+    for host in ("linux-x86_64", "darwin-x86_64", "windows-x86_64"):
+        tool = Path(ndk) / "toolchains/llvm/prebuilt" / host / "bin" / (
+            "llvm-strip.exe" if host.startswith("windows") else "llvm-strip")
+        if tool.is_file():
+            return str(tool)
+    return None
+
+
+def android_stage_library(source, dest, strip=None):
+    """Copy a native library into jniLibs without its debug information.
+
+    A translated game is some 600 MB with it and about a quarter of that
+    without; the CMake tree keeps the full one for symbolising a crash.
+    Gradle leaves the libraries as they are (keepDebugSymbols), so the APK
+    carries exactly what this writes."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    temporary = dest.with_name(dest.name + ".part")
+    if strip:
+        subprocess.run([strip, "--strip-unneeded", "-o", str(temporary), str(source)], check=True)
+    else:
+        shutil.copy2(source, temporary)
+    temporary.replace(dest)
+    return dest
 
 
 def android_stage_layout_assets(out, game_dir):
@@ -215,29 +263,46 @@ def android_stage_core_assets(out, game_dir):
     copy_core_mods(game_dir, Path(out) / "app/src/main/assets/mods/core")
 
 
-def android_apk(build_root, cfg, *, gen_dir, game_dir):
-    """Stage the native libraries beside the SDL activity and assemble a debug APK."""
-    library = Path(gen_dir) / "host/libmain.so"
-    sdl_activity = Path(gen_dir) / "_deps/sdl3-src/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java"
-    for path in (library, sdl_activity):
-        if not path.is_file():
-            raise FileNotFoundError("Android CMake build input is missing: %s" % path)
-    out = android_project(build_root, cfg, gen_dir=gen_dir)
-    jni = out / "app/src/main/jniLibs/arm64-v8a"
-    jni.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(library, jni / "libmain.so")
-    # Read the configured option, not leftover installed libraries: switching
-    # video off must remove the previous build's copies from the APK too.
+def cmake_cache_on(gen_dir, name):
+    """A BOOL option as the CMake tree was configured with it."""
     cache = (Path(gen_dir) / "CMakeCache.txt").read_text().splitlines()
-    video = any(line.startswith("RECOMP_VIDEO:BOOL=") and
-                line.partition("=")[2].upper() in {"1", "ON", "YES", "TRUE", "Y"}
-                for line in cache)
-    for component in ("avformat", "avcodec", "avutil"):
-        name = "lib%s.so" % component
+    return any(line.startswith(name + ":BOOL=") and
+               line.partition("=")[2].upper() in {"1", "ON", "YES", "TRUE", "Y"}
+               for line in cache)
+
+
+def android_stage(build_root, cfg, *, gen_dirs, game_dir):
+    """Render the Gradle project and stage each ABI's native libraries and the
+    assets beside the SDL activity; `gen_dirs` maps an ABI to its CMake tree.
+
+    Each ABI's jniLibs/<abi> gets libmain.so and, in a multi-game build
+    (RECOMP_GAME_MODULES), the shared libSDL3.so the modules use with it.
+    The modules themselves are tools/assemble_games.py's to add."""
+    abis = tuple(gen_dirs)
+    first = gen_dirs[abis[0]]
+    sdl_activity = Path(first) / "_deps/sdl3-src/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java"
+    if not sdl_activity.is_file():
+        raise FileNotFoundError("Android CMake build input is missing: %s" % sdl_activity)
+    out = android_project(build_root, cfg, gen_dir=first, abis=abis)
+    strip = android_strip_tool()
+    video = False
+    for abi, gen_dir in gen_dirs.items():
+        library = Path(gen_dir) / "host/libmain.so"
+        if not library.is_file():
+            raise FileNotFoundError("Android CMake build input is missing: %s" % library)
+        # From scratch: a game module an earlier multi-game build put here goes too.
+        jni = out / "app/src/main/jniLibs" / abi
+        shutil.rmtree(jni, ignore_errors=True)
+        android_stage_library(library, jni / "libmain.so", strip)
+        if cmake_cache_on(gen_dir, "RECOMP_GAME_MODULES"):
+            android_stage_library(Path(gen_dir) / "_deps/sdl3-build/libSDL3.so", jni / "libSDL3.so", strip)
+        # Read the configured option, not leftover installed libraries: switching
+        # video off must leave the FFmpeg notice out of the APK too.
+        video = cmake_cache_on(gen_dir, "RECOMP_VIDEO")
         if video:
-            shutil.copy2(Path(gen_dir) / "ffmpeg/lib" / name, jni / name)
-        else:
-            (jni / name).unlink(missing_ok=True)
+            for component in ("avformat", "avcodec", "avutil"):
+                name = "lib%s.so" % component
+                android_stage_library(Path(gen_dir) / "ffmpeg/lib" / name, jni / name, strip)
     notice = out / "app/src/main/assets/ffmpeg-NOTICE.md"
     if video:
         notice.parent.mkdir(parents=True, exist_ok=True)
@@ -246,13 +311,114 @@ def android_apk(build_root, cfg, *, gen_dir, game_dir):
         notice.unlink(missing_ok=True)
     android_stage_layout_assets(out, game_dir)
     android_stage_core_assets(out, game_dir)
+    android_stage_resources(out, cfg, build_root)
+    android_stage_innoextract(out, abis, build_root, strip)
+    return out
+
+
+def android_stage_resources(out, cfg, build_root):
+    """The resources a desktop app carries beside its binary, as APK assets
+    under resources/: RecompActivity unpacks them into the app's external
+    files folder (the host's resources folder there) when the APK changes.
+    The folder is rebuilt from scratch: nothing an earlier build put there
+    stays (tools/assemble_games.py adds the other games' under games/)."""
+    resources = Path(out) / "app/src/main/assets/resources"
+    shutil.rmtree(resources, ignore_errors=True)
+    return android_write_resources(resources, cfg, symbols=Path(build_root) / "recomp/symbols.json")
+
+
+def android_write_resources(resources, cfg, launcher=True, symbols=None):
+    """A game's resources for Android into `resources`: the translation's
+    index (`symbols`, build/recomp/symbols.json, which the mod loader reads)
+    as the desktop packages carry it; from game.toml [android], the interface
+    mods' recipes (ui-mods/ for a desktop-class device, ui-mods-touch/ for a
+    phone or tablet; the host picks by the device, host/sdl/main.cpp) and the
+    profile seed; with `launcher`, the launcher's files (launcher-games.json
+    and the install manifests), which only the app that shows the launcher
+    carries."""
+    resources = Path(resources)
+    resources.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "tools/recomp/baseline/classic-modes.json", resources / "classic-modes.json")
+    if symbols is not None and Path(symbols).is_file():
+        shutil.copy2(symbols, resources / "symbols.json")
+    android = cfg.get("android")
+    if android is None:  # a bare config (the tests'), not one game_config.load read
+        return resources
+    game_dir = Path(cfg["dir"])
+    for folder, names in (("ui-mods", android["ui_mods"]), ("ui-mods-touch", android["touch_ui_mods"])):
+        for name in names:
+            dest = resources / folder / (name + ".recipe")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(game_dir / "ui-mods" / dest.name, dest)
+    for rel, source in sorted(android["profile_files"].items()):
+        if (game_dir / source).is_file():
+            dest = resources / "profile-seed" / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(game_dir / source, dest)
+    config = cfg["launcher_config_dir"]
+    if launcher and (config / "launcher-games.json").is_file():
+        for name in ("launcher-games.json", "launcher-splash.jpg"):
+            if (config / name).is_file():
+                shutil.copy2(config / name, resources / name)
+        # The install manifests: names, sizes and SHA-256 only.
+        for manifest in sorted((config / "launcher-manifests").glob("*.json")):
+            dest = resources / "launcher-manifests" / manifest.name
+            dest.parent.mkdir(exist_ok=True)
+            shutil.copy2(manifest, dest)
+    return resources
+
+
+def android_stage_innoextract(out, abis, build_root, strip=None):
+    """innoextract for the launcher's installs from GOG installers, as
+    jniLibs/<abi>/libinnoextract.so: an executable in the APK's native library
+    folder, the one place an app may run a program from (useLegacyPackaging
+    has the system unpack it there). Built once per ABI by
+    third_party/innoextract/build-android.sh; without it the launcher installs
+    from game folders only."""
+    notice = Path(out) / "app/src/main/assets/innoextract-NOTICE.md"
+    staged = False
+    for abi in abis:
+        dest = Path(out) / "app/src/main/jniLibs" / abi / "libinnoextract.so"
+        built = Path(build_root) / "innoextract-android" / abi / "innoextract"
+        if not built.is_file() and os.environ.get("ANDROID_NDK_HOME"):
+            # The venv's pinned cmake and ninja, as the app's own build uses.
+            env = dict(os.environ, CMAKE=cmake_tool("cmake"),
+                       PATH=os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
+            subprocess.run(["sh", str(ROOT / "third_party/innoextract/build-android.sh"),
+                            str(Path(build_root) / "innoextract-android"), abi], check=True, env=env)
+        if built.is_file():
+            android_stage_library(built, dest, strip)
+            staged = True
+        else:
+            print("warning: no innoextract for %s; the launcher installs from game folders only" % abi,
+                  file=sys.stderr)
+            dest.unlink(missing_ok=True)
+    if staged:
+        notice.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / "third_party/innoextract/NOTICE.md", notice)
+    else:
+        notice.unlink(missing_ok=True)
+
+
+def android_gradle(out):
+    """Assemble the staged project's debug APKs: the universal one (returned)
+    and, with several ABIs, one per ABI beside it (app-<abi>-debug.apk)."""
     wrapper = "gradlew.bat" if platform.system() == "Windows" else "./gradlew"
     subprocess.run([wrapper, "assembleDebug"], cwd=out, check=True)
-    apk = out / "app/build/outputs/apk/debug/app-debug.apk"
+    folder = Path(out) / "app/build/outputs/apk/debug"
+    apk = folder / "app-universal-debug.apk"
     if not apk.is_file():
-        raise FileNotFoundError("No APK after assembleDebug: %s" % apk)
-    print("Packaged %s (%d bytes)" % (apk, apk.stat().st_size), flush=True)
+        apk = folder / "app-debug.apk"
+    if not apk.is_file():
+        raise FileNotFoundError("No APK after assembleDebug in %s" % folder)
+    for built in sorted(folder.glob("*.apk")):
+        print("Packaged %s (%d MB)" % (built, built.stat().st_size >> 20), flush=True)
     return apk
+
+
+def android_apk(build_root, cfg, *, gen_dirs, game_dir):
+    """Stage the native libraries beside the SDL activity and assemble the debug APKs."""
+    return android_gradle(android_stage(build_root, cfg, gen_dirs=gen_dirs, game_dir=game_dir))
 
 
 def android_push_game(command, cfg, build_root):
@@ -446,12 +612,28 @@ def parse_args(argv, system=None):
                              "its settings row gone")
     parser.add_argument("--push-game", action="store_true",
                         help="Android: push the configured game install minus [bundle].exclude before launch")
+    parser.add_argument("--abi", action="append", choices=ANDROID_ABIS, default=None,
+                        help="Android: an ABI the APK carries, repeatable (default: %s)" % ", ".join(ANDROID_ABIS))
+    parser.add_argument("--module-only", action="store_true",
+                        help="Android: build only the game's module for a multi-game app (with --game-modules), "
+                             "no APK (tools/assemble_games.py adds it to the app's)")
+    parser.add_argument("--stage-only", action="store_true",
+                        help="Android: stage the Gradle project under <build>/android without assembling it "
+                             "(tools/build_app.py adds the other games' modules first)")
     parser.add_argument("--console", action="store_true", help="After launching on the device, stream its console")
     args = parser.parse_args(argv)
     if args.push_game and (args.target != "android" or args.no_install):
         parser.error("--push-game requires --target android without --no-install")
     if args.unsigned and args.target != "ios":
         parser.error("--unsigned is for --target ios")
+    if (args.abi or args.module_only or args.stage_only) and args.target != "android":
+        parser.error("--abi, --module-only and --stage-only are for --target android")
+    if args.module_only and not args.game_modules:
+        parser.error("--module-only needs --game-modules")
+    if args.push_game and (args.module_only or args.stage_only):
+        parser.error("--push-game installs an APK; --module-only and --stage-only make none")
+    # Once each, in the order given (the first one's tree renders the project).
+    args.abi = tuple(dict.fromkeys(args.abi or ANDROID_ABIS))
     if args.target == "ios" and not args.stub and not args.team and not args.unsigned:
         parser.error("--target ios needs --team or RECOMP_IOS_TEAM (or --unsigned)")
     if args.stub and (args.config == "Debug" or args.regenerate):
@@ -487,7 +669,8 @@ def main():
     defines.append("-DRECOMP_BUNDLE_GAME=" + ("OFF" if args.no_game_files else "ON"))
     defines.append("-DRECOMP_RELEASE=" + ("ON" if args.release else "OFF"))
     # A multi-game app's game module builds with the app (CMake RECOMP_GAME_MODULES).
-    module_targets = ["recomp_game"] if args.game_modules and args.target in ("app", "ios", "ios-sim") else []
+    module_targets = ["recomp_game"] if args.game_modules and args.target in ("app", "ios", "ios-sim",
+                                                                             "android") else []
     pgo = args.pgo if args.pgo in ("", "generate") else str(Path(args.pgo).resolve())
     defines.append("-DRECOMP_PGO=" + pgo)
     try:
@@ -538,6 +721,25 @@ def main():
                 if not args.stub and not args.no_install:
                     app = ios_app_bundle(cfg["game"]["app_name"], args.build_root, folder="ios-sim")
                     simulator_install_and_launch(app, cfg["game"]["bundle_id"], args.device, args.console)
+            elif args.target == "android":
+                # One CMake tree per ABI, then one Gradle project carrying them all.
+                targets = module_targets if args.module_only else TARGETS["android"] + module_targets
+                gen_dirs = {}
+                for abi in args.abi:
+                    gen_dirs[abi] = build_dir_for(args.build_root, preset, abi)
+                    configure(preset, defines + ["-DANDROID_ABI=" + abi], build_dir=gen_dirs[abi])
+                    build(preset, targets, args.jobs, build_dir=gen_dirs[abi], config=args.config)
+                if args.module_only:
+                    print("Built the module in %s" % ", ".join(str(d) for d in gen_dirs.values()))
+                elif args.stage_only:
+                    out = android_stage(args.build_root, cfg, gen_dirs=gen_dirs, game_dir=args.game_dir)
+                    print("Staged the Gradle project in %s" % out)
+                else:
+                    apk = android_apk(args.build_root, cfg, gen_dirs=gen_dirs, game_dir=args.game_dir)
+                    if not args.no_install:
+                        android_install_and_launch(apk, cfg["game"]["bundle_id"], args.device, args.console,
+                                                   game_cfg=cfg if args.push_game else None,
+                                                   build_root=args.build_root)
             else:
                 # A link-only build ships no texture pack, and its CI has no numpy.
                 if args.target == "app" and not args.stub:
@@ -547,12 +749,6 @@ def main():
                 if args.target == "web":
                     site = web_site(args.game_dir, args.build_root, preset, cfg)
                     print("Web site in %s (serve it with tools/web_launcher.py --serve)" % site)
-                if args.target == "android":
-                    apk = android_apk(args.build_root, cfg, gen_dir=build_dir, game_dir=args.game_dir)
-                    if not args.no_install:
-                        android_install_and_launch(apk, cfg["game"]["bundle_id"], args.device, args.console,
-                                                   game_cfg=cfg if args.push_game else None,
-                                                   build_root=args.build_root)
                 system = "Windows" if preset.startswith("windows-cross") else platform.system()
                 if args.target == "app" and not args.stub and system in {"Linux", "Windows"}:
                     # The desktop Ninja presets write OUTPUT_NAME into POP_OUT.

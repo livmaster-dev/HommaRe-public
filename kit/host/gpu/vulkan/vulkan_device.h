@@ -201,6 +201,10 @@ class VulkanDevice final : public Device {
         std::unordered_map<uint64_t, uint32_t> acquired; // texture id -> image index
         std::unordered_map<uint64_t, VkSemaphore> acquired_wait;
         bool needs_recreate = false;
+        // The window's system surface is gone (Android takes it while the app
+        // is in the background or covered): the next acquire makes a new
+        // VkSurfaceKHR over the window, once the window has one again.
+        bool surface_lost = false;
         double refresh = 1.0 / 60;
     };
 
