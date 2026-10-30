@@ -64,6 +64,7 @@
 #define HOMM5_RET_ANCHOR_X 0x00e35733
 #define HOMM5_RET_ANCHOR_Y 0x00e3577d /* and for y (the dragged icon, native/ui_bounds.c; the phone rows, native/phone_layout.c) */
 #define HOMM5_FN_COUNTER_MAKE fn_00739b00 /* a battle's stack counter made (the base game's 008333f0) */
+#define HOMM5_FN_SET_PLACEMENT fn_00e35920 /* a window's SetPlacement (the base game's 00e3b9f0) */
 
 /* The phone's interface (native/phone_hud.c), from the base game's through
  * byte-identical functions, RTTI and the classes' sub-object offsets

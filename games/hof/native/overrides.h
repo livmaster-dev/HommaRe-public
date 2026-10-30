@@ -77,6 +77,10 @@ void hof_mount_pak(X86 *c);
  * axis 00e43650 is 00e4eba0 here (the rest in native/addresses.h). */
 void homm5_anchor_axis(X86 *c);
 #define FN_00e4eba0 homm5_anchor_axis
+/* 00e479c0: a window's SetPlacement (the base game's 00e3b9f0), for the
+ * windows the game places itself (native/ui_bounds.c). */
+void homm5_window_place(X86 *c);
+#define FN_00e479c0 homm5_window_place
 
 /* The adventure minimap's picture and mouse (native/hof_screen.c) at the
  * window's laid-out corner instead of its description's Position. */
