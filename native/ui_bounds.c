@@ -243,8 +243,9 @@ static int counter_window(uint32_t win) {
  * changes is placed from the screen's edge from then on, the shift its
  * last layout took undone first (its children follow as the game moves it).
  * A HUD window keeps the box: the game never moves one from its file's
- * place. Each window is noted with its vtable, so another window at the same
- * address later starts afresh. */
+ * place. Each window is noted with its vtable and the offset it was last
+ * placed at, so another window at the same address later starts afresh (the
+ * hire screen's panels took a freed slider's note). */
 #ifndef HOMM5_FN_SET_PLACEMENT
 #define HOMM5_FN_SET_PLACEMENT fn_00e3b9f0
 #endif
@@ -286,11 +287,6 @@ static Laid *laid(uint32_t win, int make) {
     Laid *l = free_slot ? free_slot : &g_laid[home];
     *l = (Laid){win, vt, 0.0f, 0.0f, 0};
     return l;
-}
-
-static int placed_by_game(uint32_t win) {
-    const Laid *l = laid(win, 0);
-    return l && l->placed;
 }
 
 /* SetPlacement: thiscall (ECX the window's IWindow at +0x10c; x, y, w, h
@@ -433,8 +429,22 @@ void homm5_anchor_axis(X86 *c) {
     const float game_x = span_x, game_w = span_w;
     const int edge = !root && !follows_picture && (anchor == EPA_LOW_END || anchor == EPA_HIGH_END) &&
                      near(parent_x, span_x) && near(parent_w, span_w);
-    if (edge && placed_by_game(c->r[R_EDI])) {
-        Laid *l = laid(c->r[R_EDI], 0);
+    /* A window the game placed is laid out at the offset it last gave it. One
+     * laid out at another stands where a freed one was, of the same class
+     * (most are plain windows): the note is that one's. */
+    Laid *note = edge ? laid(c->r[R_EDI], 0) : NULL;
+    if (note && note->placed && !near(rdf32(esp + 12), note->off)) {
+        static int traced_stale;
+        if (trace_wide() && traced_stale < 200) {
+            ++traced_stale;
+            fprintf(stderr, "[wide] window %08x (vt %08x) at %.0f is not the one placed at %.0f\n",
+                    c->r[R_EDI], note->vt, rdf32(esp + 12), note->off);
+        }
+        note->placed = 0;
+        note->dx = 0.0f;
+    }
+    if (note && note->placed) {
+        Laid *l = note;
         static int traced_placed;
         if (trace_wide() && traced_placed < 200) {
             ++traced_placed;
