@@ -55,6 +55,11 @@ void homm5_anchor_axis(X86 *c);
  * game puts it. */
 void homm5_counter_make(X86 *c);
 #define FN_008333f0 homm5_counter_make
+/* 00e3b9f0: a window's SetPlacement (offsets set by code: a message box
+ * centred, a dragged icon at the cursor); native/ui_bounds.c places such a
+ * window from the screen's edge rather than the interface bounds'. */
+void homm5_window_place(X86 *c);
+#define FN_00e3b9f0 homm5_window_place
 
 /* 00a1a1e0 (projection), 00a18c90 (screen -> ray), 00a19030 (world -> screen)
  * and 00a19940 (the engine's own wide-screen angle): native/horplus.c gives

@@ -42,6 +42,9 @@ void homm5_anchor_axis(X86 *c);
  * (the base game's 008333f0). */
 void homm5_counter_make(X86 *c);
 #define FN_00739b00 homm5_counter_make
+/* 00e35920: a window's SetPlacement (the base game's 00e3b9f0). */
+void homm5_window_place(X86 *c);
+#define FN_00e35920 homm5_window_place
 
 /* The phone's interface (native/phone_hud.c; addresses and their sources in
  * native/addresses.h): the base game's 00e74f30 (root placement), 00e3dd70

@@ -63,6 +63,8 @@
 #define HOMM5_STRETCH_ROOTS 1
 /* A battle's stack counter (native/hof_screen.c hof_counter_window). */
 #define HOMM5_COUNTER_WINDOW hof_counter_window
+/* A window's SetPlacement (the base game's 00e3b9f0). */
+#define HOMM5_FN_SET_PLACEMENT fn_00e479c0
 /* Screen mode changes (native/hof_screen.c): the roots are laid out again
  * after one (native/phone_hud.c). */
 #define HOMM5_SCREEN_MODE_CHANGES hof_screen_mode_changes

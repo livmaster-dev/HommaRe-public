@@ -233,6 +233,95 @@ static int counter_window(uint32_t win) {
 }
 #endif
 
+/* Windows the game places itself. The message boxes (the next player's turn,
+ * the save under way, every question) are centred by code, and a dragged
+ * creature's icon follows the cursor: each is laid out at offset 0, then
+ * SetPlacement (00e3b9f0, Hammers of Fate's 00e479c0, Tribes of the East's
+ * 00e35920) gives it its offset and moves its laid-out position by the
+ * change. An offset counted from the screen's left edge, added to the box's
+ * edge, stood the box's margin to the right. A window whose x offset the game
+ * changes is placed from the screen's edge from then on, the shift its
+ * last layout took undone first (its children follow as the game moves it).
+ * A HUD window keeps the box: the game never moves one from its file's
+ * place. Each window is noted with its vtable, so another window at the same
+ * address later starts afresh. */
+#ifndef HOMM5_FN_SET_PLACEMENT
+#define HOMM5_FN_SET_PLACEMENT fn_00e3b9f0
+#endif
+void HOMM5_FN_SET_PLACEMENT(X86 *c);
+
+enum {
+    WINDOW_X = 0x64,          /* the laid-out position (SetParentRect's out) */
+    WINDOW_PLACEMENT = 0x10c, /* the IWindow sub-object SetPlacement is called on */
+    PLACE_X = 1,              /* SetPlacement's flag: the x offset given */
+    LAID_SLOTS = 4096,
+};
+
+typedef struct {
+    uint32_t win, vt;
+    float off;  /* the x offset of its last layout */
+    float dx;   /* how far its last layout stood from the game's own edge */
+    int placed; /* the game has moved it */
+} Laid;
+static Laid g_laid[LAID_SLOTS];
+
+/* The window's note, made when `make`; NULL when there is none. */
+static Laid *laid(uint32_t win, int make) {
+    const uint32_t vt = rd32(win);
+    const uint32_t home = (win >> 4) & (LAID_SLOTS - 1);
+    Laid *free_slot = NULL;
+    for (uint32_t i = 0; i < 16; ++i) {
+        Laid *l = &g_laid[(home + i) & (LAID_SLOTS - 1)];
+        if (l->win == win) {
+            if (l->vt == vt)
+                return l;
+            *l = (Laid){win, vt, 0.0f, 0.0f, 0}; /* another window there now */
+            return make ? l : NULL;
+        }
+        if (!l->win && !free_slot)
+            free_slot = l;
+    }
+    if (!make)
+        return NULL;
+    Laid *l = free_slot ? free_slot : &g_laid[home];
+    *l = (Laid){win, vt, 0.0f, 0.0f, 0};
+    return l;
+}
+
+static int placed_by_game(uint32_t win) {
+    const Laid *l = laid(win, 0);
+    return l && l->placed;
+}
+
+/* SetPlacement: thiscall (ECX the window's IWindow at +0x10c; x, y, w, h
+ * offsets, flags), RET 0x14. */
+void homm5_window_place(X86 *c) {
+    const uint32_t win = c->r[R_ECX] - WINDOW_PLACEMENT, esp = c->r[R_ESP];
+    if (rd32(esp + 20) & PLACE_X) {
+        const float off = rdf32(esp + 4);
+        Laid *l = laid(win, 0);
+        if (!l) {
+            /* Not laid out against the screen yet: placed before it is. */
+            l = laid(win, 1);
+            l->placed = 1;
+            if (trace_wide())
+                fprintf(stderr, "[wide] window %08x (vt %08x) placed by the game at %.0f\n", win,
+                        l->vt, off);
+        } else if (!near(off, l->off) || l->placed) {
+            if (trace_wide() && !l->placed)
+                fprintf(stderr, "[wide] window %08x (vt %08x) placed by the game at %.0f (was %.0f): %.0f back\n",
+                        win, l->vt, off, l->off, l->dx);
+            if (l->dx != 0.0f)
+                wrf32(win + WINDOW_X, rdf32(win + WINDOW_X) - l->dx);
+            l->dx = 0.0f;
+            l->placed = 1;
+        }
+        if (l)
+            l->off = off;
+    }
+    HOMM5_FN_SET_PLACEMENT(c);
+}
+
 /* The axis (00e43650 in the base game): a child window's position along one
  * axis (fastcall: ECX the anchor, EDX its size (in/out); stack: the parent's
  * position and size, the window's offset, its two margins, and where the
@@ -337,8 +426,29 @@ void homm5_anchor_axis(X86 *c) {
      * bookmarks. */
     follows_picture = !root && rdf32(c->r[R_EDX]) <= 128.0f && homm5_hud_free_window(c->r[R_EDI]);
 #endif
-    if (!root && !follows_picture && (anchor == EPA_LOW_END || anchor == EPA_HIGH_END) &&
-        near(parent_x, span_x) && near(parent_w, span_w)) {
+    /* Where the game counts a placed window's offset from: the screen's left
+     * edge, in Hammers of Fate too (its message boxes are centred on the
+     * whole screen; its stack counters, from the interface's own edge, are
+     * the exception above). */
+    const float game_x = span_x, game_w = span_w;
+    const int edge = !root && !follows_picture && (anchor == EPA_LOW_END || anchor == EPA_HIGH_END) &&
+                     near(parent_x, span_x) && near(parent_w, span_w);
+    if (edge && placed_by_game(c->r[R_EDI])) {
+        Laid *l = laid(c->r[R_EDI], 0);
+        static int traced_placed;
+        if (trace_wide() && traced_placed < 200) {
+            ++traced_placed;
+            fprintf(stderr, "[wide] window %08x (vt %08x) at %.0f laid out from the game's %.0f+%.0f\n",
+                    c->r[R_EDI], l->vt, rdf32(esp + 12), game_x, game_w);
+        }
+        l->off = rdf32(esp + 12);
+        l->dx = 0.0f;
+        wrf32(esp + 4, game_x);
+        wrf32(esp + 8, game_w);
+        HOMM5_FN_ANCHOR_AXIS(c);
+        return;
+    }
+    if (edge) {
         float bx = safe_x, bw = safe_w;
         if (aspect > 0.0f && box < safe_w - 0.5f) {
             bx = safe_x + (safe_w - box) * 0.5f;
@@ -358,6 +468,14 @@ void homm5_anchor_axis(X86 *c) {
             /* The arguments are a copy SetParentRect pushed for this call. */
             wrf32(esp + 4, bx);
             wrf32(esp + 8, bw);
+        }
+        /* How far this stands from where the game would place it. */
+        const float ux = rdf32(esp + 4), uw = rdf32(esp + 8);
+        const float dx = anchor == EPA_LOW_END ? ux - game_x : (ux + uw) - (game_x + game_w);
+        Laid *l = laid(c->r[R_EDI], !near(dx, 0.0f));
+        if (l) {
+            l->off = rdf32(esp + 12);
+            l->dx = dx;
         }
     }
     HOMM5_FN_ANCHOR_AXIS(c);
