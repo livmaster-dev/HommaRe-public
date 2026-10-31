@@ -620,7 +620,8 @@ void j_button(Json *j, int first, const char *name, const char *label, int enabl
 extern const NsScreen ns_custom_create, ns_custom_wait, ns_hotseat_create, ns_hotseat_wait,
     ns_main_menu, ns_profile_name, ns_load_game, ns_hall_of_fame, ns_options, ns_duel, ns_duel3,
     ns_esc_menu, ns_lan_name, ns_lan_lobby, ns_lan_duel_lobby, ns_mp_create, ns_lan_duel_create, ns_mp_wait, ns_save_game,
-    ns_ubi_login, ns_ubi_cdkey, ns_ubi_channels;
+    ns_ubi_login, ns_ubi_cdkey, ns_ubi_channels, ns_lan_load, ns_hotseat_load, ns_mp_load_wait,
+    ns_lan_save, ns_hotseat_save;
 /* Every game links them all; a screen without addresses in a game has a zero
  * vtable and is never matched. */
 static const NsScreen *const SCREENS[] = {&ns_custom_create, &ns_custom_wait, &ns_hotseat_create,
@@ -628,7 +629,9 @@ static const NsScreen *const SCREENS[] = {&ns_custom_create, &ns_custom_wait, &n
                                           &ns_load_game, &ns_hall_of_fame, &ns_options, &ns_duel,
                                           &ns_duel3, &ns_esc_menu, &ns_lan_name, &ns_lan_lobby,
                                           &ns_lan_duel_lobby, &ns_mp_create, &ns_lan_duel_create, &ns_mp_wait, &ns_save_game,
-                                          &ns_ubi_login, &ns_ubi_cdkey, &ns_ubi_channels};
+                                          &ns_ubi_login, &ns_ubi_cdkey, &ns_ubi_channels, &ns_lan_load,
+                                          &ns_hotseat_load, &ns_mp_load_wait, &ns_lan_save,
+                                          &ns_hotseat_save};
 enum { SCREEN_COUNT = sizeof SCREENS / sizeof SCREENS[0] };
 
 /* The table's row for IScreen* p, and the full screen object into *screen,

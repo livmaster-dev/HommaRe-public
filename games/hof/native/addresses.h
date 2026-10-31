@@ -254,6 +254,33 @@
 #define NS_LOAD_CLOSE 0x00746780        /* V same body (close-top + defer, AL=1, RET 4), registered at the same spots */
 #define NS_LOAD_TYPE 0x00734b50         /* V hash */
 #define NS_LOAD_SIZE 0x00734ea0         /* V hash */
+/* A LAN game's and a hot seat's load screens (CLoadScreen<SLanSaveHeaderInfo>,
+ * CLoadScreen<SHotSeatHeaderInfo>), also at +0x1d4 with the same fields; their
+ * headers are longer (research notes lan-load-hof-map.md). */
+#define NS_VT_LOAD_LAN 0x00fa9d48
+#define NS_LOAD_LAN_CLICK 0x007491c0
+#define NS_LOAD_LAN_LOAD 0x00737bf0
+#define NS_LOAD_LAN_CONFIRMED 0x00746380
+#define NS_L_LAN_ROW 0x254
+#define NS_VT_LOAD_HS 0x00fa9738
+#define NS_LOAD_HS_CLICK 0x007490e0
+#define NS_LOAD_HS_LOAD 0x00738900
+#define NS_LOAD_HS_CONFIRMED 0x00738a90
+#define NS_L_HS_ROW 0x94
+/* The in-game Save screens, CSaveScreen<SHeaderInfo>, <SLanSaveHeaderInfo> and
+ * <SHotSeatHeaderInfo>: all 0x1f0 with their IScreen at +0x1e8, the load
+ * screen's NS_L_* fields and the kind's row click and delete (research notes
+ * save-screens-hof-map.md). */
+#define NS_VT_SAVE 0x00fa9340
+#define NS_SUB_SAVE 0x1e8
+#define NS_SAVE_SAVE 0x00737610         /* primary vt slot 0x38; thiscall (screen, 0), RET 4 */
+#define NS_S_EDIT 0x1b8                 /* the name's IEditLine (base 0x298) */
+#define NS_VT_SAVE_LAN 0x00fa9e0c
+#define NS_SAVE_LAN_SAVE 0x007468b0
+#define NS_VT_SAVE_HS 0x00fa99c4
+#define NS_SAVE_HS_SAVE 0x007391a0
+#define NS_SAVE_CAN 0x00734f60          /* fastcall ECX [screen+0x18c]: AL may save now */
+#define NS_S_GAME 0x18c
 #define NS_DIFF_OF_SAVE 0x00b0a010      /* V hash */
 #define NS_DIFF_ENTRY 0x00b09fd0        /* V hash */
 
@@ -569,6 +596,13 @@
 /* NS_MPC_SPEED_NAME: none (no combat speed in HoF). */
 
 #define NS_VT_MPW              0x00fbd9f4  /* base 00fbaae0; V RTTI CMPWaitScreen IScreen */
+/* A loaded LAN game's players (NUI::CMPUbiComLoadScreen, a CMPWaitScreen):
+ * the load logic keeps its model at +0x230 and sets +0x2d0 once the game
+ * starts (research notes lan-load-hof-map.md). */
+#define NS_VT_MPL              0x00fbdab0
+#define NS_SUB_MPL             0x1dc
+#define NS_MPL_MODEL           0x230
+#define NS_MPL_STARTED         0x2d0
 #define NS_SUB_MPW             0x1c0       /* base 0x1cc; V */
 #define NS_MPW_START           0x00927720  /* base 00962750; V re-checked ([+0x180], [+0x1a8]; RET 4) */
 #define NS_MPW_BACK            0x009276f0  /* base 00962720; V re-checked */

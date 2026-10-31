@@ -288,6 +288,33 @@ void fn_00557470(X86 *c);
 #define NS_LOAD_CLOSE      0x00644510 /* V 14 votes, identical body */
 #define NS_LOAD_TYPE       0x00629930 /* V hash */
 #define NS_LOAD_SIZE       0x00629e30 /* V hash */
+/* A LAN game's and a hot seat's load screens (CLoadScreen<SLanSaveHeaderInfo>,
+ * CLoadScreen<SHotSeatHeaderInfo>), also at +0x2b4 with the same fields; their
+ * headers are longer (research notes lan-load-toe-map.md). */
+#define NS_VT_LOAD_LAN     0x00f58578
+#define NS_LOAD_LAN_CLICK  0x00649180
+#define NS_LOAD_LAN_LOAD   0x0062e5a0
+#define NS_LOAD_LAN_CONFIRMED 0x00643d00
+#define NS_L_LAN_ROW       0x298
+#define NS_VT_LOAD_HS      0x00f57534
+#define NS_LOAD_HS_CLICK   0x006490a0
+#define NS_LOAD_HS_LOAD    0x0062ecd0
+#define NS_LOAD_HS_CONFIRMED 0x0062ee60
+#define NS_L_HS_ROW        0x94
+/* The in-game Save screens, CSaveScreen<SHeaderInfo>, <SLanSaveHeaderInfo> and
+ * <SHotSeatHeaderInfo>: 4 bytes longer than the base game's (a LAN save
+ * callback at +0x2b0), so their IScreen is at +0x2c8; the name field and the
+ * NS_L_* fields are the load screen's, the row click and delete the load
+ * screen's of the kind (research notes save-screens-toe-map.md). */
+#define NS_VT_SAVE         0x00f5720c
+#define NS_SUB_SAVE        0x2c8
+#define NS_SAVE_SAVE       0x0062dfc0
+#define NS_VT_SAVE_LAN     0x00f58640
+#define NS_SAVE_LAN_SAVE   0x00644b20
+#define NS_VT_SAVE_HS      0x00f5778c
+#define NS_SAVE_HS_SAVE    0x0062f570
+#define NS_SAVE_CAN        0x00629ef0 /* fastcall ECX [screen+0x198]: AL may save now */
+#define NS_S_GAME          0x198
 #define NS_DIFF_OF_SAVE    0x00abe080 /* V hash */
 #define NS_DIFF_ENTRY      0x00abe040 /* V hash */
 
@@ -491,6 +518,13 @@ void fn_00557470(X86 *c);
 #define NS_MPC_SPEED_NAME      0x00abe110  /* base 00b97ca0; V (= NS_DUEL_SPEED_NAME) */
 
 #define NS_VT_MPW              0x00f6c91c  /* base 00fbaae0; V RTTI CMPWaitScreen IScreen */
+/* A loaded LAN game's players (NUI::CMPUbiComLoadScreen, a CMPWaitScreen):
+ * the load logic keeps its model at +0x26c and sets +0x314 once the game
+ * starts (research notes lan-load-toe-map.md). */
+#define NS_VT_MPL              0x00f6c9dc
+#define NS_SUB_MPL             0x1e8
+#define NS_MPL_MODEL           0x26c
+#define NS_MPL_STARTED         0x314
 #define NS_SUB_MPW             0x1cc       /* same; V */
 #define NS_MPW_START           0x00899080  /* base 00962750; V re-checked ([+0x18c], [+0x1b4]; RET 4) */
 #define NS_MPW_BACK            0x00899050  /* base 00962720; V re-checked */
