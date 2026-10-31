@@ -181,6 +181,11 @@ void homm5_game_view_draw(X86 *c);
 void homm5_msgbox_setup(X86 *c);
 #define FN_007c3910 homm5_msgbox_setup
 
+/* 00443240: the GameSpy clDataList unbounded string reader (native/net_guard.c;
+ * the base game's 004432d0). */
+void homm5_gs_str_read(X86 *c);
+#define FN_00443240 homm5_gs_str_read
+
 /* 00419a30: the GS SDK's login and 00e06e30: ProcessLoginRouterResult (the
  * base game's 00419ae0 and 00b31380); native/gs_login.c. */
 void homm5_gs_login(X86 *c);

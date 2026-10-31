@@ -54,8 +54,9 @@ volatile_reads = []
 entry_points = [0x006c6490]
 # Native code linked with the translation: hot float helpers (overrides.c),
 # the touch adapter, saves, the map camera, the wide-screen interface and
-# the ubi-gs login, which sends a token instead of the password (gs_login.c).
-native = { header = "native/overrides.h", sources = ["native/overrides.c", "native/scene.c", "native/granny.c", "native/lighting.c", "native/gpu_skin.cpp", "native/touch.c", "native/save.cpp", "native/camera.c", "native/widescreen.c", "native/phone_hud.c", "native/horplus.c", "native/ui_bounds.c", "native/phone_layout.c", "native/render_split.c", "native/tap_attack.c", "native/native_screens.c", "native/screens_custom.c", "native/screens_menu.c", "native/screens_load.c", "native/screens_hof.c", "native/screens_options.c", "native/screens_duel.c", "native/screens_question.c", "native/screens_escmenu.c", "native/screens_lan.c", "native/screens_ubi.c", "native/gs_login.c"] }
+# the ubi-gs login, which sends a token instead of the password (gs_login.c),
+# and the bound on the GS SDK's server string copies (net_guard.c).
+native = { header = "native/overrides.h", sources = ["native/overrides.c", "native/scene.c", "native/granny.c", "native/lighting.c", "native/gpu_skin.cpp", "native/touch.c", "native/save.cpp", "native/camera.c", "native/widescreen.c", "native/phone_hud.c", "native/horplus.c", "native/ui_bounds.c", "native/phone_layout.c", "native/render_split.c", "native/tap_attack.c", "native/native_screens.c", "native/screens_custom.c", "native/screens_menu.c", "native/screens_load.c", "native/screens_hof.c", "native/screens_options.c", "native/screens_duel.c", "native/screens_question.c", "native/screens_escmenu.c", "native/screens_lan.c", "native/screens_ubi.c", "native/gs_login.c", "native/net_guard.c"] }
 # A Direct3D 9 game: no DirectDraw lock to track, so stores skip the watch/dirty check.
 store_hooks = false
 # Flags are followed over the jumps inside a function: CMP; Jcc computes only

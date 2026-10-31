@@ -374,6 +374,30 @@
 #define NS_E_MODE 0x1b4
 #define NS_PAK_DIRS "data,dataa1" /* the paks it mounts, for the native views' pictures */
 
+/* GameSpy clDataList string readers and the fixed buffers of all 52 calls of
+ * the unbounded one (native/net_guard.c). The unbounded reader is the base
+ * game's 004432d0, the bounded one 00443390; PLAYERINFO's seven fields
+ * (0042a520, the base game's 0042a5e0) go into 12/16/36/36/68/132/132. The
+ * sites are in the base game's order (net_guard.c names each), the sizes the
+ * same. */
+#define HOMM5_GS_STR_ORIG fn_00443240
+#define HOMM5_GS_STR_BOUNDED fn_00443300
+#define HOMM5_GS_STR_SITES \
+    {0x0042a5e8u, 12}, {0x0042a5fcu, 16}, {0x0042a610u, 36}, {0x0042a624u, 36}, {0x0042a638u, 68}, \
+        {0x0042a64cu, 132}, {0x0042a660u, 132}, {0x0042497cu, 36}, {0x004249bfu, 132}, \
+        {0x004249dau, 132}, {0x00424f60u, 36}, {0x00424f9fu, 132}, {0x00424fb6u, 132}, \
+        {0x0043f498u, 16}, {0x0043f4aeu, 132}, \
+        {0x0042723au, 36}, {0x004272b4u, 36}, {0x0042733fu, 132}, {0x0042383eu, 132}, \
+        {0x00423876u, 132}, {0x004222bau, 132}, {0x00428cafu, 132}, {0x00430434u, 36}, \
+        {0x00425f0au, 16}, {0x004233e6u, 16}, {0x004259b0u, 36}, {0x004260c7u, 16}, \
+        {0x0041fc01u, 36}, {0x0041fc17u, 36}, {0x0041fc2du, 128}, {0x0041fc43u, 128}, \
+        {0x00421ebdu, 129}, {0x0042201du, 129}, {0x0042253cu, 36}, {0x0042257du, 36}, \
+        {0x004227d9u, 16}, {0x004227edu, 129}, {0x004227fdu, 129}, {0x0042291fu, 16}, \
+        {0x00422aafu, 16}, {0x00423b2fu, 16}, {0x00423c8fu, 16}, {0x00425cc8u, 16}, \
+        {0x00425cf8u, 16}, {0x004276cau, 36}, {0x00427d87u, 33}, {0x00427f60u, 36}, \
+        {0x00429649u, 16}, {0x00429682u, 132}, {0x0042975fu, 16}, {0x00429773u, 36}, \
+        {0x0042979au, 1024},
+
 /* The GS login (native/gs_login.c): the SDK's login entry, reached from
  * ProcessLogin (00e06a10) through the thunk 00419340, and
  * ProcessLoginRouterResult. */

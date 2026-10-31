@@ -344,6 +344,24 @@ remembers where you registered (no password in it). A server that knows nothing 
 takes the hash for your password. Accounts made with the original game, which sends the
 password as typed, can't be used from HommaRe.
 
+**Playing online safely.** A ubi-gs server can be run by anyone, and local-network and
+online play puts you in touch with other players' copies. The 2006 client parses what a
+server or peer sends in old C++ that, in places, copied text into fixed stack buffers
+without a length check — a hostile server could send an over-long field and overflow one.
+HommaRe recompiles the game, so it replaces those copies with the game's own bounded
+reader: a field that is too long is cut to fit and the game carries on with the shortened
+text, rather than running off the end of a buffer. This covers every server-controlled
+string field the client reads into a fixed buffer: all 52 places in each game that used
+the unchecked copy — the player-info reply (the known overflow), the room list and member
+list, member-join, the proxy login reply, the module proxy list, the game-start,
+friend-update and ladder messages, and the lobby's other names and ids. A copy from
+anywhere else would be cut at 16 bytes and logged rather than left unchecked. The room
+list's first fields already had a length; the NAT and address replies carry no strings.
+Local-network and direct peer-to-peer play uses a different, binary protocol: its
+datagrams are read into a length-bounded buffer and parsed into fixed-size records, with
+no unbounded copy found. Even so, if you would rather not trust an unknown ubi-gs server
+or peer, stay on a local network or a VPN with people you know.
+
 ## What's next
 
 - GOG's other languages (German, French, Polish and more): their installers are needed to
