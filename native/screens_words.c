@@ -93,6 +93,7 @@ static const Words WORDS[] = {
     {"Creating the game...", 0, "Spiel wird erstellt...", "Création de la partie...", "Tworzenie gry..."},
     {"unlimited", 0, "unbegrenzt", "illimité", "bez limitu"},
     {"%d min", 0, "%d Min.", "%d min", "%d min"},
+    {"Version: ", 0, "Version: ", "Version : ", "Wersja: "},
     {"Turn time", 0, "Zeitlimit", "Durée du tour", "Limit czasu"},
     {"Turn time:", 0, "Zeitlimit:", "Durée du tour :", "Limit czasu:"},
     {"Difficulty:", 0, "Schwierigkeit:", "Difficulté :", "Poziom trudności:"},
@@ -251,22 +252,22 @@ static const char *lookup(const char *ru, const char *en) {
         if (e->en == en && e->ru == ru && e->lang == ns_lang)
             return e->out;
     }
-    const char *out = en;
-    for (size_t i = 0; i < sizeof WORDS / sizeof WORDS[0]; ++i) {
+    const char *out = NULL;
+    for (size_t i = 0; i < sizeof WORDS / sizeof WORDS[0] && !out; ++i) {
         const Words *w = &WORDS[i];
-        if (strcmp(w->en, en) || (w->ru && strcmp(w->ru, ru)))
-            continue;
-        out = ns_lang == NS_DE ? w->de : ns_lang == NS_FR ? w->fr : w->pl;
-        break;
+        if (!strcmp(w->en, en) && (!w->ru || !strcmp(w->ru, ru)))
+            out = ns_lang == NS_DE ? w->de : ns_lang == NS_FR ? w->fr : w->pl;
     }
-    if (out == en && ns_trace())
+    /* A game text usually stands in front of the words (text_or), so a
+     * phrase noted here may still never be shown. */
+    if (!out && ns_trace())
         fprintf(stderr, "[screens] no %s words for \"%s\"\n", ns_lang_code(), en);
     /* An empty slot, or the last one probed when all were taken. */
     e->ru = ru;
     e->en = en;
-    e->out = out;
+    e->out = out ? out : en;
     e->lang = ns_lang;
-    return out;
+    return e->out;
 }
 
 const char *ns_tr(const char *ru, const char *en) {

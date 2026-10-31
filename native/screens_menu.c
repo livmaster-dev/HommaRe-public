@@ -601,7 +601,9 @@ static void menu_document(Json *j, Scratch *s, uint32_t screen) {
     j_lit(j, ",");
     j_kv_str(j, "title", panel_title(s, index));
     j_lit(j, ",");
-    j_kv_str(j, "version", ns_tr("Версия: " NS_GAME_VERSION, "Version: " NS_GAME_VERSION));
+    char version[48];
+    snprintf(version, sizeof version, "%s" NS_GAME_VERSION, ns_tr("Версия: ", "Version: "));
+    j_kv_str(j, "version", version);
     int shown = -1;
     if (index == P_MAIN || index == P_SINGLE || index == P_MULTI || index == P_HOT_SEAT)
         shown = j_buttons(j, s, screen, index);
