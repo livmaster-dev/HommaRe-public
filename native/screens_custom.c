@@ -65,6 +65,9 @@
 #define NS_HS_NAME_ACCEPT 0x009f1dc0 /* "edit_accept": the names checked */
 #define NS_VT_MPW 0x00fbaae0         /* NUI::CMPWaitScreen's IScreen (a LAN game's players) */
 #define NS_SUB_MPW 0x1cc
+#define NS_VT_MPL 0x00fbaba0         /* NUI::CMPUbiComLoadScreen's IScreen (a loaded LAN game's players) */
+#define NS_SUB_MPL 0x1e8
+#define NS_MPL_MODEL 0x200           /* the host load logic's model */
 #define NS_MPW_START 0x00962750      /* game messages: thiscall (screen, 0), RET 4 */
 #define NS_MPW_BACK 0x00962720
 #define NS_MPW_SEND 0x00962890       /* "sendmessage": the chat's edit line sent */
@@ -1066,10 +1069,7 @@ enum {
     /* the logic (host and client) */
     ML_SESSION = 0x10,
     ML_STATUS = 0x18,        /* CMPWaitStatusDemonstrator: its CWaitBox at +0x18 */
-    ML_HOST_ID = 0x34,
-    ML_ROWS = 0x38,          /* vector<IMPWaitItem*>, a row per slot */
     ML_GOT_ID = 0x60,        /* client: byte, its slot heard of */
-    ML_MODEL = 0x74,         /* host only: CPlayersStartInfo */
     ML_ACCEPTING = NS_MPW_ML_ACCEPTING, /* host only: byte, changes taken */
     ML_CAN_START = 0x18,     /* vtable slot */
     /* a row */
@@ -1081,6 +1081,23 @@ enum {
     MR_LOCKS = 0xc4,         /* hash map field -> locked: buckets [+4, +8) */
     MR_NAME = 0xf4,          /* wstr */
 };
+
+/* A loaded LAN game's players (NUI::CMPUbiComLoadScreen, a CMPWaitScreen
+ * opened once a LAN save is chosen): the screen is CMPWaitScreen's, its logic
+ * another class (CMultiplayerHostLoadLogic, CMultiplayerClientLoadLogic) that
+ * keeps the rows lower and the save's settings locked on every row; only who
+ * plays changes. Its model's records are not read. */
+static int g_mp_load;
+#ifndef NS_MPL_ROWS
+#define NS_MPL_ROWS 0x34
+#define NS_MPL_HOST_ID 0x30 /* the local player's id; a client's -1 until the host gives one */
+#endif
+#ifndef NS_MPL_MODEL
+#define NS_MPL_MODEL 0 /* a game without the screen never reads it */
+#endif
+#define ML_HOST_ID (g_mp_load ? NS_MPL_HOST_ID : 0x34)
+#define ML_ROWS (g_mp_load ? NS_MPL_ROWS : 0x38) /* vector<IMPWaitItem*>, a row per slot */
+#define ML_MODEL (g_mp_load ? NS_MPL_MODEL : 0x74) /* host only: CPlayersStartInfo */
 
 /* Where the variant keeps its rows (a vector's begin, end) and its model. */
 static uint32_t rows_of(uint32_t screen) {
@@ -1102,6 +1119,8 @@ static uint32_t wait_row(uint32_t screen, int slot) {
 }
 
 static uint32_t wait_record(uint32_t screen, int slot) {
+    if (g_hs == 3 && g_mp_load)
+        return 0;
     const uint32_t model = model_of(screen);
     return ns_ptr(model) ? rd32(model + M_RECORDS) + (uint32_t)slot * M_RECORD_SIZE : 0;
 }
@@ -1500,7 +1519,9 @@ static int mp_local_slot(Scratch *s, uint32_t screen, int n) {
     const uint32_t logic = rd32(screen + MW_LOGIC);
     if (rd8(screen + MW_HOST)) {
         const uint32_t model = model_of(screen);
-        return ns_ptr(model) ? (int)ns_call(s, NS_MPW_SLOT_OF, model, rd32(logic + ML_HOST_ID), NULL, 0) : -1;
+        const int slot = ns_ptr(model) ? (int)ns_call(s, NS_MPW_SLOT_OF, model, rd32(logic + ML_HOST_ID), NULL, 0) : -1;
+        if (slot >= 0 || !g_mp_load)
+            return slot;
     }
     for (int slot = 0; slot < n; ++slot)
         if (row_lock(wait_row(screen, slot), FIELD_TYPE) == 0)
@@ -1583,10 +1604,17 @@ static const char *mp_busy(Scratch *s, uint32_t screen) {
     const uint32_t status = ns_ptr(logic) ? rd32(logic + ML_STATUS) : 0;
     if (!ns_ptr(status) || !rd32(status + 0x18))
         return NULL;
-    if (rd8(screen + MW_HOST) ? !rd8(logic + ML_ACCEPTING) || rd32(screen + MW_STARTING)
-                              : 0)
+    int starting = rd8(screen + MW_HOST) && rd32(screen + MW_STARTING);
+    if (rd8(screen + MW_HOST) && !g_mp_load)
+        starting |= !rd8(logic + ML_ACCEPTING);
+#ifdef NS_MPL_STARTED
+    if (rd8(screen + MW_HOST) && g_mp_load)
+        starting |= rd8(logic + NS_MPL_STARTED) != 0; /* set once the game starts */
+#endif
+    if (starting)
         return ns_label(s, "/UI/Common/MULTIPLAYER_TEXTS/E_START_GAME_INIT.txt", "Запуск игры", "Starting the game");
-    if (!rd8(screen + MW_HOST) && ns_ptr(rd32(logic + ML_SESSION)) && !rd8(logic + ML_GOT_ID))
+    const int got_id = g_mp_load ? rd32(logic + ML_HOST_ID) != 0xffffffffu : rd8(logic + ML_GOT_ID) != 0;
+    if (!rd8(screen + MW_HOST) && ns_ptr(rd32(logic + ML_SESSION)) && !got_id)
         return ns_label(s, "/UI/Common/MULTIPLAYER_TEXTS/E_GAMEINFO_INIT.txt", "Идет сбор информации об игре...",
                         "Getting the game's information...");
     return ns_label(s, "/UI/Common/MULTIPLAYER_TEXTS/E_COMMON_INIT.txt", "Идет установка...", "Connecting...");
@@ -1845,9 +1873,14 @@ VARIANT(hs_wait_document, 1, wait_document(j, s, screen), Json *j, Scratch *s, u
 VARIANT(mp_create_command, 2, create_command(s, screen, cmd), Scratch *s, uint32_t screen, const char *cmd)
 VARIANT(mp_create_document, 2, create_document(j, s, screen), Json *j, Scratch *s, uint32_t screen)
 #if defined(NS_VT_MPW)
-VARIANT(mp_wait_cmd, 3, mp_wait_command(s, screen, cmd), Scratch *s, uint32_t screen, const char *cmd)
-VARIANT(mp_wait_step, 3, step_wants(s, screen), Scratch *s, uint32_t screen)
-VARIANT(mp_wait_doc, 3, mp_wait_document(j, s, screen), Json *j, Scratch *s, uint32_t screen)
+VARIANT(mp_wait_cmd, 3, (g_mp_load = 0, mp_wait_command(s, screen, cmd)), Scratch *s, uint32_t screen, const char *cmd)
+VARIANT(mp_wait_step, 3, (g_mp_load = 0, step_wants(s, screen)), Scratch *s, uint32_t screen)
+VARIANT(mp_wait_doc, 3, (g_mp_load = 0, mp_wait_document(j, s, screen)), Json *j, Scratch *s, uint32_t screen)
+#endif
+#if defined(NS_VT_MPW) && defined(NS_VT_MPL)
+VARIANT(mp_load_cmd, 3, (g_mp_load = 1, mp_wait_command(s, screen, cmd)), Scratch *s, uint32_t screen, const char *cmd)
+VARIANT(mp_load_step, 3, (g_mp_load = 1, step_wants(s, screen)), Scratch *s, uint32_t screen)
+VARIANT(mp_load_doc, 3, (g_mp_load = 1, mp_wait_document(j, s, screen)), Json *j, Scratch *s, uint32_t screen)
 #endif
 
 const NsScreen ns_custom_create = {.id = "custom_create", .vtable = NS_VT_CREATE, .sub = NS_SUB_CREATE,
@@ -1874,6 +1907,12 @@ const NsScreen ns_mp_wait = {.id = "mp_players", .vtable = NS_VT_MPW, .sub = NS_
 #else
 const NsScreen ns_mp_wait = {.id = "mp_players"};
 #endif
+#if defined(NS_VT_MPW) && defined(NS_VT_MPL)
+const NsScreen ns_mp_load_wait = {.id = "mp_load_players", .vtable = NS_VT_MPL, .sub = NS_SUB_MPL,
+                                  .command = mp_load_cmd, .step = mp_load_step, .document = mp_load_doc};
+#else
+const NsScreen ns_mp_load_wait = {.id = "mp_load_players"};
+#endif
 
 #else
 
@@ -1884,5 +1923,6 @@ const NsScreen ns_hotseat_create = {.id = "hotseat_create"};
 const NsScreen ns_hotseat_wait = {.id = "hotseat_players"};
 const NsScreen ns_mp_create = {.id = "mp_create"};
 const NsScreen ns_mp_wait = {.id = "mp_players"};
+const NsScreen ns_mp_load_wait = {.id = "mp_load_players"};
 
 #endif
