@@ -15,6 +15,7 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <chrono>
 #include <setjmp.h>
 #include "../../platform/os.h"
 static int failures;
@@ -139,18 +140,25 @@ int main(int argc, char **argv) {
         wr32(sp + 4, dst);
         wr32(sp + 8, src);
     };
-    // Caller stays published across all 10,000 generated dispatches; gaps therefore
+    // Caller stays published across all the generated dispatches; gaps therefore
     // count against the >90% requirement instead of disappearing as idle time.
+    // Batches of 10,000 repeat until 150 ms have passed: a fast machine copies
+    // one batch in under 100 ms, fewer samples than the 1000 Hz sampler needs.
     recomp_profile_push(0xfffffffe);
-    for (int i = 0; i < 10000; ++i) {
-        setup();
-        if (i & 1)
-            direct_call(&c);
-        else
-            recomp_call(&c, target);
-    }
+    uint32_t dispatches = 0;
+    const auto start = std::chrono::steady_clock::now();
+    do {
+        for (int i = 0; i < 10000; ++i) {
+            setup();
+            if (i & 1)
+                direct_call(&c);
+            else
+                recomp_call(&c, target);
+        }
+        dispatches += 10000;
+    } while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(150));
     CHECK(memcmp(g_mem + src, g_mem + dst, n) == 0);
-    CHECK(fixture_calls == 10000);
+    CHECK(fixture_calls == dispatches);
     CHECK(recomp_profile_depth() == (enabled ? 1u : 0u));
     if (enabled) {
         auto rows = profile_snapshot();
@@ -160,9 +168,9 @@ int main(int argc, char **argv) {
             if (r.index == index_)
                 hot = r.samples;
         }
-        printf("fixture: 10000 generated dispatches at %08x with a copy hook, "
+        printf("fixture: %u generated dispatches at %08x with a copy hook, "
                "hot=%llu total=%llu share=%.2f%%\n",
-               target, (unsigned long long)hot, (unsigned long long)total,
+               dispatches, target, (unsigned long long)hot, (unsigned long long)total,
                total ? 100.0 * hot / total : 0);
         CHECK(total >= 100);
         CHECK(hot * 100 > total * 90);

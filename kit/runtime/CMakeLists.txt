@@ -181,7 +181,8 @@ if(POP_REAL_GEN AND NOT IOS AND NOT ANDROID)
     string(REGEX REPLACE "^#define FIDX_([0-9a-f]+) 0u$" "\\1"
       PROFILE_TARGET_TOKEN "${PROFILE_FIRST_INDEX}")
     target_compile_definitions(profile_tests PRIVATE RECOMP_PROFILE_TARGET=${PROFILE_TARGET_TOKEN})
-    target_link_libraries(profile_tests PRIVATE recomp_platform recomp_runtime recomp_dx_null)
+    # recomp_mods: a game's native code reads its settings (mods_settings_file_get).
+    target_link_libraries(profile_tests PRIVATE recomp_platform recomp_runtime recomp_dx_null recomp_mods lua)
     target_compile_options(profile_tests PRIVATE ${POP_WARN_HOST})
     pop_optimize(profile_tests 1)
     pop_link_gen(profile_tests)
