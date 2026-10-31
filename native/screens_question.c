@@ -155,7 +155,7 @@ static void question_document(Json *j, Scratch *s, uint32_t box) {
     const Asked *a = asked(box);
     const int yesno = rd8(box + B_YESNO) != 0;
     j_lit(j, "{\"screen\":\"question\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_printf(j, ",\"box\":%u,", box);
     j_kv_str(j, "title", a ? a->title : "");
     j_lit(j, ",");

@@ -588,20 +588,22 @@ static void menu_document(Json *j, Scratch *s, uint32_t screen) {
     const int index = panel(screen);
     char diff[64];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
     static uint32_t captions_for;
     if (captions_for != screen) {
         captions_for = screen;
         g_caption_count = 0;
     }
     j_lit(j, "{\"screen\":\"main_menu\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "panel", panel_name(index));
     j_lit(j, ",");
     j_kv_str(j, "title", panel_title(s, index));
     j_lit(j, ",");
-    j_kv_str(j, "version", ns_tr("Версия: " NS_GAME_VERSION, "Version: " NS_GAME_VERSION));
+    char version[48];
+    snprintf(version, sizeof version, "%s" NS_GAME_VERSION, ns_tr("Версия: ", "Version: "));
+    j_kv_str(j, "version", version);
     int shown = -1;
     if (index == P_MAIN || index == P_SINGLE || index == P_MULTI || index == P_HOT_SEAT)
         shown = j_buttons(j, s, screen, index);
@@ -655,12 +657,12 @@ static void box_command(Scratch *s, uint32_t box, const char *cmd) {
 static void box_document(Json *j, Scratch *s, uint32_t box) {
     char diff[64], text[64] = "";
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
     const uint32_t edit = rd32(box + BOX_EDIT);
     if (ns_ptr(edit))
         ns_wstr_utf8(edit + EDIT_TEXT, text, sizeof text);
     j_lit(j, "{\"screen\":\"profile_name\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_tr("Ввод имени профиля", "Profile name"));
     j_lit(j, ",");

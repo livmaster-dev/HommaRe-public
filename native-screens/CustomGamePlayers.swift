@@ -252,9 +252,10 @@ struct CellLabel: View {
             Text(cell.value)
                 .font(Theme.body(13, weight: .medium))
                 .foregroundStyle(Theme.text)
-                .lineLimit(cell.detail == nil ? 2 : 1)
+                // One word ("Willkürlich") shrinks rather than breaking in two.
+                .lineLimit(cell.detail == nil && cell.value.contains(" ") ? 2 : 1)
                 .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(cell.value.contains(" ") ? 0.7 : 0.55)
             if let detail = cell.detail, !detail.isEmpty {
                 Text(detail)
                     .font(Theme.body(10))

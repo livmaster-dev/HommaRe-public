@@ -267,12 +267,12 @@ static int duel_choice(uint32_t view) {
 static void duel_document(Json *j, Scratch *s, uint32_t screen) {
     char diff[64], text[256];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
     const int turn = turn_of(screen);
     j_lit(j, "{");
     j_kv_str(j, "screen", g_triple ? "duel3" : "duel");
     j_lit(j, ",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", g_triple ? ns_tr("Дуэль 3х3", "Duel 3x3") : ns_tr("Дуэль", "Duel"));
     j_printf(j, ",\"turn\":%d,\"count\":%d,\"players\":[", turn, (int)rd32(screen + D_COUNT));

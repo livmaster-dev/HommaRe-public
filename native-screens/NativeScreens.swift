@@ -102,9 +102,11 @@ final class ScreenStore: ObservableObject {
         if feedback { UISelectionFeedbackGenerator().selectionChanged() }
     }
 
-    /// A word of the views' own, in the game's language (Russian or English).
+    /// A word of the views' own, in the game's language: Russian, English,
+    /// or German, French and Polish from ScreenWords (else English).
     func tr(_ ru: String, _ en: String) -> String {
-        lang.hasPrefix("ru") ? ru : en
+        if lang.hasPrefix("ru") { return ru }
+        return ScreenWords.table[en]?[lang] ?? en
     }
 }
 

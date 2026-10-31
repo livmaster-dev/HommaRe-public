@@ -254,7 +254,7 @@ static const char *picture(uint32_t hdr) {
 static void load_document(Json *j, Scratch *s, uint32_t screen) {
     char diff[64], text[1024];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
     uint32_t b;
     const int n = headers(screen, &b);
     const uint32_t chosen = chosen_header(screen);
@@ -263,7 +263,7 @@ static void load_document(Json *j, Scratch *s, uint32_t screen) {
         j_lit(j, "{\"screen\":\"save_game\",");
     else
         j_lit(j, "{\"screen\":\"load_game\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", g_save ? ns_label(s, "/UI/SaveLoad/SaveSpecific/header.txt", "Сохранить игру", "Save Game")
                                 : ns_label(s, "/UI/SaveLoad/LoadSpecific/header.txt", "Загрузить игру", "Load Game"));

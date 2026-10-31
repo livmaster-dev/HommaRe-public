@@ -246,7 +246,7 @@ static void message(Scratch *s, uint32_t screen, uint32_t fn) {
 static int lang_ru(Scratch *s) {
     char diff[64];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    return ns_ru = (unsigned char)diff[0] >= 0xd0;
+    return ns_set_lang(diff);
 }
 
 /* The game's chat log, the latest lines ("sender: text"). */
@@ -379,7 +379,7 @@ static void lobby_document(Json *j, Scratch *s, uint32_t screen) {
     const int n = ns_ptr(gv) ? list_data(s, rd32(gv + NS_LAN_GV_LIST), NS_LAN_RTTI_GAME_DATA, games, 64) : 0;
     const uint32_t chosen = ns_ptr(gv) ? ns_call(s, NS_LAN_SELECTED, gv, 0, NULL, 0) : 0;
     j_lit(j, "{\"screen\":\"lan_lobby\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", g_duel ? ns_tr("Дуэль: список серверов", "Duel: Server List")
                                 : ns_tr("Стандартный режим: список серверов", "Standard Mode: Server List"));
@@ -567,7 +567,7 @@ static void box_document(Json *j, Scratch *s, uint32_t box) {
         ns_wstr_utf8(edit + NS_LAN_EDIT_TEXT, text, sizeof text);
     const int name = rd32(box + NS_LAN_BOX_ID) == 1;
     j_lit(j, "{\"screen\":\"lan_name\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", name ? ns_tr("Ввод имени", "Your Name") : ns_tr("Ввод пароля", "Password"));
     j_lit(j, ",");
@@ -657,7 +657,7 @@ static void dcreate_document(Json *j, Scratch *s, uint32_t screen) {
     lang_ru(s);
     const int locked = button_on(s, rd32(screen + NS_LAN_DC_LOCKED));
     j_lit(j, "{\"screen\":\"form\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_tr("Создание игры", "New Game"));
     j_lit(j, ",\"fields\":[");

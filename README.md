@@ -74,8 +74,8 @@ battery when nothing moves.
   ten languages of GOG's installers (English, Russian, Czech, German, Spanish, French,
   Italian, Hungarian, Polish and Simplified Chinese) and stands upright on an iPhone.
 - **Downloads from your GOG.com library, on every device.** Sign in to GOG in the
-  launcher and it downloads the games you own, English or Russian, checks every file's
-  SHA-256 and resumes a stopped download. No installer files and no Files app needed.
+  launcher and it downloads the games you own, in English, Russian, German, French or
+  Polish, checks every file's SHA-256 and resumes a stopped download. No installer files and no Files app needed.
 - **Installs from your GOG installers, on every device.** Give the launcher GOG's offline
   installer: the `.exe`, the `.bin`, the folder they are in, or several at once; on a Mac
   you can also drop them onto the window. It unpacks only what the game needs, checks
@@ -287,9 +287,9 @@ You install the game from your own GOG copy, and every file is checked.
 
 **Which version do I need?** The GOG releases: *Heroes of Might and Magic V* 2.1 (which
 contains the original game 1.60 and Hammers of Fate 2.1) and *Tribes of the East* 3.1,
-in Russian or English. The launcher checks each game's executable by its SHA-256 and says
-if it doesn't match. GOG's other languages, disc versions and other stores haven't been
-tested.
+in English, Russian, German, French or Polish. The launcher checks each game's executable
+by its SHA-256 and says if it doesn't match. GOG's other languages, disc versions and other
+stores haven't been tested.
 
 **Is this an emulator? Does it use Wine?** No. It's a static recompilation: the game's
 x86 code was translated ahead of time into C and compiled for arm64. A runtime written for
@@ -364,8 +364,8 @@ or peer, stay on a local network or a VPN with people you know.
 
 ## What's next
 
-- GOG's other languages (German, French, Polish and more): their installers are needed to
-  check the files.
+- GOG's other languages (Czech, Spanish, Italian, Hungarian and Chinese): their installers
+  are needed to check the files.
 - iCloud saves sync
 
 There are no dates and no promises: it's ready when it's ready.
