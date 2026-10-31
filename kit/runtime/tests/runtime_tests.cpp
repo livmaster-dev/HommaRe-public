@@ -7045,6 +7045,60 @@ static void test_host_sockets(X86 *c) {
         heap_free(a);
 }
 
+// What an import shim sees as the host's rounding mode (x86.h, SSE rounding control).
+static unsigned g_rc_in_shim = 99;
+static bool observe_rc(const char *, const uint32_t *, uint32_t, uint32_t *) {
+    g_rc_in_shim = recomp_host_rc();
+    return true;
+}
+
+// Heroes V's _control87(0xa031f, ~0): round toward zero, 24-bit x87 precision,
+// every exception masked. The UCRT sets MXCSR from it as well as the x87
+// control word, and the game parses and checksums its database with SSE
+// arithmetic in that mode; shims still run to nearest.
+static void test_sse_rounding_control(X86 *c) {
+    printf("SSE rounding control\n");
+#define RT_DLL "api-ms-win-crt-runtime-l1-1-0.dll"
+    const uint32_t mxcsr = c->mxcsr;
+    const uint16_t cw = c->fpu_cw;
+    check(recomp_host_rc() == 0, "the host rounds to nearest before the guest asks otherwise");
+    c->mxcsr = RECOMP_MXCSR_DEFAULT;
+    call_import(c, RT_DLL, "_control87", {0xa031f, 0xffffffffu});
+    check(c->mxcsr == 0x7f80u, "_control87(0xa031f) sets MXCSR %#x (want 0x7f80)", c->mxcsr);
+    check(c->fpu_cw == 0x0c7f, "and the x87 control word %#x (want 0x0c7f)", c->fpu_cw);
+    check(recomp_host_rc() == 3, "translated code after it rounds toward zero (host mode %u)",
+          recomp_host_rc());
+    {
+        volatile float a = 0.1f, b = 3.0f;
+        check(a * b == 0x1.333332p-2f, "0.1f * 3 truncates to 0x3e999999");
+    }
+    ImportCallObserver before = imports_set_call_observer_get();
+    imports_set_call_observer(observe_rc);
+    const uint32_t q = call_import(c, RT_DLL, "_control87", {0, 0});
+    imports_set_call_observer(before);
+    check(g_rc_in_shim == 0, "a shim runs to nearest while the guest truncates (saw %u)",
+          g_rc_in_shim);
+    check(recomp_host_rc() == 3 && (q & 0x300u) == 0x300u,
+          "and the guest's mode is back after it (host %u, _control87 %#x)", recomp_host_rc(), q);
+    uint32_t out = heap_alloc(4, true);
+    call_import(c, RT_DLL, "_controlfp_s", {out, 0, 0x300});
+    check(c->mxcsr == 0x1f80u && recomp_host_rc() == 0,
+          "_controlfp_s(_RC_NEAR) puts MXCSR back to %#x, host mode %u", c->mxcsr,
+          recomp_host_rc());
+    heap_free(out);
+    // An LDMXCSR the guest runs itself, and the longjmp rule: Windows' longjmp
+    // restores no floating-point control.
+    recomp_set_mxcsr(c, 0x3f80u);
+    check(recomp_host_rc() == 1, "LDMXCSR rounding down is in force at once");
+    recomp_fp_host();
+    recomp_fp_guest(c);
+    check(recomp_host_rc() == 1, "and comes back on re-entering guest code");
+    recomp_set_mxcsr(c, mxcsr);
+    c->fpu_cw = cw;
+    recomp_fp_host();
+#undef RT_DLL
+}
+
 static void test_legacy_dlls(X86 *c) {
     printf("legacy DLLs\n");
     const uint32_t n = 4096;
@@ -7295,6 +7349,7 @@ int main(int argc, char **argv) {
     test_registry(c);
     test_import_coverage(c);
     test_legacy_dlls(c);
+    test_sse_rounding_control(c);
     test_rejected_import_decorations();
     test_queued_input_wakes_a_blocked_wait(c);
     // Last: it retires the main thread.

@@ -3289,12 +3289,14 @@ class Translator(object):
         if m == "CWDE":
             return ["c->r[0] = (uint32_t)(int32_t)(int16_t)c->r[0];"]
         if m in ("LDMXCSR", "STMXCSR"):
-            # The SSE control word. This kit models one rounding mode and
-            # masks every exception, which is what a guest sets it to; a store
-            # hands back exactly that.
+            # The SSE control word. Its rounding field is the host's rounding
+            # mode while translated code runs (x86.h, recomp_fp_guest), so a
+            # load takes effect at once; exceptions stay masked and the status
+            # flags are not accumulated, so a store hands back the control
+            # bits as last set.
             if m == "STMXCSR":
-                return [write_op(ops[0], 32, "0x1f80u")]
-            return [";"]
+                return [write_op(ops[0], 32, "c->mxcsr")]
+            return ["recomp_set_mxcsr(c, %s);" % read_op(ops[0], 32)]
 
         # ------------------------------------------------------- arith ----
         if m in ("ADD", "ADC", "SUB", "SBB", "CMP"):
@@ -3550,8 +3552,8 @@ class Translator(object):
             return self.emit_mmx(ins, m)
         # Two singles to two dwords in an MMn register: the conversions behind
         # Heroes V's SSE vertex path (0068f758), which the game takes once CPUID
-        # reports SSE. CVTPS2PI rounds as MXCSR says - always the default
-        # round-to-nearest-even here, LDMXCSR being a trap - and CVTTPS2PI
+        # reports SSE. CVTPS2PI rounds as MXCSR says - the host's mode while
+        # translated code runs (x86.h, recomp_fp_guest) - and CVTTPS2PI
         # truncates; either gives 0x80000000 for a NaN or a value out of range.
         if m in ("CVTPS2PI", "CVTTPS2PI"):
             dst, src = ops[0], ops[1]
@@ -3928,8 +3930,10 @@ class Translator(object):
             # Codecs call a bare `emms; ret` whatever CPUID said.
             return ["c->fpu_tag = 0xffffu;"]
         if m == "STMXCSR":
-            # No translated SSE arithmetic changes MXCSR, so expose its reset value.
-            return ["wr32(%s, 0x1f80u);" % addr_expr(ops[0])]
+            # The control bits as last set (see the LDMXCSR case above).
+            return ["wr32(%s, c->mxcsr);" % addr_expr(ops[0])]
+        if m == "LDMXCSR":
+            return ["recomp_set_mxcsr(c, rd32(%s));" % addr_expr(ops[0])]
         if m in ("FNCLEX", "FCLEX"):
             return ["c->fpu_sw &= (uint16_t)~0x80ffu;"]
 

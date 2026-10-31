@@ -51,6 +51,7 @@ EFLAGS_COMPARED = 0x0CC5   # CF PF ZF SF DF OF
 EFLAGS_MISC_INIT = 0x202
 FPU_CW_INIT = 0x037F
 FPU_TAG_INIT = 0xFFFF
+MXCSR_INIT = 0x1F80
 CS_SELECTOR = 0x1B          # the flat user-mode code selector Windows hands a process
 
 UC_REGS = [UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EBX,
@@ -73,6 +74,7 @@ class X86(C.Structure):
         ("xmm", (C.c_uint32 * 4) * 8),
         ("mm", C.c_uint64 * 8),
         ("ret_expect", C.c_uint32),
+        ("mxcsr", C.c_uint32),
     ]
 
 
@@ -238,6 +240,19 @@ def fbstp_setup(rng):
             "mem": [(SCRATCH + 0x210, struct.pack("<i", value))]}
 
 
+def mxcsr_rounding_setup(rng):
+    """Operands whose results are inexact, so that the rounding mode decides
+    the last bit, and an MXCSR with a random rounding field to run them in."""
+    def single():
+        return struct.unpack("<f", struct.pack("<f", rng.uniform(-1e3, 1e3)))[0]
+    mxcsr = 0x1F80 | (rng.randrange(4) << 13)
+    return {"regs": dict(rand_regs(rng), ESI=SCRATCH + 0x300, EDI=SCRATCH + 0x100,
+                         EDX=rng.randrange(0x1000001, 0x7FFFFFFF) * rng.choice([1, -1]) & 0xFFFFFFFF),
+            "mem": [(SCRATCH + 0x300, struct.pack("<fff4xIIdd", single(), single(), single() / 3e5,
+                                                  mxcsr, MXCSR_INIT, rng.uniform(-1e6, 1e6),
+                                                  rng.choice([3.0, 7.0, -11.0, rng.uniform(1.0, 1e3)])))]}
+
+
 def sse_scalar_setup(rng):
     """Two doubles worth dividing and comparing, and an integer to convert.
     The second is never zero, and both are plain values: this checks the
@@ -366,7 +381,7 @@ CASES = [
          sse_scalar_setup),
     # A conversion's other operand is as often memory or a general register
     # as it is an XMM one, CWDE turns up in the same runtimes, and a guest
-    # that reads MXCSR gets the one rounding mode this kit models.
+    # that reads MXCSR before setting it gets the reset value.
     Case("SSE conversions through memory, CWDE and MXCSR", 0x0D02F000 + 0x600,
          [(0, "CVTTSD2SI EAX,qword ptr [ESI]"),
           (4, "MOV dword ptr [EDI],EAX"),
@@ -570,6 +585,33 @@ CASES = [
     Case("STMXCSR stores the default MXCSR", 0x0D023000,
          [(0x0, "STMXCSR dword ptr [ECX]"), (0x3, "RET")],
          "0F AE 19  C3", lambda rng: {"regs": rand_regs(rng, ECX=SCRATCH + 0x80)}),
+    # MXCSR's rounding field decides the last bit of SSE arithmetic and of the
+    # rounding conversions: Heroes V parses its game database in round toward
+    # zero (its _control87 sets MXCSR), and checksums what it parsed. LDMXCSR
+    # loads a random mode, STMXCSR reads it back, the default goes back at the
+    # end (the harness runs in this process).
+    Case("LDMXCSR's rounding mode rounds SSE arithmetic and conversions", 0x0D02FE00,
+         [(0x00, "LDMXCSR dword ptr [ESI + 0x10]"),
+          (0x04, "STMXCSR dword ptr [EDI + 0x18]"),
+          (0x08, "MOVSS XMM0,dword ptr [ESI]"),
+          (0x0c, "MULSS XMM0,dword ptr [ESI + 0x4]"),
+          (0x11, "MOVSS dword ptr [EDI],XMM0"),
+          (0x15, "MOVSS XMM1,dword ptr [ESI]"),
+          (0x19, "ADDSS XMM1,dword ptr [ESI + 0x8]"),
+          (0x1e, "MOVSS dword ptr [EDI + 0x4],XMM1"),
+          (0x23, "MOVSD XMM2,qword ptr [ESI + 0x18]"),
+          (0x28, "CVTSD2SS XMM3,XMM2"),
+          (0x2c, "MOVSS dword ptr [EDI + 0x8],XMM3"),
+          (0x31, "DIVSD XMM2,qword ptr [ESI + 0x20]"),
+          (0x36, "MOVSD qword ptr [EDI + 0x10],XMM2"),
+          (0x3b, "CVTSI2SS XMM4,EDX"),
+          (0x3f, "MOVSS dword ptr [EDI + 0xc],XMM4"),
+          (0x44, "LDMXCSR dword ptr [ESI + 0x14]"),
+          (0x48, "RET")],
+         "0f ae 56 10 0f ae 5f 18 f3 0f 10 06 f3 0f 59 46 04 f3 0f 11 07 f3 0f 10 0e "
+         "f3 0f 58 4e 08 f3 0f 11 4f 04 f2 0f 10 56 18 f2 0f 5a da f3 0f 11 5f 08 "
+         "f2 0f 5e 56 20 f2 0f 11 57 10 f3 0f 2a e2 f3 0f 11 67 0c 0f ae 56 14 c3",
+         mxcsr_rounding_setup),
     Case("FLDLN2 and FLDL2E push the x87 constants", 0x0D024000,
          [(0x0, "FLDLN2"), (0x2, "FLDL2E"), (0x4, "FSTP double ptr [ECX]"),
           (0x6, "FSTP double ptr [ECX + 0x8]"), (0x9, "RET")],
@@ -973,7 +1015,7 @@ class Emu(object):
         self.u.mem_write(SCRATCH, b"\0" * SCRATCH_SIZE)
         self.u.mem_write(case.addr, case.code)
         self.u.reg_write(UC_X86_REG_FPCW, FPU_CW_INIT)
-        self.u.reg_write(UC_X86_REG_MXCSR, 0x1f80)
+        self.u.reg_write(UC_X86_REG_MXCSR, MXCSR_INIT)
         self.u.reg_write(UC_X86_REG_FPSW, 0)
         self.u.reg_write(UC_X86_REG_FPTAG, FPU_TAG_INIT)
         self.u.reg_write(UC_X86_REG_EFLAGS, EFLAGS_MISC_INIT)
@@ -1003,6 +1045,7 @@ def run_once(case, native, emu, rng):
     c.eflags_misc = EFLAGS_MISC_INIT
     c.fpu_cw = FPU_CW_INIT
     c.fpu_tag = FPU_TAG_INIT
+    c.mxcsr = MXCSR_INIT
 
     emu.u.emu_start(case.addr, MAGIC_RET, timeout=2 * 1000 * 1000, count=100000)
     native.lib.harness_run(case.addr, C.byref(c))

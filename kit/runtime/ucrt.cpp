@@ -244,12 +244,31 @@ uint16_t cw_from_abstract(uint32_t a, uint16_t cw) {
     cw |= (uint16_t)((pc == 0 ? 3 : pc == 0x10000 ? 2 : 0) << 8);
     return cw;
 }
+// The same abstract word as MXCSR's exception masks (bits 7-12) and rounding
+// field (bits 13-14); precision control has no SSE counterpart, and denormal
+// control (_MCW_DN) is not modelled.
+uint32_t mxcsr_from_abstract(uint32_t a, uint32_t mxcsr) {
+    mxcsr &= ~0x7f80u;
+    if (a & 0x10) mxcsr |= 0x0080;    // _EM_INVALID: IM
+    if (a & 0x80000) mxcsr |= 0x0100; // _EM_DENORMAL: DM
+    if (a & 0x08) mxcsr |= 0x0200;    // _EM_ZERODIVIDE: ZM
+    if (a & 0x04) mxcsr |= 0x0400;    // _EM_OVERFLOW: OM
+    if (a & 0x02) mxcsr |= 0x0800;    // _EM_UNDERFLOW: UM
+    if (a & 0x01) mxcsr |= 0x1000;    // _EM_INEXACT: PM
+    mxcsr |= ((a >> 8) & 3u) << 13;   // _MCW_RC: same order as RC
+    return mxcsr;
+}
+// On x86 the UCRT's _control87 and _controlfp_s set the SSE2 control word as
+// well as the x87 one (Heroes V's _control87(0xa031f, ~0) rounds its SSE
+// arithmetic toward zero), so both change here. The new MXCSR takes effect
+// when the shim returns to translated code (imports_dispatch).
 uint32_t control87(X86 *c, uint32_t value, uint32_t mask) {
     mask &= 0x000b031fu | 0x80000u | 0x30000u;
     uint32_t cur = abstract_from_cw(c->fpu_cw);
     if (mask) {
         cur = (cur & ~mask) | (value & mask);
         c->fpu_cw = cw_from_abstract(cur, c->fpu_cw);
+        c->mxcsr = mxcsr_from_abstract(cur, c->mxcsr);
     }
     return abstract_from_cw(c->fpu_cw);
 }

@@ -48,6 +48,27 @@
   none, and the host takes a modifier's state from an event's `mod`, so a
   touch-held Shift (or a pad button bound to one) never reached the game.
 
+## SSE arithmetic in the guest's rounding mode
+
+- `X86.mxcsr` holds the guest's MXCSR. The CRT's `_control87`/`_controlfp_s`
+  set it along with the x87 control word, as the UCRT does on x86, and
+  `LDMXCSR`/`STMXCSR` load and read it (STMXCSR returned a constant 0x1f80).
+- Its rounding field is the host's rounding mode (MXCSR on x86-64, FPCR on
+  AArch64, `fesetround` elsewhere) while translated code runs, so SSE
+  arithmetic and conversions round the way the guest asked; host code still
+  runs to nearest. `imports_dispatch` switches around each shim, `guest_call`
+  and the landings of a guest longjmp or SEH unwind switch back; a new thread
+  starts at 0x1f80. No cost while the guest rounds to nearest.
+- Heroes V (all three games) calls `_control87(0xa031f, ~0)` - round toward
+  zero - and parses its game database with SSE arithmetic, then checksums the
+  result for multiplayer: rounding to nearest made "0.05" 0x3d4cccce instead of
+  0x3d4ccccc, so the game database checksum differed from the original game's
+  and an original host refused HommaRe ("Client Game Database checksum does not
+  match Host Game Database checksum"). The game's simulation computes in that
+  mode too.
+- FST to a float rounds per the x87 RC whatever the host's mode (it assumed
+  nearest), and FBSTP works out nearest-even itself.
+
 ## Sockets on every platform
 
 - `runtime/winsock.cpp` runs on the platform layer's sockets: `platform/os.h`

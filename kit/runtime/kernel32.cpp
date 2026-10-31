@@ -3609,6 +3609,7 @@ bool thread_prepare_context(GuestThread *t) {
     t->ctx.fpu_sw = 0;
     t->ctx.fpu_tag = 0xffff;
     t->ctx.fpu_top = 0;
+    t->ctx.mxcsr = RECOMP_MXCSR_DEFAULT; // a new thread's, whatever its creator's
     t->ctx.eflags_misc = 0x00000202u;
     t->ctx.fs_base = t->teb;
     wr32(t->teb + 0x00, 0xffffffffu); // SEH chain head: empty
@@ -3653,6 +3654,7 @@ void run_thread_body(X86 *c, uint32_t h) {
     // frame stays live across an ExitThread longjmp, so it survives intact.
     X86 caller_ctx = *c;
     const uint32_t profile_depth = recomp_profile_depth();
+    c->mxcsr = RECOMP_MXCSR_DEFAULT; // a new thread's, whatever its creator's
     if (setjmp(g_sync_thread_jmp) == 0) {
         uint32_t result = guest_call(c, start, param);
         if (HObj *t = handle_get(h, H_THREAD))
@@ -3660,6 +3662,7 @@ void run_thread_body(X86 *c, uint32_t h) {
     }
     recomp_profile_truncate(profile_depth);
     *c = caller_ctx;
+    recomp_fp_host();          // back in the CreateThread shim, however the body ended
     recomp_seh_frame_leave(c); // retire checkpoints from a synchronous guest worker
     g_in_sync_thread = saved_in;
     g_sync_thread_handle = saved_handle;

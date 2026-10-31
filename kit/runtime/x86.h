@@ -19,6 +19,10 @@
 #include <limits.h>
 #include <string.h>
 #include <math.h>
+#include <fenv.h>
+#if defined(__x86_64__) || defined(_M_X64)
+#include <xmmintrin.h>
+#endif
 #ifndef M_LN2 /* glibc and MSVC hide the M_ constants without feature macros */
 #define M_LN2 0.693147180559945309417
 #endif
@@ -362,7 +366,12 @@ static inline void wrf80(uint32_t a, double v) {
 static inline void wrbcd80(uint32_t a, double v) {
     uint8_t out[10];
     memset(out, 0, sizeof out);
-    double r = nearbyint(v);
+    /* Nearest even worked out here, not nearbyint: the host may be rounding
+     * in the guest's MXCSR mode (recomp_fp_guest). Exact below 2^52, and
+     * above it v is already whole. */
+    double r = floor(v), d = v - r;
+    if (d > 0.5 || (d == 0.5 && fmod(r, 2.0) != 0.0))
+        r += 1.0;
     if (!(fabs(r) < 1e18)) {
         static const uint8_t indefinite[10] = {0, 0, 0, 0, 0, 0, 0, 0xc0, 0xff, 0xff};
         memcpy(g_mem + a, indefinite, 10);
@@ -431,8 +440,123 @@ struct X86 {
      * recomp_return's continuation lookup gives, since only CALL
      * continuations are ever stored here, without the lookup on every RET. */
     uint32_t ret_expect;
+    /* MXCSR: the SSE control and status word. Its rounding-control field
+     * (bits 13-14) is what the host FPU rounds with while this thread's
+     * translated code runs (recomp_fp_guest below). Initialise to 0x1f80, the
+     * value Windows starts every thread with. */
+    uint32_t mxcsr;
 };
 typedef struct X86 X86;
+
+/* ------------------------------------------------- SSE rounding control --
+ *
+ * The translator spells SSE arithmetic as C float and double arithmetic
+ * (ADDSS is `a + b`), and conversions as C conversions, so they round the way
+ * the HOST FPU is set to. On Windows they round the way MXCSR says, and a
+ * guest can change that: Heroes V's WinMain, and its multiplayer turn code
+ * before every segment, call _control87(0xa031f, ~0) - round toward zero,
+ * which the UCRT applies to MXCSR as well as to the x87 control word. The
+ * game database it loads parses every number with SSE arithmetic (0060f850 in
+ * Hammers of Fate) and checksums the result, so "0.05" must become 0x3d4ccccc,
+ * not the round-to-nearest 0x3d4cccce, or a multiplayer room refuses a copy
+ * that parsed the other way; and the game's own simulation computes in that
+ * mode on every machine in the room.
+ *
+ * So the host's rounding mode follows the guest's MXCSR while translated code
+ * runs, and is round-to-nearest while host code runs: imports_dispatch
+ * switches to nearest around every shim and back after it, guest_call and the
+ * landings of a guest longjmp or an SEH unwind switch to the guest's mode.
+ * The cost is nothing while the guest rounds to nearest (the default) and a
+ * write of the host control register on each side of an import call while it
+ * does not. x87 arithmetic, computed in host doubles (fx87), follows the same
+ * mode: the CRT's _control87 keeps the two control words' rounding fields
+ * equal, and the x87-only rounding (FIST, FST to a float, FRNDINT) reads
+ * fpu_cw explicitly. A host without a rounding mode (WebAssembly) stays at
+ * nearest.
+ *
+ * The rounding field is in the x86 encoding throughout: 0 nearest, 1 down
+ * (toward -inf), 2 up (toward +inf), 3 toward zero. */
+#define RECOMP_MXCSR_DEFAULT 0x1f80u
+
+static inline unsigned recomp_host_rc(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+    return (_mm_getcsr() >> 13) & 3u;
+#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    /* FPCR.RMode (bits 22-23): 0 nearest, 1 toward +inf, 2 toward -inf, 3 zero. */
+    uint64_t fpcr;
+    __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+    static const unsigned from_arm[4] = {0u, 2u, 1u, 3u};
+    return from_arm[(fpcr >> 22) & 3u];
+#else
+    switch (fegetround()) {
+#ifdef FE_DOWNWARD
+    case FE_DOWNWARD:
+        return 1u;
+#endif
+#ifdef FE_UPWARD
+    case FE_UPWARD:
+        return 2u;
+#endif
+#ifdef FE_TOWARDZERO
+    case FE_TOWARDZERO:
+        return 3u;
+#endif
+    default:
+        return 0u;
+    }
+#endif
+}
+
+static inline void recomp_host_set_rc(unsigned rc) {
+    rc &= 3u;
+#if defined(__x86_64__) || defined(_M_X64)
+    /* MXCSR alone: x86-64 host code does its float and double arithmetic in
+     * SSE, and the kit uses no long double. */
+    _mm_setcsr((_mm_getcsr() & ~0x6000u) | (rc << 13));
+#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    static const uint64_t to_arm[4] = {0u, 2u, 1u, 3u};
+    uint64_t fpcr;
+    __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+    fpcr = (fpcr & ~(3ull << 22)) | (to_arm[rc] << 22);
+    __asm__ __volatile__("msr fpcr, %0" : : "r"(fpcr) : "memory");
+#else
+    int mode = FE_TONEAREST;
+#ifdef FE_DOWNWARD
+    if (rc == 1u)
+        mode = FE_DOWNWARD;
+#endif
+#ifdef FE_UPWARD
+    if (rc == 2u)
+        mode = FE_UPWARD;
+#endif
+#ifdef FE_TOWARDZERO
+    if (rc == 3u)
+        mode = FE_TOWARDZERO;
+#endif
+    fesetround(mode);
+#endif
+}
+
+/* Entering translated code on this host thread: round as the guest asked. */
+static inline void recomp_fp_guest(const X86 *c) {
+    const unsigned rc = (c->mxcsr >> 13) & 3u;
+    if (recomp_host_rc() != rc)
+        recomp_host_set_rc(rc);
+}
+
+/* Entering host code from translated code: round to nearest. */
+static inline void recomp_fp_host(void) {
+    if (recomp_host_rc() != 0u)
+        recomp_host_set_rc(0u);
+}
+
+/* LDMXCSR: a new MXCSR, in force for the translated code that follows. (A
+ * shim that changes c->mxcsr - _control87 - leaves the switch to
+ * imports_dispatch, which makes it on the way back to the guest.) */
+static inline void recomp_set_mxcsr(X86 *c, uint32_t value) {
+    c->mxcsr = value & 0xffffu;
+    recomp_fp_guest(c);
+}
 
 /* ----------------------------------------------------------------- SSE */
 
@@ -492,9 +616,9 @@ static inline int32_t recomp_sse_cvtt_i32(float v) {
         return INT32_MIN;
     return (int32_t)v;
 }
-/* CVTPS2PI's rounding conversion under the default MXCSR (nearest, ties to
- * even; LDMXCSR is never modelled, so the mode cannot change). The same
- * indefinite result as above outside int32. */
+/* CVTPS2PI's rounding conversion, in MXCSR's rounding mode: nearbyintf rounds
+ * as the host is set, which is the guest's mode while translated code runs
+ * (recomp_fp_guest). The same indefinite result as above outside int32. */
 static inline int32_t recomp_sse_cvt_i32(float v) {
     if (!(v >= -2147483648.0f && v < 2147483648.0f))
         return INT32_MIN;
@@ -1456,7 +1580,9 @@ RECOMP_HOT_INLINE double fx87_exact(X86 *c, double r) {
 /* An x87 result from one of the basic arithmetic instructions, which do
  * observe the precision-control field.  PC=00 rounds to single; PC=10
  * (53-bit) and PC=11 (64-bit) both land on the double we store, 64-bit
- * approximated by 53 per the plan ruling. */
+ * approximated by 53 per the plan ruling.  Both roundings are the host's,
+ * in the guest's mode (see x87_set_cw); in a directed mode the two steps
+ * compose exactly. */
 RECOMP_HOT_INLINE double fx87(X86 *c, double r) {
     if (r != r) {
         c->fpu_sw |= 0x0001u;
@@ -1586,11 +1712,13 @@ static inline double fround_cw(const X86 *c, double v) {
     }
 }
 
-/* FLDCW.  Nothing outside fpu_cw has to change: rounding reads the field
- * directly.  Arithmetic and float stores are the one place the host's own
- * nearest-even rounding is used for the significand, which is exact whenever
- * RC = 00; this binary only ever leaves RC = 00 across the CRT's ftol, whose
- * window between the two FLDCWs contains a single FISTP and no arithmetic. */
+/* FLDCW.  Nothing outside fpu_cw has to change: the x87-only rounding (FIST,
+ * FRNDINT, FST to a float) reads the field directly.  Arithmetic is the one
+ * place the host's own rounding is used for the significand, and the host
+ * rounds as MXCSR says (recomp_fp_guest): the same mode whenever the guest set
+ * it through the CRT, whose _control87 writes both control words.  A guest
+ * that changes RC with FLDCW alone does so around the CRT's ftol, whose window
+ * between the two FLDCWs holds a single FISTP and no arithmetic. */
 static inline void x87_set_cw(X86 *c, uint16_t cw) {
     c->fpu_cw = cw;
 }
@@ -1664,22 +1792,37 @@ static inline void x87_frstor(X86 *c, uint32_t a) {
     c->fpu_tag = rd16(a + 8);
 }
 
-/* FST/FSTP to a float, rounded per RC.  The host conversion rounds to
- * nearest; for the directed modes, step one ULP if it went the wrong way. */
+/* FST/FSTP to a float, rounded per the x87 control word's RC. The host
+ * conversion rounds in the host's mode, which follows MXCSR rather than the
+ * x87 control word (recomp_fp_guest), so it only brackets the value: the two
+ * floats either side of it are found from it, and RC picks one. */
 static inline float fto_float(const X86 *c, double v) {
-    unsigned rc = (c->fpu_cw >> 10) & 3u;
-    float f = (float)v;
-    double back;
-    if (rc == 0 || v != v || isinf(v) || (double)f == v)
+    const unsigned rc = (c->fpu_cw >> 10) & 3u;
+    const float f = (float)v;
+    float lo, hi;
+    double dl, dh;
+    uint32_t bits;
+    if (v != v || isinf(v) || (double)f == v)
         return f;
-    back = (double)f;
-    if (rc == 1 && back > v)
-        return nextafterf(f, -(float)INFINITY); /* down */
-    if (rc == 2 && back < v)
-        return nextafterf(f, (float)INFINITY); /* up */
-    if (rc == 3 && ((v > 0 && back > v) || (v < 0 && back < v)))
-        return nextafterf(f, 0.0f); /* truncate */
-    return f;
+    /* lo < v < hi, adjacent; FLT_MAX and infinity count as adjacent. */
+    lo = (double)f < v ? f : nextafterf(f, -(float)INFINITY);
+    hi = (double)f > v ? f : nextafterf(f, (float)INFINITY);
+    if (rc == 1)
+        return lo; /* down */
+    if (rc == 2)
+        return hi; /* up */
+    if (rc == 3)
+        return v > 0 ? lo : hi; /* truncate */
+    /* Nearest, ties to even. Past FLT_MAX the tie is 2^128 - 2^103, and goes
+     * to infinity (FLT_MAX is odd). */
+    if (isinf(lo) || isinf(hi))
+        return fabs(v) >= 0x1.ffffffp+127 ? (v > 0 ? hi : lo) : (v > 0 ? lo : hi);
+    dl = v - (double)lo; /* exact: lo and hi are within a factor of two of v */
+    dh = (double)hi - v;
+    if (dl != dh)
+        return dl < dh ? lo : hi;
+    memcpy(&bits, &lo, 4);
+    return (bits & 1u) ? hi : lo;
 }
 
 /* FIST/FISTP: round per the control word, and store the "integer indefinite"
