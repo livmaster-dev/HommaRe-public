@@ -175,3 +175,16 @@ void homm5_gs_login(X86 *c);
 #define FN_00419c20 homm5_gs_login
 void homm5_gs_login_result(X86 *c);
 #define FN_00e0e500 homm5_gs_login_result
+
+/* 0064e160 (the battle's pick under the cursor), 0064e770 (the action for
+ * it), 0064c360 (its left button release) and 0070d860 (the grid cells'
+ * states): the base game's 0074de10, 0074e470, 0074bf70 and 0080bac0 for
+ * native/tap_attack.c. */
+void homm5_tap_pick(X86 *c);
+#define FN_0064e160 homm5_tap_pick
+void homm5_tap_action(X86 *c);
+#define FN_0064e770 homm5_tap_action
+void homm5_tap_click(X86 *c);
+#define FN_0064c360 homm5_tap_click
+void homm5_tap_grid(X86 *c);
+#define FN_0070d860 homm5_tap_grid

@@ -20,6 +20,16 @@ endif()
 # The pages the host draws over the game, in the kit's Open Sans.
 list(APPEND POP_RUNTIME_SOURCES gdi32_canvas.cpp)
 find_package(ZLIB REQUIRED)
+# An Apple SDK's zlib.h is in the SDK's own usr/include, which the compiler
+# searches anyway. Named again (the Xcode generator passes it as -isystem) it
+# comes before libc++'s headers, which Xcode 27.2's libc++ refuses.
+if(APPLE)
+  get_target_property(POP_ZLIB_INCLUDES ZLIB::ZLIB INTERFACE_INCLUDE_DIRECTORIES)
+  if(POP_ZLIB_INCLUDES)
+    list(FILTER POP_ZLIB_INCLUDES EXCLUDE REGEX "\\.sdk/usr/include/?$")
+    set_target_properties(ZLIB::ZLIB PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${POP_ZLIB_INCLUDES}")
+  endif()
+endif()
 
 # The faces the runtime's GDI draws Windows' own UI fonts with
 # (third_party/fonts/opensans/README.md), embedded as byte arrays.
