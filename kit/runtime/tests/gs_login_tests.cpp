@@ -3,8 +3,8 @@
 // verifier and response against vectors shared with the Go server
 // (computed independently with Python's hashlib), servers.ini's ServerID and
 // LoginNonce, the address fallback, case-insensitive names, and the session:
-// plain token, registration, response, a used nonce, a refused response and
-// the registration file.
+// plain token, registration, response, a used nonce, a mistyped password, a
+// refused response and the registration file.
 //
 // Run from the repository root:
 //   .venv/bin/python tools/test.py --compile-only && build/recomp/gs_login_tests
@@ -179,6 +179,84 @@ static std::string send(const char *name, const char *password) {
     return out;
 }
 
+// The response a password makes to a nonce.
+static std::string answer(const char *password, const std::string &server_id, const char *name,
+                          const char *nonce) {
+    uint8_t v[32];
+    gs_login::verifier(gs_login::token(password, server_id, name), v);
+    return gs_login::response(v, nonce);
+}
+
+// A name registered here, then a password other than its own: a response,
+// which the server refuses, never a registration or another line. Starts
+// with Alice's "secret" on kVectors[0]'s server as the file's only line.
+static void test_mistyped(const std::string &path) {
+    section("a mistyped password");
+    const Vector &v0 = kVectors[0];
+    auto only_alice = [&](const char *password) {
+        const auto records = gs_login::load_records(path);
+        return records.size() == 1 && records[0].server_id == v0.server_id &&
+               records[0].name == "alice" &&
+               records[0].fp ==
+                   gs_login::fingerprint(gs_login::token(password, v0.server_id, "Alice"));
+    };
+    gs_login::set_server(v0.server_id, "1111111111111111");
+    check(send("Alice", "secreT") == answer("secreT", v0.server_id, "Alice", "1111111111111111"),
+          "the name has a line here, another password: the response from the typed one, "
+          "not a registration");
+    recomp_gs_login_result(0);
+    check(only_alice("secret"), "refused: no line added, the registered one kept");
+    check(send("ALICE", "secrte") == answer("secrte", v0.server_id, "ALICE", "1111111111111111"),
+          "again before a fresh nonce: the response to the spent one, still no registration");
+    recomp_gs_login_result(0);
+    check(only_alice("secret"), "refused: the file as it was");
+    check(send("alice", "secret") == std::string("~r:") + v0.token,
+          "the right password with the nonce spent: the registered token as a registration");
+    recomp_gs_login_result(1);
+    check(only_alice("secret"), "accepted: still the one line");
+
+    bool all = true;
+    for (int i = 0; i < 20; ++i) {
+        char nonce[24], password[16];
+        snprintf(nonce, sizeof nonce, "%016x", 0xa000 + i);
+        snprintf(password, sizeof password, "typo%d", i);
+        gs_login::set_server(v0.server_id, nonce);
+        all = all && send("Alice", password) == answer(password, v0.server_id, "Alice", nonce);
+        recomp_gs_login_result(0);
+    }
+    check(all, "20 mistyped passwords, a fresh nonce each: 20 responses");
+    check(only_alice("secret"), "and the file never grew");
+    gs_login::set_server(v0.server_id, "b000000000000000");
+    check(send("Alice", "secret") == answer("secret", v0.server_id, "Alice", "b000000000000000"),
+          "then the right password: the response");
+    recomp_gs_login_result(1);
+    check(only_alice("secret"), "accepted: the line kept");
+
+    gs_login::set_server(v0.server_id, "b100000000000000");
+    check(send("Alice", "changed") == answer("changed", v0.server_id, "Alice", "b100000000000000"),
+          "another password the server takes (changed there): a response");
+    recomp_gs_login_result(1);
+    check(only_alice("changed"), "accepted: the name's one line now has that password");
+    gs_login::set_server(v0.server_id, "b200000000000000");
+    send("Alice", "secret");
+    recomp_gs_login_result(1);
+    check(only_alice("secret"), "and back");
+
+    const std::string elsewhere = "ffeeddccbbaa99887766554433221100";
+    gs_login::set_server(elsewhere, "b300000000000000");
+    check(send("Alice", "secret") == "~r:" + gs_login::token("secret", elsewhere, "Alice"),
+          "the same name on another server: registration");
+    recomp_gs_login_result(1);
+    gs_login::set_server(v0.server_id, "b400000000000000");
+    check(send("Bob", "secret") == "~r:" + gs_login::token("secret", v0.server_id, "Bob"),
+          "a fresh name: registration");
+    recomp_gs_login_result(1);
+    const auto records = gs_login::load_records(path);
+    check(records.size() == 3 && records[0].name == "bob" && records[1].server_id == elsewhere &&
+              records[2].server_id == v0.server_id && records[2].name == "alice",
+          "both recorded, Alice's line here still the one");
+}
+
 static void test_session() {
     section("the session");
     const std::string path = g_dir + "/ubi-gs-logins.txt";
@@ -220,24 +298,56 @@ static void test_session() {
     recomp_gs_login_result(1);
     check(gs_login::load_records(path).size() == 1, "one line still");
 
-    gs_login::set_server(v0.server_id, "1111111111111111");
-    check(send("Alice", "other") ==
-              std::string("~r:") + gs_login::token("other", v0.server_id, "Alice"),
-          "another password for the name: registration");
-    recomp_gs_login_result(1);
-    check(gs_login::load_records(path).size() == 2, "both recorded");
+    test_mistyped(path);
+    section("a refused response, a file from before");
 
     gs_login::set_server(v0.server_id, "2222222222222222");
     const std::string r = send("Alice", "secret");
-    check(r.compare(0, 3, "~1:") == 0, "a fresh nonce: a response");
+    check(r == answer("secret", v0.server_id, "Alice", "2222222222222222"),
+          "a fresh nonce: a response");
     recomp_gs_login_result(0);
     records = gs_login::load_records(path);
-    check(records.size() == 1 && records[0].fp == gs_login::fingerprint(gs_login::token(
-                                                      "other", v0.server_id, "Alice")),
-          "a refused response forgets that registration only");
+    check(records.size() == 2 && records[0].name == "bob" && records[1].server_id != v0.server_id,
+          "a refused response from the registered password forgets that name on that server only");
     gs_login::set_server(v0.server_id, "3333333333333333");
     check(send("Alice", "secret") == std::string("~r:") + v0.token,
           "so the next login registers again (lost server state)");
+    recomp_gs_login_result(1);
+    check(gs_login::load_records(path).size() == 3, "and is recorded again");
+
+    // A file from before, with a line per mistyped password: the name is
+    // known through any of them, and its lines go together.
+    const std::string other_fp =
+        gs_login::fingerprint(gs_login::token("typo", v0.server_id, "Alice"));
+    {
+        std::vector<gs_login::Record> old = gs_login::load_records(path);
+        old.push_back({v0.server_id, "ALICE", other_fp});
+        old.push_back({v0.server_id, "alice", "0badf00d"});
+        gs_login::save_records(path, old);
+    }
+    gs_login::set_server(v0.server_id, "6666666666666666");
+    check(send("alice", "secret") == answer("secret", v0.server_id, "alice", "6666666666666666"),
+          "several lines for the name, one of them in capitals: a response");
+    recomp_gs_login_result(1);
+    records = gs_login::load_records(path);
+    int alices = 0;
+    for (const auto &rec : records)
+        alices += rec.server_id == v0.server_id && rec.name == "alice";
+    check(records.size() == 3 && alices == 1 && records[0].fp == gs_login::fingerprint(v0.token),
+          "accepted: one line for the name, the accepted password's");
+    {
+        std::vector<gs_login::Record> old = gs_login::load_records(path);
+        old.push_back({v0.server_id, "alice", other_fp});
+        gs_login::save_records(path, old);
+    }
+    gs_login::set_server(v0.server_id, "7777777777777777");
+    send("Alice", "secret");
+    recomp_gs_login_result(0);
+    records = gs_login::load_records(path);
+    check(records.size() == 2, "the registered password refused: all of the name's lines go");
+    gs_login::set_server(v0.server_id, "8888888888888888");
+    check(send("Alice", "secret") == std::string("~r:") + v0.token,
+          "so the next login registers, not stuck on a stale line");
     recomp_gs_login_result(1);
 
     unlink(path.c_str());

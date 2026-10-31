@@ -360,6 +360,7 @@ struct Session {
     bool active = false;    // the server list came from a server the player chose
     bool challenge = false; // that server sent a LoginNonce
     std::string server_id, nonce;
+    bool nonce_used = false; // answered once already: the server has spent it
     // the LOGIN on its way
     char mode = 0; // 0 none, 'p' plain token, 'r' registration, '1' response
     Record pending;
@@ -377,8 +378,10 @@ std::string records_path(Session &s) {
     return dir.empty() ? "" : dir + "/ubi-gs-logins.txt";
 }
 
-bool same(const Record &a, const Record &b) {
-    return a.server_id == b.server_id && a.name == b.name && a.fp == b.fp;
+// The same server and name; the file's names are lowered when written, and
+// a hand-edited one is lowered here, as the token's salt lowers it.
+bool same_name(const Record &a, const Record &b) {
+    return a.server_id == b.server_id && lower_ascii(a.name) == lower_ascii(b.name);
 }
 
 } // namespace
@@ -389,6 +392,7 @@ void set_server(const std::string &server_id, const std::string &nonce) {
     s.active = !server_id.empty();
     s.server_id = server_id;
     s.nonce = nonce;
+    s.nonce_used = false;
     s.challenge = !nonce.empty();
     s.mode = 0;
 }
@@ -423,24 +427,37 @@ bool password_for(const std::string &name, const std::string &password, std::str
         return true;
     }
     const Record mine{s.server_id, lower_ascii(name), fingerprint(t)};
-    bool registered = false;
+    // known: this file has a line for the name on this server, so the name
+    // registered here; registered: one of them holds this very token.
+    bool known = false, registered = false;
     const std::string path = records_path(s);
     if (!path.empty())
         for (const Record &r : load_records(path))
-            registered = registered || same(r, mine);
-    if (registered && !s.nonce.empty()) {
+            if (same_name(r, mine)) {
+                known = true;
+                registered = registered || r.fp == mine.fp;
+            }
+    // A known name with another token is almost certainly a mistyped (or
+    // changed) password: it gets a response too, never a registration, so
+    // the server refuses it and the file gets no line for it. Once the nonce
+    // is spent, only the registered token goes as a registration (the server
+    // logs in a taken name registered with the same token); any other
+    // answers the spent nonce, which the server refuses.
+    if (known && (!s.nonce_used || !registered)) {
         uint8_t v[32];
         verifier(t, v);
         *out = response(v, s.nonce);
         memset(v, 0, sizeof v);
-        s.nonce.clear(); // single use
         s.mode = '1';
-        LOGW("ubi-gs login: %s gets a response to its nonce", s.server_id.c_str());
+        LOGW("ubi-gs login: %s gets a response to its %snonce%s", s.server_id.c_str(),
+             s.nonce_used ? "spent " : "",
+             registered ? "" : " (not the password registered here)");
+        s.nonce_used = true; // single use
     } else {
         *out = "~r:" + t;
         s.mode = 'r';
         LOGW("ubi-gs login: %s gets a registration (%s)", s.server_id.c_str(),
-             registered ? "no fresh nonce" : "first time here with this name and password");
+             known ? "no fresh nonce" : "first time here with this name");
     }
     s.pending = mine;
     return true;
@@ -456,11 +473,12 @@ void login_result(bool accepted) {
     const std::string path = records_path(s);
     if (path.empty())
         return;
+    // One line per server and name: the token the server last accepted.
     std::vector<Record> records = load_records(path), kept;
     bool had = false;
     for (const Record &r : records) {
-        if (same(r, s.pending))
-            had = true;
+        if (same_name(r, s.pending))
+            had = had || r.fp == s.pending.fp;
         else
             kept.push_back(r);
     }
@@ -469,12 +487,26 @@ void login_result(bool accepted) {
         if (kept.size() > MAX_RECORDS)
             kept.resize(MAX_RECORDS);
     } else if (mode != '1' || !had) {
-        return; // a refused registration leaves the file as it was
+        // A refused registration, or a refused response from a token that
+        // never registered here (a mistyped password), leaves the file as
+        // it was. So a mistyped password never adds a line, and the name
+        // keeps getting responses until the right password comes.
+        return;
     }
+    // Refused, the registered token itself: the server lost the account, or
+    // the nonce expired, or the server asked to slow down after misses (the
+    // router's answer doesn't tell which). As before, the name's lines go
+    // and its next login registers again, whatever is typed then. That can
+    // neither loop nor grow the file: each login is one LOGIN the player
+    // started; a server that still holds the name logs in a registration
+    // with the same token and refuses one with any other (ubi-gs-go since
+    // its #12), a refused one writes nothing, and an accepted login leaves
+    // one line for the name. A server that did lose the account
+    // takes the next password typed as the new one, as with any first login.
     if (!save_records(path, kept))
         LOGW("ubi-gs login: %s could not be written", path.c_str());
     if (!accepted)
-        LOGW("ubi-gs login: %s refused the response; the next login registers again",
+        LOGW("ubi-gs login: %s refused the registered password; the next login registers again",
              s.pending.server_id.c_str());
 }
 

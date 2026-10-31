@@ -22,14 +22,18 @@
 // - No LoginNonce in its servers.ini (the Python ubi-gs, upstream): T as a
 //   plain password. The server hashes it like any password.
 // - LoginNonce=<hex> (fresh per servers.ini, single use): a challenge.
-//     registration   "~r:" + T, the first time with this server, name and
-//                    password (or when no fresh nonce is left);
+//     registration   "~r:" + T, the first time with this server and name
+//                    (or with the registered password when no fresh nonce
+//                    is left);
 //     login          "~1:" + base64url(HMAC-SHA256(V, nonce)[0..12]),
 //                    V = HMAC-SHA256(T, "ubi-gs verifier v1"),
 //   so after registration T itself stays home. The server keeps V and a
-//   hash of T. Which names and passwords registered where is kept in the
-//   profile's ubi-gs-logins.txt (server id, name, a 32-bit fingerprint of T):
-//   a login the router accepts adds the line, a refused "~1:" removes it.
+//   hash of T. Which names registered where, and with which password, is
+//   kept in the profile's ubi-gs-logins.txt (server id, name, a 32-bit
+//   fingerprint of T), one line per server and name: a login the router
+//   accepts writes the name's line, a refused "~1:" from the registered T
+//   removes it. A name with a line gets "~1:" whatever password is typed,
+//   so a mistyped one is refused and never registers or adds a line.
 //   The game's login dialog only lets a player type [A-Za-z0-9_.-], so no
 //   password typed into an original game starts with '~'.
 //
