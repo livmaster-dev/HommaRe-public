@@ -98,6 +98,10 @@
 #define HOMM5_VT_LIST 0x01033278
 #define HOMM5_VT_SCROLLER 0x01037c40
 #define HOMM5_VT_TEXT_VIEW 0x01038670
+/* A text view the game places by code (the battle's damage hint under the
+ * cursor) counts its x from the interface's own left edge, as the cursor
+ * does, not from the screen's (native/ui_bounds.c). */
+#define HOMM5_VT_PLACED_FROM_INTERFACE HOMM5_VT_TEXT_VIEW
 #define HOMM5_HUD_ROOT_RECT 1
 #define HOMM5_UI_REAL_W 0x010d4e2c /* the effective width native/hof_screen.c keeps there */
 #define HOMM5_UI_REAL_H 0x010d4e30
