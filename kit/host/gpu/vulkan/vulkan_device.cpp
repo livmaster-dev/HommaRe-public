@@ -89,7 +89,9 @@ std::unique_ptr<VulkanDevice> VulkanDevice::create() {
     for (const char *s :
          {"VK_KHR_surface", "VK_EXT_metal_surface", "VK_KHR_win32_surface", "VK_KHR_xlib_surface",
           "VK_KHR_xcb_surface", "VK_KHR_wayland_surface", "VK_EXT_headless_surface",
-          "VK_KHR_get_physical_device_properties2"})
+          "VK_KHR_get_physical_device_properties2",
+          // What VK_EXT_swapchain_maintenance1 needs (release_drawable).
+          "VK_KHR_get_surface_capabilities2", "VK_EXT_surface_maintenance1"})
         if (has_inst(s))
             inst_ext.push_back(s);
     std::vector<const char *> layers;
@@ -169,6 +171,9 @@ std::unique_ptr<VulkanDevice> VulkanDevice::create() {
         dev_ext.push_back("VK_KHR_swapchain");
     if (has_dev("VK_KHR_portability_subset"))
         dev_ext.push_back("VK_KHR_portability_subset");
+    const bool maintenance1_ext = has_dev("VK_EXT_swapchain_maintenance1") &&
+                                  has_inst("VK_EXT_surface_maintenance1") &&
+                                  has_inst("VK_KHR_get_surface_capabilities2");
     d->core13_ = d->props_.apiVersion >= VK_API_VERSION_1_3 && app.apiVersion >= VK_API_VERSION_1_3;
     if (!d->core13_) {
         if (!has_dev("VK_KHR_dynamic_rendering")) {
@@ -219,6 +224,24 @@ std::unique_ptr<VulkanDevice> VulkanDevice::create() {
         fdr.dynamicRendering = VK_TRUE;
         f2.pNext = &fdr;
     }
+    // An image acquired and then not drawn (a frame whose composite could not
+    // be allocated) goes back to the swapchain with vkReleaseSwapchainImagesEXT.
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT fsm{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT};
+    if (maintenance1_ext) {
+        VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT have{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT};
+        VkPhysicalDeviceFeatures2 have2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+        have2.pNext = &have;
+        vkGetPhysicalDeviceFeatures2(chosen, &have2);
+        if (have.swapchainMaintenance1) {
+            dev_ext.push_back("VK_EXT_swapchain_maintenance1");
+            fsm.swapchainMaintenance1 = VK_TRUE;
+            fsm.pNext = f2.pNext;
+            f2.pNext = &fsm;
+            d->release_images_ = true;
+        }
+    }
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     qci.queueFamilyIndex = family;
@@ -246,6 +269,11 @@ std::unique_ptr<VulkanDevice> VulkanDevice::create() {
         fprintf(stderr, "gpu/vulkan: no dynamic rendering entry points\n");
         return nullptr;
     }
+    d->release_images_ = d->release_images_ && vkReleaseSwapchainImagesEXT;
+    // RECOMP_VULKAN_RELEASE_IMAGES=0 takes the path a device without the
+    // extension takes (release_drawable presents the image instead), for tests.
+    if (const char *e = recomp_env("VULKAN_RELEASE_IMAGES"); e && *e == '0')
+        d->release_images_ = false;
     vkGetDeviceQueue(d->device_, family, 0, &d->queue_);
     VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -989,7 +1017,7 @@ void VulkanDevice::submit_cmd(uint64_t id, std::unique_ptr<Cmd> c) {
         if (r == VK_SUCCESS && c->presents)
             queue_present(*c);
     }
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     if (trace_) {
         trace_second_.submit_ms += (now_seconds() - t0) * 1000;
         ++trace_second_.commits;
@@ -999,13 +1027,22 @@ void VulkanDevice::submit_cmd(uint64_t id, std::unique_ptr<Cmd> c) {
     if (r != VK_SUCCESS) {
         fail("queue submit failed");
         auto callbacks = std::move(c->callbacks);
+        auto presented = std::move(c->presented);
+        c->presented = nullptr;
         retired_[cb.id] = CommandStatus::Error;
         retired_order_.push_back(cb.id);
         retire_graves(cb.id);
         free_cmds_.push_back(std::move(c));
+        completing_.push_back(cb.id);
+        retired_cv_.notify_all();
+        // As in reap_loop: callbacks run, and what they hold is released, unlocked.
+        lock.unlock();
         for (auto &fn : callbacks)
             fn(CommandStatus::Error, 0);
-        retired_cv_.notify_all();
+        callbacks.clear();
+        presented = nullptr;
+        lock.lock();
+        end_completing(cb.id);
         return;
     }
     if (trace_)
@@ -1059,14 +1096,34 @@ void VulkanDevice::reap_loop() {
             retired_order_.pop_front();
         }
         free_cmds_.push_back(std::move(s.cmd));
+        completing_.push_back(s.id);
         retired_cv_.notify_all();
         lock.unlock();
         for (auto &fn : callbacks)
             fn(status, ms);
         if (presented)
             presented(done_at);
+        // What the callbacks captured is released before the lock is taken
+        // again. A presenter frame's last reference can be the one its
+        // completion handler holds (a frame dropped while in flight), and its
+        // destructor destroys textures, which takes mutex_: released under the
+        // lock, the reaper waited on itself and every completion stopped.
+        callbacks.clear();
+        presented = nullptr;
         lock.lock();
+        end_completing(s.id);
     }
+}
+
+// The buffer's on_complete callbacks have run (and what they held is released):
+// wait() on it may return now.
+void VulkanDevice::end_completing(uint64_t id) {
+    for (auto it = completing_.begin(); it != completing_.end(); ++it)
+        if (*it == id) {
+            completing_.erase(it);
+            break;
+        }
+    retired_cv_.notify_all();
 }
 
 void VulkanDevice::wait(CommandBuffer cb) {
@@ -1083,6 +1140,9 @@ void VulkanDevice::wait(CommandBuffer cb) {
         }
     } done{this, t0};
     retired_cv_.wait(lock, [&] {
+        for (uint64_t id : completing_)
+            if (id == cb.id)
+                return false; // retired, its callbacks still running
         if (retired_.count(cb.id))
             return true;
         for (auto &s : submitted_)
@@ -1103,9 +1163,19 @@ CommandStatus VulkanDevice::status(CommandBuffer cb) {
     return recording_.count(cb.id) ? CommandStatus::Pending : CommandStatus::Completed;
 }
 
+// Before a swapchain is rebuilt or destroyed nothing on the queue may still use
+// it. vkDeviceWaitIdle did that, but it requires every queue to be externally
+// synchronised, and other threads (the game's renderer, transfers) submit
+// meanwhile: the wait now holds the queue as a submit does. Not with mutex_
+// held: queue_present takes mutex_ inside queue_mutex_.
+void VulkanDevice::queue_idle() {
+    std::lock_guard lock(queue_mutex_);
+    vkQueueWaitIdle(queue_);
+}
+
 void VulkanDevice::wait_all_submitted() {
     std::unique_lock lock(mutex_);
-    retired_cv_.wait(lock, [&] { return submitted_.empty(); });
+    retired_cv_.wait(lock, [&] { return submitted_.empty() && completing_.empty(); });
 }
 
 uint64_t VulkanDevice::submission_watermark() {

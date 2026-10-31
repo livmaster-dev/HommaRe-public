@@ -6256,8 +6256,13 @@ struct PresentFake {
         host_present_stop();
         host_present_set_device(g_gpu.get());
     }
-    void commit() {
+    // Commit the frame in flight. With `returns_at`, the commit returns at that
+    // time on the presenter's clock, having started at the last wake's.
+    void commit(double returns_at = -1) {
+        if (returns_at >= 0)
+            device.set_commit_hook([returns_at] { host_present_test_set_clock(returns_at); });
         host_present_test_commit_swapchain(chain);
+        device.set_commit_hook(nullptr);
     }
     void complete(bool success = true) {
         device.set_completion_status(success ? gpu::CommandStatus::Completed
@@ -6374,6 +6379,154 @@ static void test_windowed_drawable_handler_and_completion_fallback() {
         CHECK_EQ(host_present_test_in_flight(), 0u);
         host_present_stop();
     }
+}
+// A slow GPU is slow frames, not lost ones. Age runs from the commit's return.
+// On a device whose commits take long (lavapipe presents synchronously) a frame
+// is lost after 2 s only once a later frame has completed before it, and
+// otherwise after kStuckGpuSeconds (30 s).
+static void test_slow_gpu_is_not_a_lost_frame() {
+    {
+        PresentFake fake;
+        host_present_test_begin(false, false);
+        host_present_test_seal(1, HOST_SCREEN_MENU, false);
+        CHECK(host_present_test_window_wake(0));
+        // The worker is still composing frame 1 three seconds on: no age yet.
+        CHECK(host_present_test_window_wake(3.0, false, true));
+        fake.commit(6.0); // took 3 s
+        fake.complete();
+        fake.presented(6.1);
+        CHECK_EQ(host_present_drops(), 0u);
+        CHECK(host_present_test_released(1));
+        // A second 3 s commit: the device presents synchronously. Frame 2 is still
+        // running 29 s after its commit returned.
+        host_present_test_seal(2, HOST_SCREEN_MENU, false);
+        CHECK(host_present_test_window_wake(6.2));
+        fake.commit(9.2);
+        CHECK(host_present_test_window_wake(9.5, false, true));
+        CHECK(host_present_test_window_wake(38.1, false, true));
+        CHECK_EQ(host_present_drops(), 0u);
+        CHECK_EQ(host_present_test_in_flight(), 2u);
+        fake.complete();
+        fake.presented(38.2);
+        CHECK_EQ(host_present_unique_completed(), 2u);
+        CHECK(host_present_test_released(2));
+        // Nothing completes for 30 s after its commit: lost, its storage retained.
+        host_present_test_seal(3, HOST_SCREEN_MENU, false);
+        CHECK(host_present_test_window_wake(39.0));
+        fake.commit(42.0);
+        CHECK(host_present_test_window_wake(71.9, false, true));
+        CHECK_EQ(host_present_drops(), 0u);
+        CHECK(host_present_test_window_wake(72.0, false, true));
+        CHECK_EQ(host_present_drops(), 1u);
+        CHECK_EQ(host_present_test_in_flight(), 2u); // a repeat of frame 2 took its place
+        CHECK(!host_present_test_released(3));
+        fake.complete();
+        CHECK(host_present_test_released(3));
+        CHECK_EQ(host_present_unique_completed(), 2u);
+    }
+    for (bool inside_commit : {false, true}) {
+        // Overtaken on that device: frame 2 completed and frame 1, committed before
+        // it, did not. Frame 2's handler may run before its commit returns (Metal's
+        // can); it still counts.
+        PresentFake fake;
+        host_present_test_begin(false, false, 3);
+        host_present_test_seal(1, HOST_SCREEN_MENU, false);
+        CHECK(host_present_test_window_wake(0));
+        fake.commit(0.5);
+        host_present_test_seal(2, HOST_SCREEN_MENU, false);
+        CHECK(host_present_test_window_wake(0.6));
+        fake.device.set_manual_completion(!inside_commit);
+        fake.commit(1.1);
+        fake.device.set_manual_completion(true);
+        CHECK_EQ(host_present_test_flight_count(), 2u);
+        if (!inside_commit)
+            host_present_test_command_done(2);
+        CHECK(host_present_test_window_wake(2.4, false, true));
+        CHECK_EQ(host_present_drops(), 0u);
+        CHECK(host_present_test_window_wake(2.5, false, true));
+        CHECK_EQ(host_present_drops(), 2u);
+        CHECK_EQ(host_present_test_flight_count(), 0u);
+        CHECK(!host_present_test_released(1));
+        fake.complete();
+        CHECK(host_present_test_released(1));
+        CHECK(host_present_test_released(2));
+        CHECK_EQ(host_present_unique_completed(), 0u);
+    }
+}
+// A device whose commits return at once (Metal, a Vulkan GPU) runs a frame's work
+// after its commit, in order, so a frame that never completes holds back every
+// frame behind it and nothing overtakes it. It is lost 2 s after its commit, as
+// is one whose commit alone took long (the worker suspended mid-commit while the
+// window was hidden): one slow commit does not make the device a synchronous one.
+static void test_stuck_frame_on_an_asynchronous_device_is_lost_after_2s() {
+    for (double commit_seconds : {0.0, 5.0}) {
+        PresentFake fake;
+        host_present_test_begin(false, false);
+        host_present_test_seal(1, HOST_SCREEN_MENU, false);
+        CHECK(host_present_test_window_wake(0));
+        fake.commit(commit_seconds);
+        CHECK(host_present_test_window_wake(commit_seconds + 1.9, false, true));
+        CHECK_EQ(host_present_drops(), 0u);
+        CHECK_EQ(host_present_test_in_flight(), 1u);
+        CHECK(host_present_test_window_wake(commit_seconds + 2.0, false, true));
+        CHECK_EQ(host_present_drops(), 1u);
+        CHECK(!host_present_test_released(1));
+        fake.complete();
+        CHECK(host_present_test_released(1));
+        CHECK_EQ(host_present_unique_completed(), 0u);
+    }
+}
+// A guest thread's GPU allocation runs outside the presenter's lock: under
+// load an allocation can wait on the device, and while the guest held the lock
+// the worker and every completion callback waited with it. Both allocation
+// paths - a new scene target in acquire, new pixels in stage - are held at a
+// gate here while another thread takes the lock.
+static void test_guest_allocation_outside_presenter_lock() {
+    gpu::FakeDevice device;
+    host_present_set_device(&device);
+    host_present_start_offscreen(8, 8);
+    std::vector<uint8_t> px(32 * 32 * 4, 7);
+    host_present_stage_rgba(px.data(), 8, 8);
+    host_present_test_seal(1, HOST_SCREEN_MENU, false);
+    // Whether the presenter's lock can be taken while the guest allocates.
+    auto lock_is_free = [] {
+        auto read = std::make_shared<std::atomic<bool>>(false);
+        std::thread([read] {
+            (void)host_present_unique_completed(); // takes the presenter's lock
+            *read = true;
+        }).detach(); // a reader stuck behind the lock ends once the gate opens
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!*read && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return read->load();
+    };
+    for (int size : {16, 24}) {
+        // 16: a new frame, so acquire allocates a scene target. 24 then stages
+        // pixels of another size into that same frame, so stage allocates.
+        std::atomic<bool> done{false};
+        std::thread guest([&] {
+            device.hold_allocations_of(std::this_thread::get_id());
+            host_present_stage_rgba(px.data(), size, size);
+            done = true;
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!device.allocations_held() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        CHECK(device.allocations_held() > 0);
+        CHECK(lock_is_free());
+        device.hold_allocations_of({});
+        guest.join();
+        CHECK(done.load());
+    }
+    // The staged frame seals whole, after its allocation, and is presented (frame 1
+    // may have been superseded in the mailbox by then: the newest frame wins).
+    host_present_test_seal(2, HOST_SCREEN_MENU, false);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (host_present_test_last_id() != 2 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK_EQ(host_present_test_last_id(), 2u);
+    host_present_stop();
+    host_present_set_device(g_gpu.get());
 }
 static void test_newest_sealed_wins_and_oldest_drops() {
     host_present_test_begin();
@@ -6782,6 +6935,53 @@ static void test_presenter_migration_cancels_old_drawable() {
     CHECK_EQ(host_present_unique_completed(), 1u);
     CHECK_EQ(host_present_test_last_id(), 2u);
     host_present_stop();
+}
+
+// A frame whose composite cannot be allocated hands its drawable back to the
+// swapchain. Twelve in a row is more than a swapchain has images: before the
+// Vulkan backend returned them, the worker's next acquire waited forever (on
+// lavapipe's headless surface it spun) and nothing was presented again.
+static void test_presenter_composite_failures(D3DRenderer *) {
+    void *surface = gpu::test_native_surface(64, 48);
+    gpu::Swapchain probe = surface ? g_gpu->create_swapchain(surface, 64, 48) : gpu::Swapchain{};
+    if (!probe) {
+        printf("no swapchain on a test surface here: composite failure test skipped\n");
+        return;
+    }
+    g_gpu->destroy(probe);
+    // A stuck worker holds the device's lock in acquire, and the staging below
+    // then waits on it too: only another thread can call the test off.
+    static std::atomic<bool> done{false};
+    std::thread([] {
+        std::this_thread::sleep_for(std::chrono::seconds(45));
+        if (!done) {
+            printf("presenter stuck: acquire never returned after the composite failures\n");
+            fflush(nullptr);
+            _Exit(1);
+        }
+    }).detach();
+    host_present_start(surface, 64, 48);
+    host_present_test_fail_composites(12);
+    std::vector<uint8_t> rgba(64 * 48 * 4, 200);
+    uint64_t id = 200;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while ((host_present_test_composite_failures_left() || host_present_unique_completed() < 3) &&
+           std::chrono::steady_clock::now() < deadline) {
+        host_present_stage_rgba(rgba.data(), 64, 48);
+        host_present_test_seal(id++, HOST_SCREEN_MENU, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    CHECK_EQ(host_present_test_composite_failures_left(), 0u);
+    CHECK(host_present_unique_completed() >= 3);
+    if (host_present_unique_completed() < 3) {
+        // The worker is stuck in acquire: stopping the presenter would wait for it.
+        printf("presenter stuck after %u composite failures\n",
+               12 - host_present_test_composite_failures_left());
+        fflush(nullptr);
+        _Exit(1);
+    }
+    host_present_stop();
+    done = true;
 }
 
 static void test_presenter_real_offscreen(D3DRenderer *renderer) {
@@ -7540,6 +7740,9 @@ static void test_presentation_service() {
     test_windowed_first_blit_presents_without_prior_completion();
     test_windowed_drawable_handler_and_completion_fallback();
     test_windowed_duration_pacing_selector();
+    test_slow_gpu_is_not_a_lost_frame();
+    test_stuck_frame_on_an_asynchronous_device_is_lost_after_2s();
+    test_guest_allocation_outside_presenter_lock();
     test_presenter_menu_ui_and_movie_pixels();
     test_newest_sealed_wins_and_oldest_drops();
     test_repeat_counted_not_completed();
@@ -11997,6 +12200,7 @@ int main(int argc, char **argv) {
             void (*fn)(D3DRenderer *);
         } gpu[] = {
             {"offscreen presenter", test_presenter_real_offscreen},
+            {"composite failures", test_presenter_composite_failures},
             {"presenter GPU color order", test_presenter_gpu_color_order},
             {"presenter GPU logical coordinates", test_presenter_gpu_logical_coordinates},
             {"Direct3D 11 hardware path", test_gpu2d_pixels},

@@ -19,6 +19,7 @@ const char *default_backend_name() {
 void *test_native_surface(int, int) {
     return (void *)"#canvas";
 }
+void test_resize_native_surface(void *, int, int) {}
 void *native_surface_for_window(void *) {
     return (void *)"#canvas"; // the canvas selector create_swapchain takes
 }
@@ -30,6 +31,7 @@ const char *vulkan_loader_path() {
 
 std::unique_ptr<Device> vulkan_create_device();
 void *vulkan_test_native_surface(int w, int h);
+void vulkan_test_resize_native_surface(void *surface, int w, int h);
 void *vulkan_native_surface_for_window(void *sdl_window);
 const char *vulkan_loader_path_impl();
 bool vulkan_available();
@@ -83,6 +85,11 @@ void *test_native_surface(int w, int h) {
     (void)w;
     (void)h;
     return nullptr;
+}
+
+void test_resize_native_surface(void *surface, int w, int h) {
+    if (strcmp(chosen_backend(), "vulkan") == 0)
+        vulkan_test_resize_native_surface(surface, w, h);
 }
 
 void *native_surface_for_window(void *sdl_window) {

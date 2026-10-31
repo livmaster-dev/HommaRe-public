@@ -15,6 +15,10 @@ const char *default_backend_name();
 // a window: a CAMetalLayer for Metal, a hidden SDL window for Vulkan, nullptr
 // when the platform cannot provide one (no display).
 void *test_native_surface(int w, int h);
+// What a window host does before it resizes the swapchain: the test surface
+// takes the new size. An X11 swapchain is pinned to its window's size; a
+// CAMetalLayer takes whatever resize() asks, so there is nothing to do.
+void test_resize_native_surface(void *surface, int w, int h);
 
 // For the SDL host: the surface create_swapchain() wants for this backend,
 // given an SDL_Window* (a CAMetalLayer for Metal, the window itself for

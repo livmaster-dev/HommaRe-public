@@ -71,9 +71,10 @@ struct Frame {
     double guest_sleep_req_ms = 0, guest_sleep_over_ms = 0, guest_wait_ms = 0;
     double guest_over_others_ms = 0; // of the overrun: another guest thread held the baton
     double acknowledgement_deadline = 0;
-    // Evidence only: distinguish composition/acquisition from committed GPU work.
+    // The frame's command buffer, set before commit, and when commit returned (-1
+    // until then): a lost frame's age runs from there (present_thread.cpp, tick).
     uint64_t command_id = 0;
-    double command_commit_ts = 0;
+    double command_commit_ts = -1;
     unsigned pending_prefixes = 0;
     std::shared_ptr<Target> target;
     // Scene history can advance before this drawable is acknowledged.

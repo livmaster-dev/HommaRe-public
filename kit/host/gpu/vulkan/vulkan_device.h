@@ -201,6 +201,7 @@ class VulkanDevice final : public Device {
         std::unordered_map<uint64_t, uint32_t> acquired; // texture id -> image index
         std::unordered_map<uint64_t, VkSemaphore> acquired_wait;
         bool needs_recreate = false;
+        bool release = false; // release_drawable may use vkReleaseSwapchainImagesEXT
         double refresh = 1.0 / 60;
     };
 
@@ -209,7 +210,9 @@ class VulkanDevice final : public Device {
     Binding ring_alloc(Cmd &c, const void *bytes, uint64_t count); // mutex held
     VkCommandBuffer one_shot_begin();
     void one_shot_end_wait(VkCommandBuffer cb);
+    void end_completing(uint64_t id);        // with mutex_ held
     void wait_all_submitted();               // every fence so far; shutdown and swapchain teardown
+    void queue_idle(); // vkQueueWaitIdle under queue_mutex_; never with mutex_ held
     void wait_submitted_before(uint64_t id); // submissions older than `id`; bounded under load
     uint64_t submission_watermark();         // next_id_ now: everything submitted so far is older
     void fail(const char *what);
@@ -266,6 +269,8 @@ class VulkanDevice final : public Device {
     VkPhysicalDeviceFeatures enabled_features_{};
     bool core13_ = false;
     bool full_subgroups_ = false; // computeFullSubgroups enabled
+    // VK_EXT_swapchain_maintenance1: an acquired image goes back unpresented (release_drawable).
+    bool release_images_ = false;
     bool failed_ = false;
     bool trace_ = false;     // RECOMP_GPU_TRACE=1
     uint32_t one_shots_ = 0; // trace: synchronous transfers since the last commit
@@ -288,6 +293,10 @@ class VulkanDevice final : public Device {
     std::vector<Grave> graves_;
     std::unordered_map<uint64_t, CommandStatus> retired_; // bounded: last 1024
     std::deque<uint64_t> retired_order_;
+    // Retired buffers whose on_complete callbacks are still running, unlocked
+    // (the reaper's, or a failed submit's): wait() returns only after them, as
+    // gpu.h's "blocks until complete" means.
+    std::vector<uint64_t> completing_;
     std::condition_variable reaper_cv_, retired_cv_;
     std::thread reaper_;
     bool stopping_ = false;
