@@ -460,7 +460,13 @@ void fn_00557470(X86 *c);
  * ITEM_DATA 0x04, GAME_INFO 0x0c; GI_OPEN 0x18, GI_NAME 0x1c, GI_LOCKED 0x34 (= password non-empty), GI_MAX 0x6c,
  * GI_SIZE 0x70, GI_SAVED 0x90, GI_MAP 0xcc, GI_ARENA 0xf8; CHAT_* 0x0c/0x18/0x0c; PLAYER_NAME 0x0c; EDIT_TEXT 0x3c;
  * BOX_CB 0x17c, BOX_EDIT 0x180, BOX_ID 0x188. V (lan-screens-toe.md "Checked and equal"). */
-#define NS_LAN_UBI_ONLY         1           /* the lobbies natively in ubi.com mode only */
+/* the duel's create dialog (CMPDMCreateScreen; lan-screens-toe.md §1, §5, §2) */
+#define NS_LAN_VT_DUEL_CREATE   0x00f7b504  /* base 00fc7cec; V RTTI */
+#define NS_LAN_SUB_DUEL_CREATE  0x1b4       /* base 0x1b0; V */
+#define NS_LAN_DUEL_CREATE_OK   0x008dfa00  /* base 0099c900; V reg `create` */
+#define NS_LAN_DUEL_CREATE_CANCEL 0x008df860 /* base 0099c760; V reg `cancel` */
+#define NS_LAN_DC_SPEED         0x198       /* base 0x194 (a new dword at +0x194); V init 008ded40 */
+/* name 0x17c, password 0x180, lockedgame 0x184, triple_heroes 0x18c: same; V */
 
 /* ---- network game: create (ns_mp_create) and players (ns_mp_wait), Tribes of the East 3.1 ----
  * Screen fields = base; the options block differs. */

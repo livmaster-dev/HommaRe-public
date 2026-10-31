@@ -146,11 +146,6 @@
 #ifndef NS_LAN_HAS_SPEED
 #define NS_LAN_HAS_SPEED 1
 #endif
-/* An expansion draws the lobbies natively in ubi.com mode only (its LAN
- * screens stay the game's): the lobby claims when it has a MenuProfile. */
-#ifndef NS_LAN_UBI_ONLY
-#define NS_LAN_UBI_ONLY 0
-#endif
 #ifndef NS_LAN_GI_MAP
 #define NS_LAN_GI_MAP 0xcc
 #endif
@@ -193,6 +188,7 @@
 #ifndef NS_LAN_DC_SPEED
 #define NS_LAN_DC_SPEED 0x194
 #endif
+/* NS_LAN_DC_REALTIME: Hammers of Fate's "realtime" check box (no speed). */
 #ifndef NS_LAN_EDIT_TEXT
 #define NS_LAN_EDIT_TEXT 0x3c     /* an IEditLine's text (wstr) */
 #endif
@@ -536,27 +532,13 @@ static void duel_lobby_document(Json *j, Scratch *s, uint32_t screen) {
     lobby_document(j, s, screen);
 }
 
-#if NS_LAN_UBI_ONLY
-/* MenuProfile is found only in the ubi.com Menu panel; in LAN mode it is 0. */
-static int lobby_claims(uint32_t screen) {
-    return ns_ptr(rd32(screen + NS_LAN_L_PROFILE));
-}
-#define LOBBY_CLAIMS lobby_claims
-#else
-#define LOBBY_CLAIMS NULL
-#endif
-
 const NsScreen ns_lan_lobby = {.id = "lan_lobby", .vtable = NS_LAN_VT_LOBBY, .sub = NS_LAN_SUB_LOBBY,
-                               .claims = LOBBY_CLAIMS, .command = std_lobby_command, .document = std_lobby_document};
+                               .command = std_lobby_command, .document = std_lobby_document};
 const NsScreen ns_lan_duel_lobby = {.id = "lan_duel_lobby", .vtable = NS_LAN_VT_DUEL_LOBBY,
-                                    .sub = NS_LAN_SUB_DUEL_LOBBY, .claims = LOBBY_CLAIMS,
-                                    .command = duel_lobby_command, .document = duel_lobby_document};
+                                    .sub = NS_LAN_SUB_DUEL_LOBBY, .command = duel_lobby_command,
+                                    .document = duel_lobby_document};
 
 /* ------------------------------------------------- the name / password -- */
-
-/* An expansion's (ubi.com only) keeps the game's box: in ubi.com mode it only
- * asks a locked game's password, and its LAN screens are the game's. */
-#if !NS_LAN_UBI_ONLY
 
 static int box_claims(uint32_t box) {
     const uint32_t cb = rd32(box + NS_LAN_BOX_CB);
@@ -602,19 +584,13 @@ static void box_document(Json *j, Scratch *s, uint32_t box) {
 const NsScreen ns_lan_name = {.id = "lan_name", .vtable = NS_VT_EDIT_BOX_LAN, .sub = NS_SUB_EDIT_BOX_LAN,
                               .claims = box_claims, .command = box_command, .document = box_document};
 
-#else
-
-const NsScreen ns_lan_name = {.id = "lan_name"};
-
-#endif
-
 /* ------------------------------------------------ the duel's new game -- */
 
 /* Not mapped in every game (an expansion may name the lobbies alone). */
 #if defined(NS_LAN_VT_DUEL_CREATE)
 
 
-enum { F_NAME, F_LOCKED, F_PASSWORD, F_TRIPLE, F_SPEED };
+enum { F_NAME, F_LOCKED, F_PASSWORD, F_TRIPLE, F_SPEED, F_REALTIME };
 
 /* A check box: IButton GetState, 0 is on. */
 static int button_on(Scratch *s, uint32_t button) {
@@ -630,12 +606,21 @@ static void dcreate_command(Scratch *s, uint32_t screen, const char *cmd) {
         if (id == F_NAME || id == F_PASSWORD)
             set_edit(s, rd32(screen + (id == F_NAME ? NS_LAN_DC_NAME : NS_LAN_DC_PASSWORD)), text);
     } else if (strcmp(verb, "set") == 0 && value >= 0) {
-        if (id == F_LOCKED || id == F_TRIPLE) {
+        uint32_t box = 0;
+        if (id == F_LOCKED)
+            box = NS_LAN_DC_LOCKED;
+        else if (id == F_TRIPLE)
+            box = NS_LAN_DC_TRIPLE;
+#ifdef NS_LAN_DC_REALTIME
+        else if (id == F_REALTIME)
+            box = NS_LAN_DC_REALTIME;
+#endif
+        if (box) {
             const uint32_t state = value ? 0 : 1;
-            const uint32_t b = rd32(screen + (id == F_LOCKED ? NS_LAN_DC_LOCKED : NS_LAN_DC_TRIPLE));
+            const uint32_t b = rd32(screen + box);
             if (ns_ptr(b))
                 ns_vcall(s, b, 0x0c, &state, 1); /* SetState: runs its commands */
-        } else if (id == F_SPEED && value < 4) {
+        } else if (NS_LAN_HAS_SPEED && id == F_SPEED && value < 4) {
             const uint32_t seg = (uint32_t)value, bar = rd32(screen + NS_LAN_DC_SPEED);
             if (ns_ptr(bar))
                 ns_vcall(s, bar, NS_SLIDER_SET_SEGMENT, &seg, 1);
@@ -680,6 +665,11 @@ static void dcreate_document(Json *j, Scratch *s, uint32_t screen) {
     j_toggle_field(j, F_LOCKED, ns_tr("Закрытая игра", "Private game"), locked);
     j_text_field(j, 0, F_PASSWORD, "secret", ns_tr("Пароль", "Password"), locked, rd32(screen + NS_LAN_DC_PASSWORD));
     j_toggle_field(j, F_TRIPLE, ns_tr("Режим 3x3", "3x3 mode"), button_on(s, rd32(screen + NS_LAN_DC_TRIPLE)));
+#ifdef NS_LAN_DC_REALTIME
+    j_toggle_field(j, F_REALTIME, ns_tr("Динамичные бои", "Dynamic battles"),
+                   button_on(s, rd32(screen + NS_LAN_DC_REALTIME)));
+#endif
+#if NS_LAN_HAS_SPEED
     const uint32_t bar = rd32(screen + NS_LAN_DC_SPEED);
     if (ns_ptr(bar)) {
         int seg = (int)ns_vcall(s, bar, NS_SLIDER_GET_SEGMENT, NULL, 0);
@@ -696,6 +686,7 @@ static void dcreate_document(Json *j, Scratch *s, uint32_t screen) {
         }
         j_lit(j, "]}");
     }
+#endif
     j_lit(j, "],\"buttons\":[");
     j_button(j, 1, "cancel", ns_tr("Отмена", "Cancel"), 1);
     j_button(j, 0, "ok", ns_tr("Создать", "Create"), 1);
