@@ -672,12 +672,12 @@ static void create_document(Json *j, Scratch *s, uint32_t screen) {
     char diff[8][64];
     for (int i = 0; i < 4; ++i)
         ns_difficulty_name(s, i, diff[i], sizeof diff[i]);
-    ns_ru = (unsigned char)diff[0][0] >= 0xd0;
+    ns_set_lang(diff[0]);
 
     j_lit(j, "{");
     j_kv_str(j, "screen", g_hs == 2 ? "mp_create" : g_hs ? "hotseat_create" : "custom_create");
     j_lit(j, ",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", g_hs == 2 ? ns_tr("Создание обычной игры", "New Network Game")
                          : g_hs ? ns_label(s, "/UI/HotSeat/Header.txt", "Один компьютер: создание игры", "Hot Seat: New Game")
@@ -857,7 +857,7 @@ static const char *race_name(Scratch *s, int race) {
     const int f = faction(race);
     if (f >= 0) {
         snprintf(path, sizeof path, "/Text/Game/Towns/Types/%s.txt", file[f]);
-        return text_or(s, path, ns_ru ? ru[f] : en[f]);
+        return text_or(s, path, ns_tr(ru[f], en[f]));
     }
     return text_or(s, ITEM "race_random.txt", ns_tr("Случайная", "Random"));
 }
@@ -880,7 +880,7 @@ static const char *bonus_name(Scratch *s, int bonus) {
     const int b = bonus >= 0 && bonus < 4 ? bonus : 0;
     char path[96];
     snprintf(path, sizeof path, ITEM "bonus%d.txt", b);
-    return text_or(s, path, ns_ru ? ru[b] : en[b]);
+    return text_or(s, path, ns_tr(ru[b], en[b]));
 }
 
 static const char *bonus_icon(int bonus) {
@@ -1292,12 +1292,12 @@ static void wait_document(Json *j, Scratch *s, uint32_t screen) {
     const int locked = ns_ptr(ct) && rd8(ct + CT_LOCKED);
     char diff[64];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
 
     j_lit(j, "{");
     j_kv_str(j, "screen", g_hs ? "hotseat_players" : "custom_players");
     j_lit(j, ",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, g_hs ? "/UI/HotSeatWait/header.txt" : "/UI/CustomGameWait/ScreenHeader.txt", "Настройки игры", "Game Setup"));
     j_lit(j, ",\"players\":[");
@@ -1306,8 +1306,8 @@ static void wait_document(Json *j, Scratch *s, uint32_t screen) {
         const uint32_t s32 = (uint32_t)slot;
         const int colour = (int)(rd32(rec + R_COLOUR) - 1u) & 7;
         char label[64], path[96];
-        snprintf(label, sizeof label, "%s %s", ns_ru ? RU_COLOUR[colour] : EN_COLOUR[colour],
-                 ns_tr("игрок", "player"));
+        snprintf(label, sizeof label, ns_tr("%s игрок", "%s player"),
+                 ns_tr(RU_COLOUR[colour], EN_COLOUR[colour]));
         snprintf(path, sizeof path, ITEM "player_%s.txt", COLOUR_KEY[colour]);
         snprintf(label, sizeof label, "%s", text_or(s, path, label));
         j_printf(j, "%s{\"slot\":%d,", slot ? "," : "", slot);
@@ -1629,10 +1629,10 @@ static void mp_wait_document(Json *j, Scratch *s, uint32_t screen) {
     const int local = mp_local_slot(s, screen, n);
     char diff[64];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
 
     j_lit(j, "{\"screen\":\"mp_players\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, "/UI/MPWait/ScreenHeader.txt", "Обычные настройки", "Game Setup"));
     j_lit(j, ",\"players\":[");
@@ -1646,8 +1646,8 @@ static void mp_wait_document(Json *j, Scratch *s, uint32_t screen) {
         if (who[0] && (state == 0 || state == 3)) {
             snprintf(label, sizeof label, "%s", who);
         } else {
-            snprintf(label, sizeof label, "%s %s", ns_ru ? RU_COLOUR[colour] : EN_COLOUR[colour],
-                     ns_tr("игрок", "player"));
+            snprintf(label, sizeof label, ns_tr("%s игрок", "%s player"),
+                     ns_tr(RU_COLOUR[colour], EN_COLOUR[colour]));
             snprintf(path, sizeof path, ITEM "player_%s.txt", COLOUR_KEY[colour]);
             snprintf(label, sizeof label, "%s", text_or(s, path, label));
         }

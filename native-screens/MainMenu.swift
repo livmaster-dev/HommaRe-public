@@ -247,7 +247,7 @@ struct ProfileSheet: View {
         }
         .gameConfirm(isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                      title: deleting.flatMap { list.names.indices.contains($0) ? list.names[$0] : nil }
-                         .map { store.tr("Удалить профиль «\($0)»?", "Delete the profile \($0)?") } ?? "",
+                         .map { String(format: store.tr("Удалить профиль «%@»?", "Delete the profile %@?"), $0) } ?? "",
                      message: store.tr("Сохранённые игры и успехи в кампаниях этого профиля пропадут.",
                                        "Its saved games and campaign progress go with it."),
                      confirm: store.tr("Удалить", "Delete"), cancel: store.tr("Отмена", "Cancel")) {

@@ -469,12 +469,27 @@ const char *ns_label(Scratch *s, const char *path, const char *ru, const char *e
     return t[0] ? t : ns_tr(ru, en);
 }
 
+/* A Latin-1 or Latin Extended-A letter's capital (é, ł, ż, œ), else itself. */
+static unsigned latin_capital(unsigned c) {
+    if (c >= 0xe0 && c <= 0xfe && c != 0xf7)
+        return c - 0x20;
+    if ((c >= 0x139 && c <= 0x148) || (c >= 0x179 && c <= 0x17e)) /* capital first, odd */
+        return c & 1 ? c : c - 1;
+    if ((c >= 0x100 && c <= 0x137) || (c >= 0x14a && c <= 0x177)) /* capital first, even */
+        return c & 1 ? c - 1 : c;
+    return c;
+}
+
 /* `text`'s first letter as a capital (Latin or Cyrillic), in place. */
 char *ns_capital(char *text) {
     unsigned char *u = (unsigned char *)text;
     if (u[0] >= 'a' && u[0] <= 'z')
         u[0] = (unsigned char)(u[0] - 32);
-    else if (u[0] == 0xd0 && u[1] >= 0xb0 && u[1] <= 0xbf) /* а..п */
+    else if (u[0] >= 0xc3 && u[0] <= 0xc5 && u[1] >= 0x80 && u[1] <= 0xbf) { /* à..ž */
+        const unsigned c = latin_capital(((u[0] & 0x1fu) << 6) | (u[1] & 0x3fu));
+        u[0] = (unsigned char)(0xc0 | (c >> 6));
+        u[1] = (unsigned char)(0x80 | (c & 0x3f));
+    } else if (u[0] == 0xd0 && u[1] >= 0xb0 && u[1] <= 0xbf) /* а..п */
         u[1] = (unsigned char)(u[1] - 0x20);
     else if (u[0] == 0xd1 && u[1] >= 0x80 && u[1] <= 0x8f) { /* р..я */
         u[0] = 0xd0;
@@ -572,16 +587,6 @@ void ns_caption(Scratch *s, uint32_t iwindow, char *out, size_t cap) {
     ns_vcall(s, iwindow, NS_IW_CAPTION, &w, 1);
     ns_wstr_utf8(w, out, cap);
     ns_free(s, rd32(w));
-}
-
-/* ------------------------------------------------------------ language -- */
-
-/* The views' own words, in the game's language: Russian when the game's
- * texts are (its difficulty names tell), else English. */
-int ns_ru;
-
-const char *ns_tr(const char *ru, const char *en) {
-    return ns_ru ? ru : en;
 }
 
 void j_kv_str(Json *j, const char *key, const char *value) {

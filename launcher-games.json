@@ -82,7 +82,7 @@
       },
       "folder": "Heroes of Might and Magic V",
       "gogBuild": "58812465975493914",
-      "manifests": ["gog-1207661143-ru.json", "gog-1207661143-en.json"],
+      "manifests": ["gog-1207661143-ru.json", "gog-1207661143-en.json", "gog-1207661143-de.json", "gog-1207661143-fr.json", "gog-1207661143-pl.json"],
       "games": ["homm5", "homm5-hof"]
     },
     {
@@ -102,7 +102,7 @@
       },
       "folder": "Heroes of Might and Magic V - Tribes of the East",
       "gogBuild": "58812602200645111",
-      "manifests": ["gog-1207661193-ru.json", "gog-1207661193-en.json"],
+      "manifests": ["gog-1207661193-ru.json", "gog-1207661193-en.json", "gog-1207661193-de.json", "gog-1207661193-fr.json", "gog-1207661193-pl.json"],
       "games": ["homm5-toe"]
     }
   ],

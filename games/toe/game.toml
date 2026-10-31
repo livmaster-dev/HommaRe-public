@@ -55,7 +55,7 @@ entry_points = []
 # save, map camera, the phone's interface and Hor+ (native/*.c). header (native/overrides.h) holds the
 # FN_<addr> replacements every translated chunk includes; addresses
 # (native/addresses.h) this game's addresses, which only these sources include.
-native = { header = "native/overrides.h", addresses = "native/addresses.h", sources = ["../../native/overrides.c", "../../native/touch.c", "../../native/save.cpp", "../../native/camera.c", "../../native/phone_hud.c", "../../native/horplus.c", "../../native/ui_bounds.c", "../../native/granny.c", "../../native/lighting.c", "../../native/scene.c", "../../native/gpu_skin.cpp", "../../native/phone_layout.c", "../../native/render_split.c", "../../native/tap_attack.c", "../../native/native_screens.c", "../../native/screens_custom.c", "../../native/screens_menu.c", "../../native/screens_load.c", "../../native/screens_hof.c", "../../native/screens_options.c", "../../native/screens_duel.c", "../../native/screens_question.c", "../../native/screens_escmenu.c", "../../native/screens_lan.c", "../../native/screens_ubi.c", "../../native/gs_login.c", "../../native/net_guard.c"] }
+native = { header = "native/overrides.h", addresses = "native/addresses.h", sources = ["../../native/overrides.c", "../../native/touch.c", "../../native/save.cpp", "../../native/camera.c", "../../native/phone_hud.c", "../../native/horplus.c", "../../native/ui_bounds.c", "../../native/granny.c", "../../native/lighting.c", "../../native/scene.c", "../../native/gpu_skin.cpp", "../../native/phone_layout.c", "../../native/render_split.c", "../../native/tap_attack.c", "../../native/native_screens.c", "../../native/screens_custom.c", "../../native/screens_menu.c", "../../native/screens_load.c", "../../native/screens_hof.c", "../../native/screens_options.c", "../../native/screens_duel.c", "../../native/screens_question.c", "../../native/screens_escmenu.c", "../../native/screens_lan.c", "../../native/screens_ubi.c", "../../native/screens_words.c", "../../native/gs_login.c", "../../native/net_guard.c"] }
 # A Direct3D 9 game: no DirectDraw lock to track, so stores skip the watch/dirty check.
 store_hooks = false
 # As in the base game: flags are followed over the jumps inside a function
@@ -159,12 +159,23 @@ files = [
 "<body><color_default>If you have forgotten your password or need to manage your account use the <color_bright>Account <color_default>button." = "<body><color_bright>Not your Ubisoft login!<color_default> Make up a name and password for this ubi-gs server."
 # The Russian install's hint the same way, in its own words, before the line below adds the English one.
 "<body><color_default>Если вы забыли свой пароль или хотите изменить личные данные, нажмите кнопку <color_bright>Профиль<color_default>." = "<body><color_bright>Это не ваш логин Ubisoft!<color_default> Придумайте имя и пароль для этого сервера ubi-gs."
+# The German, French and Polish installs' hints the same way.
+"<body><color_default>Falls Ihr Euer Passwort vergessen habt oder Euer Konto verwalten müsst, benutzt die <color_default>Schaltfläche <color_bright>Konto." = "<body><color_bright>Nicht Euer Ubisoft-Login!<color_default> Denkt Euch einen Namen und ein Passwort für diesen ubi-gs-Server aus."
+"<body><color_default>Si vous avez oublié votre mot de passe ou que vous désirez gérer votre compte, utilisez le bouton <color_bright>Compte<color_default>." = "<body><color_bright>Ce n’est pas votre identifiant Ubisoft !<color_default> Choisissez un nom et un mot de passe pour ce serveur ubi-gs."
+"<body><color_default>Jeśli zapomniałeś hasła lub potrzebujesz dokonać zmian na koncie naciśnij przycisk <color_bright>konto<color_default>." = "<body><color_bright>To nie jest twój login Ubisoft!<color_default> Wymyśl nazwę i hasło dla tego serwera ubi-gs."
 "<body><color_default>" = "<body><color_bright>Not your Ubisoft login!<color_default> Make up a name and password for this ubi-gs server.<br><color_default>"
 "в  Windows" = "в систему"
 "в Windows" = "в систему"
 "to Windows" = "to Desktop"
+"zu Windows" = "zum Desktop"
+"vers Windows" = "vers le bureau"
+"sous Windows" = "au bureau"
+"do Windows" = "do pulpitu"
 "<VolumeBase>1</VolumeBase>" = "<VolumeBase>0.25</VolumeBase>"
 "via ubi.com website" = "through a ubi-gs community server"
+"auf dem ubi.com-Server" = "auf einem ubi-gs-Community-Server"
+"via le site ubi.com" = "via un serveur communautaire ubi-gs"
+"korzystając ze strony ubi.com" = "korzystając z serwera społeczności ubi-gs"
 "Ubi.com" = "ubi-gs"
 "ubi.com" = "ubi-gs"
 "UBI.com" = "ubi-gs"

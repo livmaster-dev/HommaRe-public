@@ -432,6 +432,34 @@ enum GogInstaller {
         #endif
     }
 
+    /// SHA-256 of one file of `setup` (`path` in the install folder), unpacked
+    /// alone; nil when the installer has none.
+    static func digest(of path: String, in setup: URL) throws -> String? {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("recomp-probe-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        #if os(macOS)
+        guard let helper = helper() else { throw Failure(errorDescription: L10n.noHelper) }
+        _ = try capture(helper, ["--extract", "--include", "/" + path, "--output-dir", dir.path, setup.path])
+        #else
+        let name = strdup(path)
+        defer { free(name) }
+        let paths: [UnsafePointer<CChar>?] = [UnsafePointer(name)]
+        try paths.withUnsafeBufferPointer { list in
+            try callLib { error, errorSize in
+                recomp_inno_extract(setup.path, dir.path, list.baseAddress, 1, nil, nil, error, errorSize)
+            }
+        }
+        #endif
+        // The installer's spelling, which need not be the manifest's.
+        let leaf = (path as NSString).lastPathComponent.lowercased()
+        guard let file = fm.enumerator(at: dir, includingPropertiesForKeys: nil)?.compactMap({ $0 as? URL })
+                .first(where: { $0.lastPathComponent.lowercased() == leaf }),
+              let data = fm.contents(atPath: file.path) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Which installer `setup` is, which manifest describes it and where it
     /// goes; a reason for the player when it is none the app knows.
     static func plan(setup: URL, config: LauncherConfig, manifestDir: URL?, base: URL) -> Result<Plan, Error> {
@@ -447,15 +475,26 @@ enum GogInstaller {
                 return .failure(Failure(errorDescription: L10n.unknownInstaller(setup.lastPathComponent)))
             }
             let listed = try listing(setup)
-            for name in installer.manifests {
+            let fitting = installer.manifests.compactMap { name -> (String, InstallManifest)? in
                 guard let dir = manifestDir,
                       let data = FileManager.default.contents(atPath: dir.appendingPathComponent(name).path),
-                      let manifest = try? JSONDecoder().decode(InstallManifest.self, from: data)
-                else { continue }
-                if manifest.files.allSatisfy({ listed.contains($0.path.lowercased()) }) {
-                    return .success(Plan(installer: installer, manifestName: name, manifest: manifest, setup: setup,
-                                         dest: base.appendingPathComponent(installer.folder, isDirectory: true)))
-                }
+                      let manifest = try? JSONDecoder().decode(InstallManifest.self, from: data),
+                      manifest.files.allSatisfy({ listed.contains($0.path.lowercased()) })
+                else { return nil }
+                return (name, manifest)
+            }
+            // Two languages of a build can hold the same paths (English and
+            // French do): GOG's description of the installer, which names its
+            // language, tells them apart.
+            var chosen = fitting.first
+            if fitting.count > 1 {
+                let info = "goggame-\(gogId).info"
+                let sum = try digest(of: info, in: setup)
+                chosen = fitting.first { $0.1.files.contains { $0.path.lowercased() == info && $0.sha256 == sum } }
+            }
+            if let (name, manifest) = chosen {
+                return .success(Plan(installer: installer, manifestName: name, manifest: manifest, setup: setup,
+                                     dest: base.appendingPathComponent(installer.folder, isDirectory: true)))
             }
             return .failure(Failure(errorDescription: L10n.otherInstallerBuild(setup.lastPathComponent)))
         } catch {
