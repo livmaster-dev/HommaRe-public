@@ -277,7 +277,44 @@
 #define NS_VT_OPT_COMBO 0x00fbb91c      /* V RTTI SComboBoxOption */
 #define NS_VT_OPT_SLIDER 0x00fbb94c     /* V RTTI SSliderOption */
 
-/* screens_duel.c: not enabled; the HoF duel and 3x3 hero views differ (report §3, §5). */
+/* screens_duel.c: hot seat's duels. The views differ from the base (no speed, a dynamic battles
+ * flag; the 3x3 slots are {preset, random} and set through a state). Read-only research
+ * 2026-10-31 (session scratch hofduel/hof-duel.md); V = seen in HoF code or data. */
+#define NS_VT_DUEL         0x00fccdfc /* V RTTI CHSDMWaitScreen<CHeroInfoView> IScreen */
+#define NS_VT_DUEL3        0x00fccd5c /* V RTTI CHSDMWaitScreen<CTripleHeroesView> IScreen */
+#define NS_SUB_DUEL        0x1a8      /* V (base 0x1d0) */
+#define NS_DUEL_NEXT       0x009a4560 /* V "start": thiscall (screen, 0), RET 4 */
+#define NS_DUEL_BACK       0x009a44c0 /* V "back"/"cancel" */
+#define NS_DUEL3_NEXT      0x009a45b0 /* V */
+#define NS_DUEL3_BACK      0x009a4510 /* V */
+#define NS_DUEL_ARENAS     0x009c5b50 /* V fastcall ECX = NS_DUEL_ARENAS_OF; entry 0 is Random arena */
+#define NS_DUEL_ARENAS_OF  0x0115eed4 /* V */
+/* NS_DUEL_SPEED_NAME: none (no speed). V */
+#define NS_D_PANEL         0x170      /* V CDMScreenView* (base 0x17c) */
+#define NS_D_VIEWS         0x174      /* V (base 0x180) */
+#define NS_D_TURN          0x180      /* V the current view (base 0x18c) */
+#define NS_D_MOVER         0x188      /* V 3x3 (base 0x194) */
+#define NS_D_COUNT         0x18c      /* V presets (base 0x198) */
+#define NS_P_GET_SETTINGS  0x30       /* V 009c56c0 (base 0x38) */
+#define NS_P_SET_SETTINGS  0x2c       /* V 009c5530 (base 0x34) */
+/* P_GRID 0x44, P_START 0x14: same. V */
+#define NS_DUEL_SETTINGS_SIZE 0xc     /* V {arena, byte dynamic, byte locked, arena used} */
+#define NS_S_DYNAMIC       0x04       /* V the "time_pressing" check box (saved as duel_realtime_default) */
+#define NS_DUEL_SHOWN      0x1c       /* V shown, and set with a pick */
+#define NS_DUEL_SET        0x1c       /* V */
+#define NS_DUEL_RANDOM     0x30       /* V */
+#define NS_DUEL_INDEX      0x2c       /* V (a random pick holds the rolled one) */
+#define NS_TRIPLE_SHOWN    0x18       /* V (the state's first byte) */
+#define NS_TRIPLE_STATE    0x18       /* V {byte shown; vector items +4..+0xc; byte ready +0x10} */
+#define NS_TRIPLE_SLOTS    0x1c       /* V */
+#define NS_TRIPLE_SLOT_SIZE 0x08      /* V {int preset (-1 none); byte random} */
+#define NS_TRIPLE_INDEX    0x00       /* V */
+#define NS_TRIPLE_RANDOM   0x04       /* V */
+#define NS_DUEL3_STATE_SIZE 0x14      /* V */
+#define NS_DUEL3_STATE_COPY 0x009c9260 /* V copy: thiscall (dst, src*), RET 4 */
+#define NS_DUEL3_ROLL      0x009cbf60 /* V thiscall (mover, state*), RET 4: random slots rolled */
+#define NS_DUEL3_SET       0x009ccbb0 /* V thiscall (view, state*), RET 4 */
+#define NS_DUEL3_MOVER     0x009cbe10 /* V fastcall ECX mover: the picked presets greyed */
 
 /* screens_question.c (+ overrides.h) */
 #define NS_VT_MSGBOX 0x00fb38a4         /* V RTTI CCommonMsgBox, 13 slots agree */
@@ -465,7 +502,17 @@
 #define NS_LAN_HAS_FILTERS      0           /* no show/hide_running, show/hide_observable, no CGamesView2 bytes; V */
 #define NS_LAN_HAS_SPEED        0           /* no SGameInfo combat speed, no speed names; V */
 #define NS_LAN_GI_PLAYERS       0x84        /* players in = [info+0x84], as HoF's own list reads it (009b6cf1); V */
-#define NS_LAN_UBI_ONLY         1           /* the lobbies natively in ubi.com mode only */
+/* the duel's create dialog (CMPDMCreateScreen; lan-screens-hof.md §1, §2.7) */
+#define NS_LAN_VT_DUEL_CREATE   0x00fcb1c8  /* base 00fc7cec; V RTTI */
+#define NS_LAN_SUB_DUEL_CREATE  0x19c       /* base 0x1b0; V */
+#define NS_LAN_DUEL_CREATE_OK   0x0097a370  /* base 0099c900; V `create` */
+#define NS_LAN_DUEL_CREATE_CANCEL 0x0097a2a0 /* base 0099c760; V `cancel` */
+#define NS_LAN_DC_NAME          0x170       /* base 0x17c; V init 00979ad0 */
+#define NS_LAN_DC_PASSWORD      0x174       /* base 0x180; V */
+#define NS_LAN_DC_LOCKED        0x178       /* base 0x184; V `lockedgame` */
+#define NS_LAN_DC_REALTIME      0x17c       /* new; V `realtime` */
+#define NS_LAN_DC_TRIPLE        0x184       /* base 0x18c; V `triple_heroes` */
+/* no presets combo, no speed slider (NS_LAN_HAS_SPEED 0); V */
 
 /* ---- network game: create (ns_mp_create) and players (ns_mp_wait), Hammers of Fate 2.1 ----
  * research notes lan/mp-create-wait-expansions.md. Base 1.60 value in the comment. */

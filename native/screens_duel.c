@@ -72,13 +72,52 @@
 #ifndef NS_TRIPLE_INDEX
 #define NS_TRIPLE_INDEX 0xe0
 #endif
+#ifndef NS_D_PANEL
+#define NS_D_PANEL 0x17c     /* CDMScreenView* */
+#endif
+#ifndef NS_D_VIEWS
+#define NS_D_VIEWS 0x180     /* vector of the 2 players' views */
+#endif
+#ifndef NS_D_TURN
+#define NS_D_TURN 0x18c      /* the current view */
+#endif
+#ifndef NS_D_MOVER
+#define NS_D_MOVER 0x194     /* 3x3: the drag and drop mover */
+#endif
+#ifndef NS_D_COUNT
+#define NS_D_COUNT 0x198     /* presets */
+#endif
+/* A duel view's choice: a "set" byte, a "random" byte (Hammers of Fate: the
+ * set byte is the shown one, the random byte apart from it). */
+#ifndef NS_DUEL_SHOWN
+#define NS_DUEL_SHOWN 0x08
+#endif
+#ifndef NS_DUEL_SET
+#define NS_DUEL_SET 0x0c
+#endif
+#ifndef NS_DUEL_RANDOM
+#define NS_DUEL_RANDOM 0x0d
+#endif
+/* A 3x3 view's slots: Hammers of Fate's have no "set" byte (an index of -1 is
+ * none) and no single put; NS_DUEL3_SET names its way (a state copied, edited,
+ * rolled and set back, as the game's own drop does). */
+#ifndef NS_TRIPLE_SHOWN
+#define NS_TRIPLE_SHOWN 0x0c
+#endif
+#ifndef NS_TRIPLE_SLOTS
+#define NS_TRIPLE_SLOTS 0x10
+#endif
+#ifndef NS_TRIPLE_RANDOM
+#define NS_TRIPLE_RANDOM 0x01
+#define NS_TRIPLE_SET 0x00
+#endif
 
 enum {
-    D_PANEL = 0x17c,         /* CDMScreenView* */
-    D_VIEWS = 0x180,         /* vector of the 2 players' views */
-    D_TURN = 0x18c,          /* the current view */
-    D_MOVER = 0x194,         /* 3x3: the drag and drop mover */
-    D_COUNT = 0x198,         /* presets */
+    D_PANEL = NS_D_PANEL,
+    D_VIEWS = NS_D_VIEWS,
+    D_TURN = NS_D_TURN,
+    D_MOVER = NS_D_MOVER,
+    D_COUNT = NS_D_COUNT,
     P_START = 0x14,          /* the panel: Start (Next) IButton* */
     P_GRID = NS_P_GRID,           /* CDMPresetsTable*: vt[0] SetSelected(i) */
     P_SET_SETTINGS = NS_P_SET_SETTINGS,   /* vtable slots, thiscall (block*) */
@@ -86,20 +125,28 @@ enum {
     /* the settings block (NS_DUEL_SETTINGS_SIZE bytes) */
     S_ARENA = 0x00,
     S_SPEED = NS_S_SPEED,
-    /* a choice (a duel view at +0x0c, a 3x3 slot block) */
-    C_SET = 0x00,
-    C_RANDOM = 0x01,
-    DUEL_CHOICE = 0x0c,
     DUEL_INDEX = NS_DUEL_INDEX,       /* the duel view: its preset index */
-    DUEL_SHOWN = 0x08,
-    TRIPLE_SLOTS = 0x10,     /* the 3x3 view: vector of 3 blocks of 0xe4 */
+    DUEL_SHOWN = NS_DUEL_SHOWN,
+    TRIPLE_SLOTS = NS_TRIPLE_SLOTS,   /* the 3x3 view: vector of 3 slots */
     TRIPLE_SLOT_SIZE = NS_TRIPLE_SLOT_SIZE,
     TRIPLE_INDEX = NS_TRIPLE_INDEX,
-    TRIPLE_SHOWN = 0x0c,
+    TRIPLE_SHOWN = NS_TRIPLE_SHOWN,
     ARENA_SIZE = 0x24,
 };
 
 static int g_triple; /* the variant being read */
+
+/* A 3x3 slot's preset index, -1 for random, -2 for none yet. */
+static int slot_choice(uint32_t blk) {
+#ifdef NS_TRIPLE_SET
+    if (!rd8(blk + NS_TRIPLE_SET))
+        return -2;
+#else
+    if (!rd8(blk + NS_TRIPLE_RANDOM) && (int)rd32(blk + TRIPLE_INDEX) < 0)
+        return -2;
+#endif
+    return rd8(blk + NS_TRIPLE_RANDOM) ? -1 : (int)rd32(blk + TRIPLE_INDEX);
+}
 
 static uint32_t view_of(uint32_t screen, int k) {
     const uint32_t b = rd32(screen + D_VIEWS), e = rd32(screen + D_VIEWS + 4);
@@ -144,23 +191,40 @@ static void duel_command(Scratch *s, uint32_t screen, const char *cmd) {
                 return;
             /* The game's own rule: one preset once per player. */
             const uint32_t b = rd32(view + TRIPLE_SLOTS);
-            for (int k = 0; k < 3 && i >= 0 && ns_ptr(b); ++k) {
-                const uint32_t blk = b + TRIPLE_SLOT_SIZE * (uint32_t)k;
-                if (k != slot && rd8(blk + C_SET) && !rd8(blk + C_RANDOM) &&
-                    (int)rd32(blk + TRIPLE_INDEX) == i)
+            for (int k = 0; k < 3 && i >= 0 && ns_ptr(b); ++k)
+                if (k != slot && slot_choice(b + TRIPLE_SLOT_SIZE * (uint32_t)k) == i)
                     return;
-            }
+            const uint32_t mover = rd32(screen + D_MOVER);
+#ifdef NS_DUEL3_SET
+            /* The view's state copied, the slot changed, random ones rolled and
+             * the state set back. */
+            if (!ns_ptr(mover))
+                return;
+            const uint32_t state = ns_alloc(s, NS_DUEL3_STATE_SIZE), from = view + NS_TRIPLE_STATE;
+            ns_call(s, NS_DUEL3_STATE_COPY, state, 0, &from, 1);
+            const uint32_t item = rd32(state + 4) + TRIPLE_SLOT_SIZE * (uint32_t)slot;
+            if (!ns_ptr(rd32(state + 4)))
+                return;
+            if (i >= 0)
+                wr32(item + TRIPLE_INDEX, (uint32_t)i);
+            wr8(item + NS_TRIPLE_RANDOM, i < 0 ? 1 : 0);
+            ns_call(s, NS_DUEL3_ROLL, mover, 0, &state, 1);
+            ns_call(s, NS_DUEL3_SET, view, 0, &state, 1);
+            ns_call(s, NS_DUEL3_MOVER, mover, 0, NULL, 0);
+            ns_free(s, rd32(state + 4));
+#else
             const uint32_t args[3] = {(uint32_t)slot, i < 0 ? 0u : (uint32_t)i, i < 0 ? 1u : 0u};
             ns_call(s, NS_DUEL3_PUT, view, 0, args, 3);
             ns_call(s, NS_DUEL3_VIEW, view, 0, NULL, 0);
-            if (ns_ptr(rd32(screen + D_MOVER)))
-                ns_call(s, NS_DUEL3_MOVER, rd32(screen + D_MOVER), 0, NULL, 0);
+            if (ns_ptr(mover))
+                ns_call(s, NS_DUEL3_MOVER, mover, 0, NULL, 0);
+#endif
         }
     } else if (strcmp(verb, "next") == 0) {
         handler(s, screen, g_triple ? NS_DUEL3_NEXT : NS_DUEL_NEXT);
     } else if (strcmp(verb, "back") == 0) {
         handler(s, screen, g_triple ? NS_DUEL3_BACK : NS_DUEL_BACK);
-    } else if (strcmp(verb, "arena") == 0 || strcmp(verb, "speed") == 0) {
+    } else if (strcmp(verb, "arena") == 0 || strcmp(verb, "speed") == 0 || strcmp(verb, "dynamic") == 0) {
         /* Settings are the first player's to change. */
         const uint32_t panel = rd32(screen + D_PANEL);
         if (turn_of(screen) != 0 || !ns_ptr(panel))
@@ -168,10 +232,20 @@ static void duel_command(Scratch *s, uint32_t screen, const char *cmd) {
         const uint32_t block = ns_alloc(s, NS_DUEL_SETTINGS_SIZE);
         settings(s, screen, block);
         const int v = ns_cmd_int(cmd, "index", -1);
-        if (strcmp(verb, "speed") == 0) {
+        if (strcmp(verb, "dynamic") == 0) {
+#ifdef NS_S_DYNAMIC
+            wr8(block + NS_S_DYNAMIC, ns_cmd_int(cmd, "value", 0) ? 1 : 0);
+#else
+            return;
+#endif
+        } else if (strcmp(verb, "speed") == 0) {
+#ifdef NS_DUEL_SPEED_NAME
             if (v < 0 || v > 3)
                 return;
             wr32(block + S_SPEED, (uint32_t)v);
+#else
+            return;
+#endif
         } else {
             const uint32_t arenas = ns_call(s, NS_DUEL_ARENAS, NS_DUEL_ARENAS_OF, 0, NULL, 0);
             const uint32_t ab = ns_ptr(arenas) ? rd32(arenas + 0x44) : 0, ae = ns_ptr(arenas) ? rd32(arenas + 0x48) : 0;
@@ -183,11 +257,11 @@ static void duel_command(Scratch *s, uint32_t screen, const char *cmd) {
     }
 }
 
-/* A choice's preset index, -1 for random, -2 for none yet. */
-static int choice(uint32_t block, uint32_t index_at) {
-    if (!rd8(block + C_SET))
+/* A duel view's preset index, -1 for random, -2 for none yet. */
+static int duel_choice(uint32_t view) {
+    if (!rd8(view + NS_DUEL_SET))
         return -2;
-    return rd8(block + C_RANDOM) ? -1 : (int)rd32(index_at);
+    return rd8(view + NS_DUEL_RANDOM) ? -1 : (int)rd32(view + DUEL_INDEX);
 }
 
 static void duel_document(Json *j, Scratch *s, uint32_t screen) {
@@ -208,13 +282,11 @@ static void duel_document(Json *j, Scratch *s, uint32_t screen) {
             j_lit(j, ",");
         j_lit(j, "{\"picks\":[");
         if (ns_ptr(view) && !g_triple) {
-            j_printf(j, "%d", choice(view + DUEL_CHOICE, view + DUEL_INDEX));
+            j_printf(j, "%d", duel_choice(view));
         } else if (ns_ptr(view)) {
             const uint32_t b = rd32(view + TRIPLE_SLOTS);
-            for (int slot = 0; slot < 3 && ns_ptr(b); ++slot) {
-                const uint32_t blk = b + TRIPLE_SLOT_SIZE * (uint32_t)slot;
-                j_printf(j, "%s%d", slot ? "," : "", choice(blk, blk + TRIPLE_INDEX));
-            }
+            for (int slot = 0; slot < 3 && ns_ptr(b); ++slot)
+                j_printf(j, "%s%d", slot ? "," : "", slot_choice(b + TRIPLE_SLOT_SIZE * (uint32_t)slot));
         }
         const int shown = ns_ptr(view) && rd8(view + (g_triple ? TRIPLE_SHOWN : DUEL_SHOWN));
         j_printf(j, "],\"shown\":%s}", shown ? "true" : "false");
@@ -236,15 +308,24 @@ static void duel_document(Json *j, Scratch *s, uint32_t screen) {
             j_lit(j, ",");
         j_str(j, text);
     }
-    j_printf(j, "],\"arena\":%d,\"speeds\":[", (int)rd32(block + S_ARENA));
+    j_printf(j, "],\"arena\":%d", (int)rd32(block + S_ARENA));
+#ifdef NS_DUEL_SPEED_NAME
+    j_lit(j, ",\"speeds\":[");
     for (int i = 0; i < 4; ++i) {
         ns_text_of(s, NS_DUEL_SPEED_NAME, (uint32_t)i, text, sizeof text);
         if (i)
             j_lit(j, ",");
         j_str(j, text);
     }
-    j_printf(j, "],\"speed\":%d,\"settings_enabled\":%s", (int)rd32(block + S_SPEED),
-             turn == 0 ? "true" : "false");
+    j_printf(j, "],\"speed\":%d", (int)rd32(block + S_SPEED));
+#endif
+#ifdef NS_S_DYNAMIC
+    /* Hammers of Fate: dynamic battles instead of a speed. */
+    j_lit(j, ",\"dynamic\":{");
+    j_kv_str(j, "label", ns_label(s, "/UI/MPDMWait/time-pressing.txt", "Динамичные бои", "Dynamic battles"));
+    j_printf(j, ",\"on\":%s}", rd8(block + NS_S_DYNAMIC) ? "true" : "false");
+#endif
+    j_printf(j, ",\"settings_enabled\":%s", turn == 0 ? "true" : "false");
     j_lit(j, ",");
     j_kv_str(j, "arena_label", ns_tr("Арена", "Arena"));
     j_lit(j, ",");
