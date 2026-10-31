@@ -1,5 +1,14 @@
 # Changelog
 
+## Guest threads get the stack they ask for
+
+- `CreateThread` gives a thread at least its `dwStackSize` and at least the
+  image's `SizeOfStackReserve` (Windows' default), never less than 256 KB and
+  never more than 16 MB. Every thread used to get 256 KB: Hammers of Fate's
+  network threads run a routine with half a megabyte of locals, wrote below
+  their stack into the heap, and the LAN game crashed (in the NDb registry on
+  the client, at game start or later; in the create menu on the host).
+
 ## The same arithmetic on every host
 
 - Every target compiles with `-ffp-contract=off` (no FMA contraction, which

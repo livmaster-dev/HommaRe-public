@@ -167,9 +167,12 @@ keyboard, `0052cd40` mouse) tell their creator they are ready by setting a
 field it polls and then loop on `WaitForSingleObject` for the rest of the
 process, so a body run to completion inside `CreateThread` never comes back.
 
-Each guest thread owns a register file, a 256 KB guest stack, a TEB and a TLS
+Each guest thread owns a register file, a guest stack, a TEB and a TLS
 array, and runs on its own host thread so guest code can nest host C frames
-freely. **Exactly one of them executes at a time**, named by a baton held
+freely. The stack is what `CreateThread` asked for, but never less than the
+image's `SizeOfStackReserve` (1 MB for Heroes V) nor 256 KB, as on Windows: a
+guest stack is a heap block, and a thread that outgrows it writes over the heap
+below. **Exactly one of them executes at a time**, named by a baton held
 under a mutex. Nothing in the guest arena, the shims or the generated code
 needs a lock, because there is never more than one guest instruction in
 flight — the same invariant the single-threaded runtime had.

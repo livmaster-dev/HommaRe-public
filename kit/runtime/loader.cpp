@@ -39,6 +39,7 @@ namespace {
 std::string g_error;
 std::string g_exe_path;
 uint32_t g_base = 0, g_size = 0, g_entry = 0, g_iat_patched = 0, g_iat_data = 0;
+uint32_t g_stack_reserve = 0;
 std::vector<SectionInfo> g_sections;
 LoaderModule g_main;
 X86 g_ctx;
@@ -443,6 +444,9 @@ uint32_t loader_image_limit() {
 uint32_t loader_entry_point() {
     return g_entry;
 }
+uint32_t loader_stack_reserve() {
+    return g_stack_reserve;
+}
 const std::vector<SectionInfo> &loader_sections() {
     return g_sections;
 }
@@ -547,6 +551,7 @@ bool loader_load(const char *exe_path) {
     g_base = image_base;
     g_size = size_image;
     g_entry = image_base + entry_rva;
+    g_stack_reserve = rd<uint32_t>(file, opt_off + 72);
     g_main.name = RECOMP_EXECUTABLE;
     g_main.path = g_exe_path;
     g_main.base = g_base;
