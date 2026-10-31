@@ -267,6 +267,20 @@
 #define NS_LOAD_HS_LOAD 0x00738900
 #define NS_LOAD_HS_CONFIRMED 0x00738a90
 #define NS_L_HS_ROW 0x94
+/* The in-game Save screens, CSaveScreen<SHeaderInfo>, <SLanSaveHeaderInfo> and
+ * <SHotSeatHeaderInfo>: all 0x1f0 with their IScreen at +0x1e8, the load
+ * screen's NS_L_* fields and the kind's row click and delete (research notes
+ * save-screens-hof-map.md). */
+#define NS_VT_SAVE 0x00fa9340
+#define NS_SUB_SAVE 0x1e8
+#define NS_SAVE_SAVE 0x00737610         /* primary vt slot 0x38; thiscall (screen, 0), RET 4 */
+#define NS_S_EDIT 0x1b8                 /* the name's IEditLine (base 0x298) */
+#define NS_VT_SAVE_LAN 0x00fa9e0c
+#define NS_SAVE_LAN_SAVE 0x007468b0
+#define NS_VT_SAVE_HS 0x00fa99c4
+#define NS_SAVE_HS_SAVE 0x007391a0
+#define NS_SAVE_CAN 0x00734f60          /* fastcall ECX [screen+0x18c]: AL may save now */
+#define NS_S_GAME 0x18c
 #define NS_DIFF_OF_SAVE 0x00b0a010      /* V hash */
 #define NS_DIFF_ENTRY 0x00b09fd0        /* V hash */
 

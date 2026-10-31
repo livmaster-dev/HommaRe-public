@@ -52,6 +52,15 @@
 #define NS_LOAD_HS_LOAD 0x00728850
 #define NS_LOAD_HS_CONFIRMED 0x007289e0
 #define NS_L_HS_ROW 0x94
+/* Their Save screens, CSaveScreen<SLanSaveHeaderInfo> and <SHotSeatHeaderInfo>,
+ * also at +0x2c4; the save may be made only when 00729bf0 lets it (research
+ * notes save-screens-*-map.md). */
+#define NS_VT_SAVE_LAN 0x00fa3da0
+#define NS_SAVE_LAN_SAVE 0x00744130
+#define NS_VT_SAVE_HS 0x00fa2dac
+#define NS_SAVE_HS_SAVE 0x0072e080
+#define NS_SAVE_CAN 0x00729bf0      /* fastcall ECX [screen+0x198]: AL may save now */
+#define NS_S_GAME 0x198
 #define NS_SAVE_SAVE 0x007279e0     /* thiscall (screen, 0), RET 4: save (asks before overwriting) */
 #endif
 #ifndef NS_S_EDIT
@@ -105,26 +114,38 @@ enum {
  * SLanSaveHeaderInfo>, opened by Load on the LAN game's screen) and a hot
  * seat's (CLoadScreen<SHotSeatHeaderInfo>): the same screen with their own
  * functions and longer headers, the row's window at their end. */
+/* The Save screens (CSaveScreen<...>) share the load screen's fields, row
+ * click and delete of their kind; only the save function is their own. */
+#ifndef NS_SAVE_SAVE
+#define NS_SAVE_SAVE 0
+#endif
+#ifndef NS_SAVE_LAN_SAVE
+#define NS_SAVE_LAN_SAVE 0
+#endif
+#ifndef NS_SAVE_HS_SAVE
+#define NS_SAVE_HS_SAVE 0
+#endif
 typedef struct {
     uint32_t click, load, confirmed;
     uint32_t type; /* the game's type function's ECX: 0 a single game, 2 LAN, 4 hot seat */
     uint32_t row;  /* H_ROW */
+    uint32_t save; /* the Save screen's save: thiscall (screen, 0), RET 4 */
 } LoadKind;
 enum { KIND_SINGLE, KIND_LAN, KIND_HOTSEAT };
 static const LoadKind KINDS[] = {
-    {NS_LOAD_CLICK, NS_LOAD_LOAD, NS_LOAD_CONFIRMED, 0, H_ROW},
+    {NS_LOAD_CLICK, NS_LOAD_LOAD, NS_LOAD_CONFIRMED, 0, H_ROW, NS_SAVE_SAVE},
 #ifdef NS_VT_LOAD_LAN
-    {NS_LOAD_LAN_CLICK, NS_LOAD_LAN_LOAD, NS_LOAD_LAN_CONFIRMED, 2, NS_L_LAN_ROW},
+    {NS_LOAD_LAN_CLICK, NS_LOAD_LAN_LOAD, NS_LOAD_LAN_CONFIRMED, 2, NS_L_LAN_ROW, NS_SAVE_LAN_SAVE},
 #else
-    {0, 0, 0, 2, 0},
+    {0, 0, 0, 2, 0, 0},
 #endif
 #ifdef NS_VT_LOAD_HS
-    {NS_LOAD_HS_CLICK, NS_LOAD_HS_LOAD, NS_LOAD_HS_CONFIRMED, 4, NS_L_HS_ROW},
+    {NS_LOAD_HS_CLICK, NS_LOAD_HS_LOAD, NS_LOAD_HS_CONFIRMED, 4, NS_L_HS_ROW, NS_SAVE_HS_SAVE},
 #else
-    {0, 0, 0, 4, 0},
+    {0, 0, 0, 4, 0, 0},
 #endif
 };
-static int g_kind; /* KIND_*: the load screen being read (Save is a single game's) */
+static int g_kind; /* KIND_*: the kind of save the screen being read lists */
 
 /* Whether saves may be deleted here (a game without the flag: always). */
 static int can_delete(uint32_t screen) {
@@ -169,8 +190,8 @@ static void load_command(Scratch *s, uint32_t screen, const char *cmd) {
         set_name(s, screen, text);
         /* The game checks the name and asks before overwriting (its box,
          * shown natively). */
-        if (verb[0] == 's' && text[0])
-            ns_call(s, NS_SAVE_SAVE, screen, 0, &zero, 1);
+        if (verb[0] == 's' && text[0] && KINDS[g_kind].save)
+            ns_call(s, KINDS[g_kind].save, screen, 0, &zero, 1);
 #endif
         return;
     }
@@ -256,6 +277,12 @@ static void load_document(Json *j, Scratch *s, uint32_t screen) {
         if (ns_ptr(edit))
             ns_wstr_utf8(edit + 0x3c, text, sizeof text);
         name_ok = text[0] != 0;
+#ifdef NS_SAVE_CAN
+        /* As the game's own button: in a network game only the player the
+         * game lets save, and not while someone is busy. */
+        if (name_ok)
+            name_ok = ns_call(s, NS_SAVE_CAN, rd32(screen + NS_S_GAME), 0, NULL, 0) & 0xff;
+#endif
         j_lit(j, ",");
         j_kv_str(j, "name", text);
         j_lit(j, ",");
@@ -393,6 +420,31 @@ const NsScreen ns_save_game = {.id = "save_game", .vtable = NS_VT_SAVE, .sub = N
 #else
 const NsScreen ns_save_game = {.id = "save_game"};
 #endif
+#define SAVE_KIND(name, kind)                                                       \
+    static void name##_cmd(Scratch *s, uint32_t screen, const char *cmd) {          \
+        g_save = 1;                                                                 \
+        g_kind = kind;                                                              \
+        load_command(s, screen, cmd);                                               \
+    }                                                                               \
+    static void name##_doc(Json *j, Scratch *s, uint32_t screen) {                  \
+        g_save = 1;                                                                 \
+        g_kind = kind;                                                              \
+        load_document(j, s, screen);                                                \
+    }
+#if defined(NS_VT_SAVE) && defined(NS_VT_SAVE_LAN) && defined(NS_VT_LOAD_LAN)
+SAVE_KIND(lan_save, KIND_LAN)
+const NsScreen ns_lan_save = {.id = "lan_save", .vtable = NS_VT_SAVE_LAN, .sub = NS_SUB_SAVE,
+                              .command = lan_save_cmd, .document = lan_save_doc};
+#else
+const NsScreen ns_lan_save = {.id = "lan_save"};
+#endif
+#if defined(NS_VT_SAVE) && defined(NS_VT_SAVE_HS) && defined(NS_VT_LOAD_HS)
+SAVE_KIND(hs_save, KIND_HOTSEAT)
+const NsScreen ns_hotseat_save = {.id = "hotseat_save", .vtable = NS_VT_SAVE_HS, .sub = NS_SUB_SAVE,
+                                  .command = hs_save_cmd, .document = hs_save_doc};
+#else
+const NsScreen ns_hotseat_save = {.id = "hotseat_save"};
+#endif
 
 #else
 
@@ -401,5 +453,7 @@ const NsScreen ns_load_game = {.id = "load_game"};
 const NsScreen ns_save_game = {.id = "save_game"};
 const NsScreen ns_lan_load = {.id = "lan_load"};
 const NsScreen ns_hotseat_load = {.id = "hotseat_load"};
+const NsScreen ns_lan_save = {.id = "lan_save"};
+const NsScreen ns_hotseat_save = {.id = "hotseat_save"};
 
 #endif

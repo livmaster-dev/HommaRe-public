@@ -301,6 +301,20 @@ void fn_00557470(X86 *c);
 #define NS_LOAD_HS_LOAD    0x0062ecd0
 #define NS_LOAD_HS_CONFIRMED 0x0062ee60
 #define NS_L_HS_ROW        0x94
+/* The in-game Save screens, CSaveScreen<SHeaderInfo>, <SLanSaveHeaderInfo> and
+ * <SHotSeatHeaderInfo>: 4 bytes longer than the base game's (a LAN save
+ * callback at +0x2b0), so their IScreen is at +0x2c8; the name field and the
+ * NS_L_* fields are the load screen's, the row click and delete the load
+ * screen's of the kind (research notes save-screens-toe-map.md). */
+#define NS_VT_SAVE         0x00f5720c
+#define NS_SUB_SAVE        0x2c8
+#define NS_SAVE_SAVE       0x0062dfc0
+#define NS_VT_SAVE_LAN     0x00f58640
+#define NS_SAVE_LAN_SAVE   0x00644b20
+#define NS_VT_SAVE_HS      0x00f5778c
+#define NS_SAVE_HS_SAVE    0x0062f570
+#define NS_SAVE_CAN        0x00629ef0 /* fastcall ECX [screen+0x198]: AL may save now */
+#define NS_S_GAME          0x198
 #define NS_DIFF_OF_SAVE    0x00abe080 /* V hash */
 #define NS_DIFF_ENTRY      0x00abe040 /* V hash */
 
