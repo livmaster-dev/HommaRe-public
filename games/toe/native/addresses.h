@@ -508,3 +508,32 @@ void fn_00557470(X86 *c);
  * 008f3ff8 re-checked; rest lan-screens-toe.md). */
 /* NS_MAP_GOAL is the out-string form here (NS_MAP_GOAL_OUT 1 already defined): see §3. */
 #define NS_MPO_QUICK_LABEL     "Быстрая схватка", "Quick combat"   /* ToE's own words; V */
+
+/* The battle's "strike from a cell" mode (native/tap_attack.c): the base
+ * game's functions matched in this exe (research notes tap-attack-toe-map.md,
+ * 2026-10-31). The combat screen's fields sit lower and the ICombat and
+ * ICombatBase vtables are in another order; the key bindings did not move. */
+#define HOMM5_TAP_SCREEN_VTABLE 0x00f591b8 /* NUI::CCombatArenaScreen, the full object */
+#define HOMM5_TAP_FN_ACTION fn_0064e770    /* the action for what is under the cursor */
+#define HOMM5_TAP_FN_CLICK fn_0064c360     /* win_left_button_up */
+#define HOMM5_TAP_FN_PICK fn_0064e160      /* what is under the cursor, into P, RET 8 */
+#define HOMM5_TAP_CURSOR_X 0x0110c464      /* NUI::CCursor's position */
+#define HOMM5_TAP_CURSOR_Y 0x0110c468
+#define HOMM5_TAP_FN_GRID fn_0070d860      /* the grid cells' states */
+#define HOMM5_TAP_SET_CELL 0x0070e140
+#define HOMM5_TAP_ATTACK_CELLS 0x00b88ff0
+#define HOMM5_TAP_MOVE_ATTACK 0x00bcd3a0
+#define HOMM5_TAP_MOVE_ATTACK_VTABLE 0x00fbf004
+#define HOMM5_TAP_RELEASE 0x004e42e0
+#define HOMM5_TAP_FREE 0x004dd510
+#define HOMM5_TAP_SCR_COMBAT 0x2a0
+#define HOMM5_TAP_SCR_ACTIVE 0x2ac
+#define HOMM5_TAP_SCR_PHASE 0x2e0
+#define HOMM5_TAP_SCR_S 0x2ec
+#define HOMM5_TAP_SCR_P 0x2f4
+#define HOMM5_TAP_SCR_GRID 0x3c4
+#define HOMM5_TAP_SCR_SHIFT 0x4c
+#define HOMM5_TAP_SCR_CTRL 0x54
+#define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x6c
+#define HOMM5_TAP_UNIT_CELL 0x40
+#define HOMM5_TAP_UNIT_SIZE 0x44

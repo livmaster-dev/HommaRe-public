@@ -52,8 +52,9 @@
 #include RECOMP_ADDRESS_HEADER
 #endif
 
-/* The base game's addresses. An expansion has the mode once its addresses.h
- * names them (not mapped yet): until then only the stubs at the end build. */
+/* The base game's addresses; Hammers of Fate's and Tribes of the East's are
+ * in their addresses.h. A game whose addresses.h names none builds only the
+ * stubs at the end. */
 #ifndef RECOMP_ADDRESS_HEADER
 #define HOMM5_TAP_SCREEN_VTABLE 0x00fa78dc /* NUI::CCombatArenaScreen, the full object */
 #define HOMM5_TAP_FN_ACTION fn_0074e470    /* the action for what is under the cursor */
@@ -117,16 +118,32 @@ static int park_enabled(void) {
 
 #if TAP_SUPPORTED
 
+/* The combat screen's fields and the interfaces' slots that the expansions
+ * moved: the base game's here, theirs in their addresses.h. */
+#ifndef HOMM5_TAP_SCR_COMBAT
+#define HOMM5_TAP_SCR_COMBAT 0x3d8
+#define HOMM5_TAP_SCR_ACTIVE 0x3e4
+#define HOMM5_TAP_SCR_PHASE 0x430
+#define HOMM5_TAP_SCR_S 0x43c
+#define HOMM5_TAP_SCR_P 0x444
+#define HOMM5_TAP_SCR_GRID 0x4f0
+#define HOMM5_TAP_SCR_SHIFT 0x4c
+#define HOMM5_TAP_SCR_CTRL 0x54
+#define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x78
+#define HOMM5_TAP_UNIT_CELL 0x3c
+#define HOMM5_TAP_UNIT_SIZE 0x40
+#endif
+
 enum {
     /* The combat screen (the full object, ECX of the wrapped functions). */
-    SCR_COMBAT = 0x3d8,  /* NWorld::ICombat */
-    SCR_ACTIVE = 0x3e4,  /* the stack whose turn it is; cleared as its command goes */
-    SCR_PHASE = 0x430,   /* 0x1000 while the armies are placed */
-    SCR_S = 0x43c,       /* the action state S */
-    SCR_P = 0x444,       /* the pick P */
-    SCR_GRID = 0x4f0,    /* the grid's cells, ECX of 0080bac0 */
-    SCR_SHIFT = 0x4c,    /* key bindings: a byte behind the pointer at +4 */
-    SCR_CTRL = 0x54,
+    SCR_COMBAT = HOMM5_TAP_SCR_COMBAT, /* NWorld::ICombat */
+    SCR_ACTIVE = HOMM5_TAP_SCR_ACTIVE, /* the stack whose turn it is; cleared as its command goes */
+    SCR_PHASE = HOMM5_TAP_SCR_PHASE,   /* 0x1000 while the armies are placed */
+    SCR_S = HOMM5_TAP_SCR_S,           /* the action state S */
+    SCR_P = HOMM5_TAP_SCR_P,           /* the pick P */
+    SCR_GRID = HOMM5_TAP_SCR_GRID,     /* the grid's cells, ECX of 0080bac0 */
+    SCR_SHIFT = HOMM5_TAP_SCR_SHIFT,   /* key bindings: a byte behind the pointer at +4 */
+    SCR_CTRL = HOMM5_TAP_SCR_CTRL,
     /* S */
     S_KIND = 0x30,       /* 2 move, 3 melee, 4/5 shoot ... */
     S_ATTACKER = 0x34,
@@ -143,10 +160,10 @@ enum {
     P_CELL_Y = 0x14,
     P_BAR = 0x24,        /* byte: picked on the turn order bar, not the field */
     /* ICombat vtable */
-    COMBAT_CELL_TO_WORLD = 0x78, /* (float out[3], const int cell[2]): the centre, on the ground */
+    COMBAT_CELL_TO_WORLD = HOMM5_TAP_COMBAT_CELL_TO_WORLD, /* (float out[3], const int cell[2]): the centre, on the ground */
     /* ICombatBase vtable */
-    UNIT_CELL = 0x3c,    /* (int out[2]); a 2x2 stack's is its max-x, max-y corner */
-    UNIT_SIZE = 0x40,    /* 1 or 2 */
+    UNIT_CELL = HOMM5_TAP_UNIT_CELL, /* (int out[2]); a 2x2 stack's is its max-x, max-y corner */
+    UNIT_SIZE = HOMM5_TAP_UNIT_SIZE, /* 1 or 2 */
     /* CMoveAttackCreatureCmd */
     CMD_REFS = 0x08,
     CMD_TICK = 0x0c,
@@ -522,7 +539,9 @@ void homm5_tap_click(X86 *c) {
     }
     const uint32_t S = scr + SCR_S, P = scr + SCR_P;
     const uint32_t kind = rd32(S + S_KIND);
-    const int melee = kind == 3 && !rd8(P + P_BAR);
+    /* Tribes of the East also strikes a town's building in melee: the game's
+     * own click does that, with no cell to choose. */
+    const int melee = kind == 3 && !rd8(P + P_BAR) && !rd32(P + P_BUILDING);
     switch (g_state) {
     case TAP_IDLE:
         /* Shift or Ctrl: the game's own click (Ctrl makes a shooter strike). */

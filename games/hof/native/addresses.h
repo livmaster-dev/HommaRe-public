@@ -593,3 +593,33 @@
 #define NS_MPW_GI_PLAYERS      0x84        /* players in = [info+0x84], as HoF's own list reads it; V */
 #define NS_MPO_QUICK_LABEL     "Быстрая схватка", "Quick combat"   /* HoF's own words; V */
 #define NS_MPO_AUTOSAVE_LABEL  "Динамичные бои", "Dynamic battles" /* `realtime` in HoF; V */
+
+/* The battle's "strike from a cell" mode (native/tap_attack.c): the base
+ * game's functions matched instruction by instruction (research notes
+ * tap-attack-hof-map.md, 2026-10-31). The combat screen's fields sit 0x144
+ * (up to the controller) and 0x140 (from the phase on) lower, and the
+ * ICombat and ICombatBase vtables are in another order. */
+#define HOMM5_TAP_SCREEN_VTABLE 0x00fad58c /* NUI::CCombatArenaScreen, the full object */
+#define HOMM5_TAP_FN_ACTION fn_0074e880    /* the action for what is under the cursor */
+#define HOMM5_TAP_FN_CLICK fn_0074c540     /* win_left_button_up */
+#define HOMM5_TAP_FN_PICK fn_0074e210      /* what is under the cursor, into P, RET 8 */
+#define HOMM5_TAP_CURSOR_X 0x0114bbd4      /* NUI::CCursor's position */
+#define HOMM5_TAP_CURSOR_Y 0x0114bbd8
+#define HOMM5_TAP_FN_GRID fn_007f8bb0      /* the grid cells' states */
+#define HOMM5_TAP_SET_CELL 0x007f9480
+#define HOMM5_TAP_ATTACK_CELLS 0x00bc6140
+#define HOMM5_TAP_MOVE_ATTACK 0x00bf6ac0
+#define HOMM5_TAP_MOVE_ATTACK_VTABLE 0x01009a0c
+#define HOMM5_TAP_RELEASE 0x00614700
+#define HOMM5_TAP_FREE 0x0060de20
+#define HOMM5_TAP_SCR_COMBAT 0x294
+#define HOMM5_TAP_SCR_ACTIVE 0x2a0
+#define HOMM5_TAP_SCR_PHASE 0x2f0
+#define HOMM5_TAP_SCR_S 0x2fc
+#define HOMM5_TAP_SCR_P 0x304
+#define HOMM5_TAP_SCR_GRID 0x3b0
+#define HOMM5_TAP_SCR_SHIFT 0x44
+#define HOMM5_TAP_SCR_CTRL 0x4c
+#define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x6c
+#define HOMM5_TAP_UNIT_CELL 0x70
+#define HOMM5_TAP_UNIT_SIZE 0x6c
