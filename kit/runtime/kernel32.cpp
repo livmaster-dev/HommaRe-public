@@ -2046,7 +2046,19 @@ void k_WaitForMultipleObjects(X86 *c) {
 //                            (the pre-scheduler behaviour, for bisection)
 // -------------------------------------------------------------------------
 const uint32_t STILL_ACTIVE_ = 0x103;
-const uint32_t THREAD_STACK_BYTES = 0x00040000u; // 256 KB, committed
+// The smallest guest thread stack, committed. A thread gets at least what its
+// creator asked for and at least the image's SizeOfStackReserve, as on Windows:
+// Heroes V's network threads run a routine (00dd11b0 in Hammers of Fate) with
+// half a megabyte of locals, and on a 256 KB stack it wrote over whatever the
+// heap kept below it.
+const uint32_t THREAD_STACK_BYTES = 0x00040000u; // 256 KB
+const uint32_t THREAD_STACK_MAX = 0x01000000u;   // 16 MB
+
+uint32_t thread_stack_bytes(uint32_t requested) {
+    uint32_t n = std::max(requested, loader_stack_reserve());
+    n = std::min(std::max(n, THREAD_STACK_BYTES), THREAD_STACK_MAX);
+    return (n + 0xffffu) & ~0xffffu;
+}
 const uint32_t WAIT_TIMEOUT_ = 0x102;
 
 // What a blocked thread is waiting for.  A blocked thread is not runnable and
@@ -3590,11 +3602,11 @@ bool request_process_exit(uint32_t code) {
 // TEB with the SEH head empty and the stack bounds Windows records there, and
 // a TLS array with the image's initial block and all other slots zeroed.
 // Returns false when the guest heap cannot supply them.
-bool thread_prepare_context(GuestThread *t) {
-    t->stack_lo = heap_alloc(THREAD_STACK_BYTES, true, 16);
+bool thread_prepare_context(GuestThread *t, uint32_t stack_bytes) {
+    t->stack_lo = heap_alloc(stack_bytes, true, 16);
     if (!t->stack_lo)
         return false;
-    t->stack_hi = t->stack_lo + THREAD_STACK_BYTES;
+    t->stack_hi = t->stack_lo + stack_bytes;
     uint32_t block = heap_alloc(TEB_SIZE + TLS_SLOTS * 4, true, 16);
     if (!block) {
         heap_free(t->stack_lo);
@@ -3672,13 +3684,13 @@ void run_thread_body(X86 *c, uint32_t h) {
 // Starts a cooperative thread.  It does not run yet: CreateThread returns to
 // its caller first, exactly as on Windows, and the new thread gets the baton
 // the first time somebody yields.
-bool thread_spawn(uint32_t h) {
+bool thread_spawn(uint32_t h, uint32_t stack_bytes) {
     cur_thread(); // main is threads()[0]
     GuestThread *t = new GuestThread();
     t->index = threads().size();
     t->handle = h;
     t->id = g_next_thread_id++;
-    if (!thread_prepare_context(t)) {
+    if (!thread_prepare_context(t, stack_bytes)) {
         delete t;
         return false;
     }
@@ -3730,7 +3742,7 @@ void k_CreateThread(X86 *c) {
         return;
     }
 
-    if (!thread_spawn(h)) {
+    if (!thread_spawn(h, thread_stack_bytes(arg(c, 1)))) {
         LOGW("CreateThread(%08x): no context available, reporting failure", start);
         handles()[h].exit_code = 0;
         handles()[h].thread_ran = true;
