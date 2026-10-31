@@ -426,7 +426,7 @@ void homm5_anchor_axis(X86 *c) {
      * edge, in Hammers of Fate too (its message boxes are centred on the
      * whole screen; its stack counters, from the interface's own edge, are
      * the exception above). */
-    const float game_x = span_x, game_w = span_w;
+    float game_x = span_x, game_w = span_w;
     const int edge = !root && !follows_picture && (anchor == EPA_LOW_END || anchor == EPA_HIGH_END) &&
                      near(parent_x, span_x) && near(parent_w, span_w);
     /* A window the game placed is laid out at the offset it last gave it. One
@@ -445,6 +445,14 @@ void homm5_anchor_axis(X86 *c) {
     }
     if (note && note->placed) {
         Laid *l = note;
+#ifdef HOMM5_VT_PLACED_FROM_INTERFACE
+        /* Hammers of Fate's battle hint (cursor_prediction) is placed under
+         * the cursor, in the interface's units: from its own edge. */
+        if (l->vt == HOMM5_VT_PLACED_FROM_INTERFACE) {
+            game_x = 0.0f;
+            game_w = 1024.0f;
+        }
+#endif
         static int traced_placed;
         if (trace_wide() && traced_placed < 200) {
             ++traced_placed;
