@@ -8,10 +8,11 @@
 // socket is non-blocking; a guest socket left blocking (the WinSock default)
 // waits by retrying with the scheduler's sleep between tries, so the other
 // guest threads run meanwhile. Addresses and ports are network order on both
-// sides. Where POSIX and WinSock differ the guest gets WinSock's answer: a
-// failed connect shows in select's exceptfds and SO_ERROR (not writefds), a
-// datagram longer than the buffer is WSAEMSGSIZE, a broadcast without
-// SO_BROADCAST is WSAEACCES.
+// sides, copied as bytes; their octets and numbers come out through
+// net_order.h, never through the host's htons or byte order. Where POSIX and
+// WinSock differ the guest gets WinSock's answer: a failed connect shows in
+// select's exceptfds and SO_ERROR (not writefds), a datagram longer than the
+// buffer is WSAEMSGSIZE, a broadcast without SO_BROADCAST is WSAEACCES.
 //
 // Beyond Windows' own stack, for LAN play where a broadcast would not arrive:
 // a limited broadcast (255.255.255.255) goes out as the directed broadcast of
@@ -28,6 +29,7 @@
 #include "guest.h"
 #include "imports.h"
 #include "memory.h"
+#include "net_order.h"
 #include "win32.h"
 #include "../platform/os.h"
 
@@ -61,7 +63,8 @@ void sched_sleep_for_host_call(uint32_t ms); // kernel32.cpp
 namespace {
 
 const uint32_t SOCKET_ERROR = 0xffffffffu, INVALID_SOCKET = 0xffffffffu;
-const uint32_t LIMITED_BROADCAST = 0xffffffffu, LOOPBACK = 0x0100007fu; // network order
+// Network order (net_order.h), the same bytes on any host.
+const uint32_t LIMITED_BROADCAST = 0xffffffffu, LOOPBACK = net_ip(127, 0, 0, 1);
 enum : uint32_t {
     WSAEINTR = 10004, WSAEBADF = 10009, WSAEACCES = 10013, WSAEFAULT = 10014, WSAEINVAL = 10022,
     WSAEMFILE = 10024, WSAEWOULDBLOCK = 10035, WSAEINPROGRESS = 10036, WSAEALREADY = 10037,
@@ -183,12 +186,10 @@ double now_ms() {
 
 // ------------------------------------------------------------ addresses --
 
-uint16_t swap16(uint16_t v) {
-    return (uint16_t)((v >> 8) | (v << 8));
-}
-
 // The guest's sockaddr_in (16 bytes: family16, port, addr, zero[8]) at `a`:
-// address and port in network order.
+// address and port in network order. Both are copied as bytes, which the
+// guest's memory and a sockaddr_in hold alike; the family is the guest's
+// little-endian short.
 bool to_host(uint32_t a, uint32_t len, uint32_t *addr, uint16_t *port) {
     if (!a || len < 8 || !gm_valid(a, 8))
         return false;
@@ -198,25 +199,30 @@ bool to_host(uint32_t a, uint32_t len, uint32_t *addr, uint16_t *port) {
 }
 
 void to_guest(uint32_t addr, uint16_t port, uint32_t a, uint32_t lenp) {
-    if (!a)
+    if (!a || (lenp && !gm_valid(lenp, 4)))
         return;
     uint32_t cap = lenp ? rd32(lenp) : 16;
+    if (cap > 16)
+        cap = 16;
+    if (!gm_valid(a, cap))
+        return;
     uint8_t buf[16] = {};
-    buf[0] = 2; // AF_INET
+    buf[0] = 2; // AF_INET, the guest's little-endian short
     memcpy(buf + 2, &port, 2);
     memcpy(buf + 4, &addr, 4);
-    memcpy(g_mem + a, buf, cap < 16 ? cap : 16);
+    memcpy(g_mem + a, buf, cap);
     if (lenp)
         wr32(lenp, 16);
 }
 
 std::string dotted(uint32_t a) {
     char s[20];
-    snprintf(s, sizeof s, "%u.%u.%u.%u", a & 0xff, (a >> 8) & 0xff, (a >> 16) & 0xff, a >> 24);
+    snprintf(s, sizeof s, "%u.%u.%u.%u", net_ip_octet(a, 0), net_ip_octet(a, 1), net_ip_octet(a, 2),
+             net_ip_octet(a, 3));
     return s;
 }
 std::string addr_str(uint32_t addr, uint16_t port) {
-    return dotted(addr) + ":" + std::to_string(swap16(port));
+    return dotted(addr) + ":" + std::to_string(net_port_number(port));
 }
 // The first bytes of a guest buffer in hex, for the trace.
 std::string hex_head(uint32_t buf, uint32_t len) {
@@ -427,7 +433,8 @@ PeerList &net_peers() {
 // the sender's address), so one copy would hear its own messages and the
 // other none. For the ports game.toml [net] movable_udp_ports lists (or
 // RECOMP_NET_MOVABLE_UDP_PORTS, commas; empty for none), a bind that finds
-// the port taken moves to port + k * MOVED_PORT_STRIDE instead: peers answer
+// the port taken moves instead to the first port + k * MOVED_PORT_STRIDE
+// (k = 1 to MOVED_PORT_SPAN) that it may have: peers answer
 // the port a datagram came from, and a broadcast to a movable port also goes
 // to the moved ports at this machine's own address. The stride keeps a
 // game's neighbouring ports out of each other's way.
@@ -494,9 +501,10 @@ int64_t send_broadcast(Sock &k, const uint8_t *data, uint32_t len, int flags, ui
         copies.insert(peers.addrs.begin(), peers.addrs.end());
     for (uint32_t a : copies)
         os_sock_sendto(k.os, data, len, flags, a, port);
-    if (movable_port(swap16(port)))
-        for (uint32_t i = 1; i <= MOVED_PORT_SPAN && swap16(port) + i * MOVED_PORT_STRIDE <= 65535; ++i)
-            os_sock_sendto(k.os, data, len, flags, self, swap16((uint16_t)(swap16(port) + i * MOVED_PORT_STRIDE)));
+    const uint32_t number = net_port_number(port);
+    if (movable_port(number))
+        for (uint32_t i = 1; i <= MOVED_PORT_SPAN && number + i * MOVED_PORT_STRIDE <= 65535; ++i)
+            os_sock_sendto(k.os, data, len, flags, self, net_port((uint16_t)(number + i * MOVED_PORT_STRIDE)));
     if (result >= 0)
         *error = OS_NET_OK;
     return result;
@@ -642,20 +650,31 @@ void winsock_bind(X86 *c) {
     // A second copy of the game on this machine (see movable_port). Everything
     // else, TCP included, fails as on Windows.
     if (os_net_error() == OS_NET_ADDRINUSE && k->type == OS_SOCK_DGRAM && !k->reuseaddr &&
-        movable_port(swap16(port))) {
+        movable_port(net_port_number(port))) {
         for (uint32_t i = 1; i <= MOVED_PORT_SPAN; ++i) {
-            const uint32_t to = swap16(port) + i * MOVED_PORT_STRIDE;
+            const uint32_t to = net_port_number(port) + i * MOVED_PORT_STRIDE;
             if (to > 65535)
                 break;
-            if (os_sock_bind(k->os, addr, swap16((uint16_t)to)) == 0) {
+            if (os_sock_bind(k->os, addr, net_port((uint16_t)to)) == 0) {
                 log_msg(1, "WSOCK32: UDP port %u is in use (another copy of the game on this machine?); "
                            "socket %#x bound %u instead",
-                        swap16(port), arg(c, 0), to);
+                        net_port_number(port), arg(c, 0), to);
                 set_eax(c, 0);
                 return;
             }
-            if (os_net_error() != OS_NET_ADDRINUSE)
+            // Taken. Windows answers WSAEACCES instead when another account
+            // holds the port (the DNS client service keeps a few random ones
+            // in the dynamic range), or when it is in a range the system
+            // excludes (netsh int ipv4 show excludedportrange protocol=udp).
+            // Either way the next one may do.
+            const OsNetError e = os_net_error();
+            if (e != OS_NET_ADDRINUSE && e != OS_NET_ACCES) {
+                const uint32_t w = last_wsa_error();
+                log_msg(1,
+                        "WSOCK32: UDP port %u is in use, and %u cannot be bound instead: %u (%s)",
+                        net_port_number(port), to, w, wsa_error_name(w));
                 break;
+            }
         }
         os_sock_bind(k->os, addr, port); // report the port the guest asked for
     }
@@ -1174,7 +1193,7 @@ void winsock_gethostbyname(X86 *c) {
             addrs.push_back(f.addr);
     } else if (sscanf(name.c_str(), "%u.%u.%u.%u%c", &v[0], &v[1], &v[2], &v[3], &tail) == 4 && v[0] < 256 &&
                v[1] < 256 && v[2] < 256 && v[3] < 256) {
-        addrs.push_back(v[0] | (v[1] << 8) | (v[2] << 16) | (v[3] << 24));
+        addrs.push_back(net_ip((uint8_t)v[0], (uint8_t)v[1], (uint8_t)v[2], (uint8_t)v[3]));
     } else {
         addrs = resolve(name);
     }
@@ -1192,12 +1211,13 @@ void winsock_gethostbyname(X86 *c) {
 
 void winsock_gethostbyaddr(X86 *c) {
     uint32_t p = arg(c, 0), len = arg(c, 1);
-    if (!p || len < 4) {
+    if (!p || len < 4 || !gm_valid(p, 4)) {
         set_last_error(WSAEFAULT);
         set_eax(c, 0);
         return;
     }
-    uint32_t a = rd32(p);
+    uint32_t a; // the in_addr's bytes, network order
+    memcpy(&a, g_mem + p, 4);
     set_eax(c, guest_hostent(dotted(a), {a}));
 }
 

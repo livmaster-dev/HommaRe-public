@@ -151,7 +151,19 @@ extern uint8_t *g_mem;
  * the accessors below are what call it. */
 void recomp_null_access(uint32_t addr, int write);
 
-/* Little-endian host (ARM64) matches the guest, so memcpy is a plain load. */
+/* Little-endian host (ARM64) matches the guest, so memcpy is a plain load.
+ * That holds on every host the kit builds for (x86_64, arm64, wasm32), and
+ * the runtime leans on it well beyond these accessors (memcpy of host
+ * integers to and from g_mem, the XMM lanes, the FPU images). A big-endian
+ * host would run with every guest value byte-swapped - in multiplayer, a
+ * desync rather than a crash - so it fails to build instead. */
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "x86.h: guest memory access assumes a little-endian host"
+#endif
+#elif !defined(_WIN32)
+#error "x86.h: cannot tell the host's byte order (no __BYTE_ORDER__)"
+#endif
 RECOMP_HOT_INLINE uint8_t rd8(uint32_t a) {
     RECOMP_NULL_GUARD(a, 0);
     return g_mem[a];

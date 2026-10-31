@@ -265,6 +265,16 @@ dropped unless `MSG_PEEK`); a broadcast without `SO_BROADCAST` is `WSAEACCES`;
 unbound socket is `WSAEINVAL`. `gethostname` is the game's id, and
 `gethostbyname` of it lists every interface's address, loopback last.
 
+Byte order. The guest builds its packets and sockaddrs in its own memory, so
+the payload is the same bytes from every host. Addresses and ports cross
+between the guest and the platform layer as network-order bytes, copied whole;
+where the runtime needs an octet or a port's number (a moved port, a dotted
+quad, the trace) it goes through `net_order.h`, byte by byte, never through
+the host's `htons` or the host's byte order. The guest's own `htons`, `htonl`,
+`inet_addr` and `inet_ntoa` work on the guest's little-endian values and always
+swap. The runtime as a whole assumes a little-endian host (guest memory is
+read with `memcpy`); `x86.h` refuses to build on any other.
+
 Broadcasts. Heroes V's LAN screen looks for games with a datagram to
 255.255.255.255 and another to the directed broadcast it derives from its own
 address by address class (10.255.255.255 for a 10.x.y.z address, whatever the
