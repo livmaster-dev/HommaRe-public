@@ -1,5 +1,16 @@
 # Changelog
 
+## Host code rounds to nearest wherever the guest reaches it
+
+- The host's tick (`boot_tick`), the scheduler's idle waiter and the turn's
+  housekeeping after the events (`after_events`) switch to round-to-nearest
+  and back: they are reached from translated code without an import, in the
+  guest's rounding mode (toward zero in Heroes V). The window's safe insets
+  came out one ulp apart on alternate turns, so every turn published a
+  change: a log line and a display generation each frame. On a foldable
+  iPhone (the Duo, a camera in a corner) that was 600 MB of log in two
+  minutes and a busy CPU at the main menu.
+
 ## Guest threads get the stack they ask for
 
 - `CreateThread` gives a thread at least its `dwStackSize` and at least the
