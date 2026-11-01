@@ -51,15 +51,17 @@ battery when nothing moves.
 
 ## What's new
 
-**0.1-playable-344** (October 2026) · [all changes](CHANGELOG.md)
+**0.1-playable-421** (October 2026) · [all changes](CHANGELOG.md)
 
-- **Install from GOG.com:** sign in to GOG in the launcher and it downloads the games you
-  own straight onto the Mac, iPad or iPhone, in English or Russian. No installer files
-  needed; they still work too.
-- **Online play through ubi-gs:** *Multi Player → Ubi.com* connects to a community server
-  standing in for Ubisoft's closed one.
-- **Hammers of Fate:** full screen with the English game on iPhone and iPad, and the
-  main menu's *Options* works with native menus.
+- **German, French and Polish** GOG releases: install them from GOG.com or their
+  installers, and the native screens speak their language.
+- **Hammers of Fate's local network games** no longer crash.
+- **The original game's arithmetic on every device:** the expansions create games on
+  ubi-gs. Network games need this build on every device.
+- **More native screens:** Load and Save in network and hot-seat games, Save in the
+  expansions, their LAN lobbies and duels.
+- **Touch:** the tap-to-strike battle in Hammers of Fate and Tribes of the East, and a
+  stack splits when you drag it and hold still.
 
 ## Highlights
 
