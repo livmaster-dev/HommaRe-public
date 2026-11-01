@@ -2491,7 +2491,14 @@ void sched_wait_locked(size_t me, double until, double max_slice) {
         // handoff makes short mouse/keyboard workers cost a full 2 ms slice,
         // many times per rendered frame while the pointer moves. Poll events
         // first, then wait on the notification the returning worker signals.
+        // Host code rounds to nearest (x86.h); the scheduler is reached from
+        // translated code too, in the guest's rounding mode.
+        const unsigned guest_rc = recomp_host_rc();
+        if (guest_rc != 0)
+            recomp_host_set_rc(0);
         waiter(awaiting_baton ? 0.0 : slice);
+        if (guest_rc != 0)
+            recomp_host_set_rc(guest_rc);
         g_in_idle_slice = false;
         g_sched_m.lock();
         if (!awaiting_baton || g_baton == me)
