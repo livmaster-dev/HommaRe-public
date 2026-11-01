@@ -55,6 +55,7 @@
 #include "../../dx/host_d9.h"
 #include "../../runtime/loader.h"
 #include "../../runtime/mods_seam.h"
+#include "../../runtime/x86.h"
 #include "../../runtime/native_seam.h"
 #include "../../runtime/win32.h"
 
@@ -2301,8 +2302,24 @@ void sync_native_screen() {
     }
 }
 
-// The housekeeping every turn does once the events are in.
+static void after_events_nearest();
+
+// The housekeeping every turn does once the events are in. It rounds to
+// nearest whoever calls it: the pump runs from translated code too (the
+// game's message loop, an idle wait), in the guest's rounding mode, toward
+// zero in Heroes V, and the window's safe insets then came out one ulp apart
+// from one turn to the next - a "change" published, logged and drawn every
+// frame (hundreds of megabytes of log on an iPhone in minutes).
 void after_events() {
+    const unsigned guest_rc = recomp_host_rc();
+    if (guest_rc != 0)
+        recomp_host_set_rc(0);
+    after_events_nearest();
+    if (guest_rc != 0)
+        recomp_host_set_rc(guest_rc);
+}
+
+static void after_events_nearest() {
     publish_safe_insets();
     install_trackpad();
     update_prompt_text_input();
