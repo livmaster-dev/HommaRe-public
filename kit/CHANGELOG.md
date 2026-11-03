@@ -1,5 +1,24 @@
 # Changelog
 
+## Native touch: gestures handed to the game, no hidden cursor
+
+- A new seam, `recomp_touch_event(kind, phase, x, y, w, h, count)` in
+  `runtime/native_seam.h`: a game that answers it gets a finger's gestures
+  (down, tap with its count, press, drag, right tap, and "a mouse is back")
+  at their point, and acts on them itself. `host_touch_key` presses a key
+  for screens that wait for any key. Weak stubs answer "no", so a game
+  without it keeps the cursor model.
+- `TouchMapper::set_native`: one finger turns into those gestures instead of
+  a placed cursor and clicks; the camera, lists and two to four fingers are
+  as before. Nine new tests in `input_touch_tests`.
+- The host moves its cursor off the window while a finger is in charge
+  (`GetCursorPos` looks past the game), and a mouse, trackpad or Pencil
+  brings it back. A list follows a finger with an exact scroll at its point.
+- The setting `host.touch/native` (off by default; `RECOMP_TOUCH_NATIVE=0|1`
+  overrides it), shown in the launcher on iPad and iPhone as "Touch: Cursor /
+  Native" in its ten languages. `RECOMP_TOUCH_SCRIPT=<file>` plays scripted
+  fingers for runs without a screen.
+
 ## Host code rounds to nearest wherever the guest reaches it
 
 - The host's tick (`boot_tick`), the scheduler's idle waiter and the turn's

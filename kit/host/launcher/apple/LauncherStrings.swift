@@ -129,6 +129,9 @@ enum L10n {
     static var cameraButtons: String { t("cameraButtons") }
     static var hideButtons: String { t("hideButtons") }
     static var battleCells: String { t("battleCells") }
+    static var touchMode: String { t("touchMode") }
+    static var touchNative: String { t("touchNative") }
+    static var touchCursor: String { t("touchCursor") }
     static var phoneInterface: String { t("phoneInterface") }
     static var silentMode: String { t("silentMode") }
     static var respect: String { t("respect") }

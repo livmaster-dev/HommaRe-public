@@ -533,6 +533,42 @@
    "pl": "Dotykowa bitwa",
    "zh-Hans": "触屏友好战斗"
   },
+  "touchMode": {
+   "en": "Touch",
+   "ru": "Касания",
+   "cs": "Dotyk",
+   "de": "Berührung",
+   "es": "Táctil",
+   "fr": "Tactile",
+   "it": "Tocco",
+   "hu": "Érintés",
+   "pl": "Dotyk",
+   "zh-Hans": "触控"
+  },
+  "touchNative": {
+   "en": "Native",
+   "ru": "Нативные",
+   "cs": "Nativní",
+   "de": "Nativ",
+   "es": "Nativo",
+   "fr": "Natif",
+   "it": "Nativo",
+   "hu": "Natív",
+   "pl": "Natywny",
+   "zh-Hans": "原生"
+  },
+  "touchCursor": {
+   "en": "Cursor",
+   "ru": "Курсор",
+   "cs": "Kurzor",
+   "de": "Mauszeiger",
+   "es": "Cursor",
+   "fr": "Curseur",
+   "it": "Cursore",
+   "hu": "Kurzor",
+   "pl": "Kursor",
+   "zh-Hans": "光标"
+  },
   "hideButtons": {
    "en": "Hide",
    "ru": "Скрывать",

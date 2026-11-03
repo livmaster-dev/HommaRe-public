@@ -114,7 +114,7 @@ struct TouchPoint {
 };
 
 struct TouchAction {
-    enum Kind { Motion, Button, Key, Wheel, Camera, Gesture } kind;
+    enum Kind { Motion, Button, Key, Wheel, Camera, Gesture, Native } kind;
     // Motion only: also place the game's own cursor here. True for a press
     // and for a left drag; false while the wheel button is held, when the
     // game scrolls or rotates from relative movement instead.
@@ -132,6 +132,9 @@ struct TouchAction {
     double zoom = 1, turn = 0;
     // Gesture: one the game gives a meaning of its own (runtime/native_seam.h
     // RECOMP_TOUCH_GESTURE_*), delivered in order with the clicks around it.
+    // Native: the gesture itself for a game that acts on it at the point
+    // (runtime/native_seam.h recomp_touch_event): RECOMP_TOUCH_EVENT_* here,
+    // RECOMP_TOUCH_PHASE_* in phase, at (x, y); a tap's count in button.
     int gesture = 0;
 };
 
@@ -169,6 +172,22 @@ class TouchMapper {
     //   a drag aims without buttons.
     void set_context(int flags) {
         context_ = flags;
+    }
+    // Native gestures (runtime/native_seam.h recomp_touch_event), for a game
+    // that acts on a gesture at its point with no cursor to place: one finger
+    // becomes Native actions - it touched, tapped (with the count of a double
+    // tap), rested and moved while resting, dragged the interface - instead of
+    // placements and clicks, and a two-finger tap a Native right tap. What
+    // the game says lies under the finger (set_context, now its answer for the
+    // point it touched) still picks the camera or a list for a drag, and
+    // multi-finger gestures are as with hover. Implies hover.
+    void set_native(bool on) {
+        native_ = on;
+        if (on)
+            hover_ = true;
+    }
+    bool native() const {
+        return native_;
     }
     // A game that moves its map camera itself (runtime/native_seam.h
     // recomp_camera_gesture): on a world map a one-finger drag and any
@@ -236,6 +255,16 @@ class TouchMapper {
     bool scrolling_ = false;      // a drag over a list: the wheel scrolls it
     double scroll_y_ = 0;         // the finger's last point that sent a notch
     bool hover_ = false;
+    bool native_ = false;
+    bool native_drag_ = false;    // native: an interface drag under way (Native drag events)
+    bool native_press_ = false;   // native: the finger rested; a Native press is under way
+    bool native_pressed_moved_ = false;
+    int native_taps_ = 0;         // native: the last tap's count, for a double tap
+    double native_tap_x_ = 0, native_tap_y_ = 0;
+    uint64_t native_tap_ns_ = 0;
+    void native_event(std::vector<TouchAction> *out, int kind, int phase, double x, double y,
+                      int count = 1);
+    void native_tap(std::vector<TouchAction> *out, double x, double y, uint64_t now);
     bool scrubbing_ = false;      // hover: the rested finger moved; the cursor follows it
     // Hover: a second finger landed beside a resting first one. Its quick lift
     // right-clicks at the first finger; the gesture then ends without more clicks.

@@ -1087,6 +1087,168 @@ static void test_hover_split_needs_the_game_and_ends_with_the_drag() {
     CHECK(has_button(out) && has_key(out, SDL_SCANCODE_LSHIFT, false));
 }
 
+// --- native gestures (runtime/native_seam.h recomp_touch_event) -------------
+
+#include "../../runtime/native_seam.h"
+
+static bool native_is(const TouchAction &a, int kind, int phase, double x, double y) {
+    return a.kind == TouchAction::Native && a.gesture == kind && a.phase == phase && a.x == x &&
+           a.y == y;
+}
+
+static TouchMapper native_mapper() {
+    TouchMapper m;
+    m.set_native(true);
+    m.frames_presented(10);
+    return m;
+}
+
+static void test_native_tap_is_down_then_tap_with_no_cursor() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 120}, 0, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_DOWN, RECOMP_TOUCH_PHASE_BEGIN, 100, 120));
+    out.clear();
+    m.finger_up({1, 103, 121}, 40 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_TAP, RECOMP_TOUCH_PHASE_END, 103, 121) &&
+          out[0].button == 1);
+    out.clear();
+    m.frames_presented(20);
+    m.tick(500 * MS, &out);
+    CHECK(out.empty()); // nothing deferred: no press, no release, no placement
+}
+
+static void test_native_double_tap_counts_two_at_the_first_point() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_up({1, 100, 100}, 40 * MS, &out);
+    out.clear();
+    m.finger_down({2, 110, 108}, 200 * MS, &out);
+    m.finger_up({2, 110, 108}, 240 * MS, &out);
+    CHECK(out.size() == 2 && native_is(out[1], RECOMP_TOUCH_EVENT_TAP, RECOMP_TOUCH_PHASE_END, 100, 100) &&
+          out[1].button == 2);
+    out.clear();
+    m.finger_down({3, 300, 100}, 400 * MS, &out); // elsewhere: a single tap again
+    m.finger_up({3, 300, 100}, 440 * MS, &out);
+    CHECK(out.size() == 2 && out[1].gesture == RECOMP_TOUCH_EVENT_TAP && out[1].button == 1);
+}
+
+static void test_native_rest_is_a_press_that_follows_and_ends() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.finger_motion({1, 104, 100}, 100 * MS, &out); // tremor: nothing
+    m.tick(kTouchLongPressNs, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_BEGIN, 104, 100));
+    out.clear();
+    m.finger_motion({1, 110, 100}, 500 * MS, &out); // still within the tremor
+    CHECK(out.empty());
+    m.finger_motion({1, 160, 130}, 600 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_MOVE, 160, 130));
+    out.clear();
+    m.finger_up({1, 160, 130}, 700 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, 160, 130));
+}
+
+static void test_native_drag_waits_for_the_context_then_drags() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.finger_motion({1, 140, 100}, 50 * MS, &out); // the game has not looked yet
+    CHECK(out.empty());
+    m.frames_presented(12);
+    m.tick(60 * MS, &out);
+    CHECK(out.size() == 2 && native_is(out[0], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_BEGIN, 100, 100) &&
+          native_is(out[1], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_MOVE, 140, 100));
+    out.clear();
+    m.finger_motion({1, 180, 110}, 80 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_MOVE, 180, 110));
+    out.clear();
+    m.finger_up({1, 190, 110}, 100 * MS, &out);
+    CHECK(!out.empty() && native_is(out[0], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_END, 190, 110));
+    for (const TouchAction &a : out)
+        CHECK(a.kind != TouchAction::Button && a.kind != TouchAction::Motion);
+}
+
+static void test_native_drag_on_a_world_map_is_still_the_camera() {
+    TouchMapper m = native_mapper();
+    m.set_camera_gestures(true);
+    m.set_context(RECOMP_TOUCH_WORLD);
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.frames_presented(12);
+    m.finger_motion({1, 150, 100}, 50 * MS, &out);
+    CHECK(out.size() == 2 && out[0].kind == TouchAction::Camera && out[0].phase == 0 &&
+          out[1].kind == TouchAction::Camera);
+    out.clear();
+    m.finger_up({1, 160, 100}, 90 * MS, &out);
+    for (const TouchAction &a : out)
+        CHECK(a.kind == TouchAction::Camera); // no tap, no placement after the pan
+}
+
+static void test_native_list_drag_scrolls() {
+    TouchMapper m = native_mapper();
+    m.set_context(RECOMP_TOUCH_LIST);
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.frames_presented(12);
+    m.finger_motion({1, 102, 150}, 50 * MS, &out);
+    CHECK(!out.empty() && out[0].kind == TouchAction::Wheel);
+    out.clear();
+    m.finger_up({1, 102, 150}, 90 * MS, &out);
+    CHECK(out.empty());
+}
+
+static void test_native_two_finger_tap_is_a_right_tap() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_down({2, 200, 100}, 20 * MS, &out);
+    out.clear();
+    m.finger_up({2, 200, 100}, 80 * MS, &out);
+    m.finger_up({1, 100, 100}, 90 * MS, &out);
+    CHECK(out.size() == 1 && out[0].kind == TouchAction::Native &&
+          out[0].gesture == RECOMP_TOUCH_EVENT_RIGHT_TAP);
+}
+
+static void test_native_tap_beside_a_rest_right_taps_at_the_rest_and_ends_it() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.tick(kTouchLongPressNs, &out);
+    out.clear();
+    m.finger_down({2, 300, 100}, 500 * MS, &out);
+    m.finger_up({2, 300, 100}, 560 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_RIGHT_TAP, RECOMP_TOUCH_PHASE_END, 100, 100));
+    out.clear();
+    m.finger_up({1, 100, 100}, 900 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, 100, 100));
+}
+
+static void test_native_cancel_ends_a_drag_and_a_press() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.tick(kTouchLongPressNs, &out);
+    out.clear();
+    m.finger_cancel(1, &out);
+    CHECK(out.size() == 1 && out[0].gesture == RECOMP_TOUCH_EVENT_PRESS &&
+          out[0].phase == RECOMP_TOUCH_PHASE_CANCEL);
+    out.clear();
+    m.finger_down({2, 100, 100}, 2000 * MS, &out);
+    m.frames_presented(12);
+    m.finger_motion({2, 160, 100}, 2050 * MS, &out);
+    out.clear();
+    m.cancel_all(&out);
+    CHECK(out.size() == 1 && out[0].gesture == RECOMP_TOUCH_EVENT_DRAG &&
+          out[0].phase == RECOMP_TOUCH_PHASE_CANCEL);
+}
+
 int main() {
     test_hover_ui_drag_is_not_snapped_to_an_edge();
     test_hover_resting_stack_drag_holds_shift_through_the_drop();
@@ -1137,6 +1299,15 @@ int main() {
     test_two_finger_drag_pans_with_arrows();
     test_two_finger_tap_is_right_click_three_is_f10_four_toggles_keyboard();
     test_second_finger_cancels_pending_tap();
+    test_native_tap_is_down_then_tap_with_no_cursor();
+    test_native_double_tap_counts_two_at_the_first_point();
+    test_native_rest_is_a_press_that_follows_and_ends();
+    test_native_drag_waits_for_the_context_then_drags();
+    test_native_drag_on_a_world_map_is_still_the_camera();
+    test_native_list_drag_scrolls();
+    test_native_two_finger_tap_is_a_right_tap();
+    test_native_tap_beside_a_rest_right_taps_at_the_rest_and_ends_it();
+    test_native_cancel_ends_a_drag_and_a_press();
     if (g_failures) {
         fprintf(stderr, "%d failures\n", g_failures);
         return 1;
