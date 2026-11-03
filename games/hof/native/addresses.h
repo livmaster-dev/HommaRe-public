@@ -657,3 +657,16 @@
 #define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x6c
 #define HOMM5_TAP_UNIT_CELL 0x70
 #define HOMM5_TAP_UNIT_SIZE 0x6c
+
+/* native/touch_native.c (native touch), mapped from the base game with
+ * games/map_addresses.py; the screen and window layouts it reads match. */
+#define HOMM5_NT_QUEUE 0x0061c790          /* the WndProc's event queue (base 005f3140) */
+#define HOMM5_NT_QUEUE_LIST 0x011335d4     /* its list (base 01133ed4) */
+#define HOMM5_NT_CWS_ISCREEN_VT 0x01035804 /* CWindowScreen's IScreen part */
+#define HOMM5_NT_VT_MOVIE 0x00fc81dc       /* NUI::CVideoScreen */
+#define HOMM5_NT_VT_LOADING 0x00fb87bc     /* NUI::CPWLScreenInterface */
+#define HOMM5_NT_FN_EDGE_SCROLL fn_00727ad0 /* CCursor::GetEdgeScroll (vtable +0x20) */
+#define HOMM5_NT_FN_CURSOR_UPDATE fn_007279d0 /* CCursor::Update (vtable +0x1C), RET 4 */
+#define HOMM5_VT_CARD 0x0103b8bc           /* CCommonGatheringWindow: an object's card */
+#define HOMM5_NT_ISCREEN_HIDE_TIP 0x68  /* IScreen: hide the tooltip (one slot before the base game's 0x6c) */
+#define HOMM5_NT_REAL_SCREEN_SIZE hof_real_screen_size /* native/hof_screen.c: the client size */

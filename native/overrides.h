@@ -195,3 +195,15 @@ void homm5_gs_login(X86 *c);
 #define FN_00419ae0 homm5_gs_login
 void homm5_gs_login_result(X86 *c);
 #define FN_00b31380 homm5_gs_login_result
+
+/* 0070ded0 (CCursor::GetEdgeScroll): native/touch_native.c answers (0,0)
+ * while native touch is in charge (the launcher's "Touch: native"); a mouse's
+ * edge scroll is the game's own. */
+void homm5_edge_scroll(X86 *c);
+#define FN_0070ded0 homm5_edge_scroll
+
+/* 0070ddb0 (CCursor::Update): while a finger's point is held, native/touch_native.c
+ * keeps the cursor there instead of at GetCursorPos (off the window on a
+ * touch), so the battle's cursor and damage hint are drawn at the point. */
+void homm5_cursor_update(X86 *c);
+#define FN_0070ddb0 homm5_cursor_update

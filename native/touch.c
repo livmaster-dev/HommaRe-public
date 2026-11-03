@@ -126,13 +126,18 @@ void recomp_app_background(void) {
                 : "not saved (the game did not reach a frame)");
 }
 
+static void nt_frame(X86 *c);           /* native/touch_native.c, below */
+static int homm5_native_hover(void);
+
 void homm5_hover_timeout(X86 *c) {
+    nt_frame(c);
     const uint32_t asked = __atomic_load_n(&g_save_asked, __ATOMIC_ACQUIRE);
     if (asked != __atomic_load_n(&g_save_answered, __ATOMIC_ACQUIRE)) {
         homm5_save_settings(c);
         __atomic_store_n(&g_save_answered, asked, __ATOMIC_RELEASE);
     }
-    const int state = g_hover;
+    const int native = homm5_native_hover();
+    const int state = native >= 0 ? native : g_hover;
     int32_t ms;
     if (state == 0)
         ms = 0;
@@ -178,6 +183,16 @@ static uint32_t screen_modal(uint32_t screen, uint32_t sub) {
 static uint32_t dragged_object(void) {
     const uint32_t obj = peek32(CURSOR_ID + 4u);
     return obj && (int32_t)peek32(obj + 4u) >= 0 ? obj : 0;
+}
+
+/* For native/phone_hud.c: whether `win` (a CWindow) is the icon of what the
+ * cursor drags (an artifact's, a stack's, a hero's), laid out at the cursor.
+ * The drag object's +0xc points into the window, at its draw part (+0x110
+ * for a stack's CWindowSimple), not at its start. */
+int homm5_is_drag_icon(uint32_t win) {
+    const uint32_t obj = dragged_object();
+    const uint32_t icon = obj ? peek32(obj + 12u) : 0;
+    return win && icon >= win && icon - win < 0x200u;
 }
 
 /* An object's class name from its MSVC RTTI (vtable[-1] -> the complete object
@@ -386,3 +401,7 @@ int recomp_pointer_place(int32_t x, int32_t y, int32_t width, int32_t height) {
     homm5_tap_pointer_placed(fx, fy); /* a battle parks it between turns */
     return 1;
 }
+
+uint32_t homm5_guest_call_regs(X86 *c, uint32_t fn, uint32_t ecx, uint32_t edx,
+                               const uint32_t *args, int nargs, uint32_t stack_top);
+#include "touch_native.c"

@@ -571,3 +571,15 @@ void fn_00557470(X86 *c);
 #define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x6c
 #define HOMM5_TAP_UNIT_CELL 0x40
 #define HOMM5_TAP_UNIT_SIZE 0x44
+
+/* native/touch_native.c (native touch), mapped from the base game with
+ * games/map_addresses.py; the screen and window layouts it reads match. */
+#define HOMM5_NT_QUEUE 0x004ec700          /* the WndProc's event queue (base 005f3140) */
+#define HOMM5_NT_QUEUE_LIST 0x010f4184     /* its list (base 01133ed4) */
+#define HOMM5_NT_CWS_ISCREEN_VT 0x00fef734 /* CWindowScreen's IScreen part */
+#define HOMM5_NT_VT_MOVIE 0x00f76d08       /* NUI::CVideoScreen */
+#define HOMM5_NT_VT_LOADING 0x00f5c7d8     /* NUI::CPWLScreenInterface */
+#define HOMM5_NT_FN_EDGE_SCROLL fn_0060de80 /* CCursor::GetEdgeScroll (vtable +0x20) */
+#define HOMM5_NT_FN_CURSOR_UPDATE fn_0060dd60 /* CCursor::Update (vtable +0x1C), RET 4 */
+#define HOMM5_VT_CARD 0x00ff55c4           /* CCommonGatheringWindow: an object's card */
+#define HOMM5_NT_ISCREEN_HIDE_TIP 0x6c  /* IScreen: hide the tooltip (as in the base game) */

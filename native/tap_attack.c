@@ -454,9 +454,12 @@ static int parked(uint32_t scr) {
 }
 
 /* 0074de10(ECX screen, P, POINT), RET 8: the pick, every frame of a turn. */
+int homm5_native_parks(void); /* native/touch_native.c: no gesture holds the cursor */
+
 void homm5_tap_pick(X86 *c) {
     const uint32_t scr = c->r[R_ECX];
-    if (rd32(scr) == HOMM5_TAP_SCREEN_VTABLE && rd32(scr + SCR_PHASE) != 0x1000u && parked(scr)) {
+    if (rd32(scr) == HOMM5_TAP_SCREEN_VTABLE && rd32(scr + SCR_PHASE) != 0x1000u &&
+        (parked(scr) || homm5_native_parks())) {
         skip_call(c, 2);
         return;
     }
@@ -466,7 +469,8 @@ void homm5_tap_pick(X86 *c) {
 /* 0074e470(ECX screen, S, P), RET 8: the action for the pick, every frame. */
 void homm5_tap_action(X86 *c) {
     const uint32_t scr = c->r[R_ECX], esp = c->r[R_ESP];
-    if (rd32(scr) == HOMM5_TAP_SCREEN_VTABLE && g_parked && park_enabled()) {
+    if (rd32(scr) == HOMM5_TAP_SCREEN_VTABLE &&
+        ((g_parked && park_enabled()) || (rd32(scr + SCR_PHASE) != 0x1000u && homm5_native_parks()))) {
         skip_call(c, 2); /* nothing picked: no move to a cell either */
         return;
     }

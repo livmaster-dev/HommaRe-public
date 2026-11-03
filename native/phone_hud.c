@@ -69,6 +69,7 @@
 #define HOMM5_VT_LIST 0x0102bd58         /* CWindowListCtrl */
 #define HOMM5_VT_SCROLLER 0x01030a30     /* CWindowScrollableContainer */
 #define HOMM5_VT_TEXT_VIEW 0x01031588    /* CWindowTextView */
+#define HOMM5_VT_CARD 0x01033478         /* CCommonGatheringWindow: an object's card */
 #endif
 /* The conversions' globals (floats; CVirtualScreenController). Hammers of
  * Fate has no virtual size to read: its conversions have 1024x768 built in. */
@@ -276,6 +277,7 @@ enum { LAYOUT_HIDE = 1, LAYOUT_BARE = 2 }; /* phone_layout.c's PL_HIDE, PL_BARE 
 /* native/native_screens.c: non-zero when `part` (00e3dd70's ECX) is the root
  * of a screen the host draws natively; that file reads the screen then. */
 int homm5_native_screens_draw(X86 *c, uint32_t part);
+int homm5_is_drag_icon(uint32_t win); /* native/touch.c: the icon of what a drag carries */
 
 enum {
     HUD_NONE = 0,
@@ -876,6 +878,10 @@ static int panel_under(const Hud *h, uint32_t win, const float r[4], Panel *p) {
         float o[4];
         if (!other || other == win || !child_rect(h, other, o) || free_window(h->root, other))
             continue;
+#ifdef HOMM5_VT_CARD
+        if (rd32(other) == HOMM5_VT_CARD)
+            continue; /* a card over the picture carries no buttons */
+#endif
         if (o[2] - o[0] <= 64.0f && o[3] - o[1] <= 64.0f)
             continue;
         if (cx >= o[0] - 8 && cx <= o[2] + 8 && cy >= o[1] - 8 && cy <= o[3] + 8)
@@ -1284,6 +1290,10 @@ int homm5_battle_placing(void) {
  * ones made after it; a dialog made later is larger and stays in the frame. */
 static int follows_picture(const Hud *h, uint32_t win) {
     float r[4];
+    /* What a drag carries, on any screen (an artifact in the hero's): laid
+     * out at the finger, not at the finger moved in by the safe area. */
+    if (homm5_is_drag_icon(win))
+        return 1;
     if (h->kind != HUD_MAP && h->kind != HUD_TOWN && h->kind != HUD_BATTLE)
         return 0; /* the arrows of a build screen's tree are placed in its frame */
     if (!window_rect(win, r) || r[2] - r[0] > 128.0f || r[3] - r[1] > 128.0f)
@@ -1293,6 +1303,78 @@ static int follows_picture(const Hud *h, uint32_t win) {
     /* Made after the root was placed: in a battle, the stack counters; on
      * the map, the resource bar's numbers, which go with the bar. */
     return h->kind == HUD_BATTLE && known_window(h->root, win) == 0;
+}
+
+#ifdef HOMM5_NT_REAL_SCREEN_SIZE
+int HOMM5_NT_REAL_SCREEN_SIZE(float *w, float *h);
+#endif
+
+/* A card met in its interface's draw (card_mapping): the mapping it goes
+ * with, for its draw on the popup layer. */
+static uint32_t g_card_win;
+static Mapping g_card_map;
+static float g_card_k;
+
+/* A card the game lays out against the 3D picture, at the object it tells of
+ * (the map's hero or town, a battle's stack, shown by a resting finger or the
+ * right button): drawn with the plain mapping, as its placement is, and moved
+ * in by as little as keeps it clear of the safe area's sides. In the
+ * interface's mapping the safe area's shift came on top of the picture's
+ * placement and the card's parts parted, one drawn beside the other. *m gets
+ * the mapping; 0 when `win` is no such card. */
+static int card_mapping(const Hud *h, uint32_t win, Mapping *m, float *text_k) {
+#ifdef HOMM5_VT_CARD
+    float r[4], in[4];
+    if (h->kind != HUD_MAP && h->kind != HUD_TOWN && h->kind != HUD_BATTLE)
+        return 0;
+    if (rd32(win) != HOMM5_VT_CARD || !window_rect(win, r))
+        return 0;
+    /* Only the screen's own card (its tooltip controller's owner is the
+     * window screen itself): one a panel shows (the hero's portrait) is laid
+     * out against that panel, in the interface's mapping. */
+    const uint32_t tips = h->root + ROOT_TIPS, owner = rd32(tips + 4u);
+    const uint32_t screen = h->root - ROOT_MAIN;
+    *text_k = 0.0f;
+    if (owner != screen) {
+        /* A panel's (the hero's portrait): laid out by the game beside the
+         * owner as the plain interface has it, so drawn in the mapping of
+         * the panel the owner is in, beside the panel as the phone shows
+         * it, at its scale. */
+        uint32_t top = owner;
+        for (int i = 0; top && i < 16 && rd32(top + WINDOW_PARENT) != screen; ++i)
+            top = rd32(top + WINDOW_PARENT);
+        Panel pn;
+        if (!top || rd32(top + WINDOW_PARENT) != screen || !panel_of(h, top, &pn, 0))
+            return 0;
+        *m = panel_mapping(h, &pn);
+        *text_k = pn.k;
+        return 1;
+    }
+    *m = h->plain;
+    /* The screen across in virtual units: vw, or more where the game's
+     * conversions take an effective width narrower than the screen
+     * (Hammers of Fate's hof_screen.c). */
+    float span = m->vw;
+#ifdef HOMM5_NT_REAL_SCREEN_SIZE
+    float sw = 0.0f, sh = 0.0f;
+    if (HOMM5_NT_REAL_SCREEN_SIZE(&sw, &sh) && m->rw > 0.0f)
+        span = m->vw * sw / m->rw;
+#endif
+    Mapping wide = *m;
+    wide.vw = span;
+    hud_insets(&wide, in);
+    const float lo = m->ox + in[0], hi = m->ox + span - in[2];
+    float d = 0.0f;
+    if (r[0] < lo)
+        d = lo - r[0];
+    else if (r[2] > hi)
+        d = hi - r[2];
+    m->ox -= d; /* drawn d virtual units over */
+    return 1;
+#else
+    (void)h, (void)win, (void)m;
+    return 0;
+#endif
 }
 
 #ifdef HOMM5_ADDR_SET_PARENT_RECT
@@ -1382,6 +1464,25 @@ static void window_draw(X86 *c) {
         HOMM5_FN_WINDOW_DRAW(c);
         return;
     }
+    /* A card is drawn twice a frame: with its screen's interface, and again
+     * on its own over everything (the screen's popup layer), the two
+     * matching where the interface has the plain mapping. With a phone's
+     * interface they part, one copy under the panels: the interface's draw
+     * is left out (below) and the popup layer's has the mapping it found. */
+    if (!g_drawing_on && g_card_win && part - WINDOW_PART == g_card_win) {
+        g_card_win = 0;
+        const float back = g_text_k;
+        Scope sc;
+        scope_enter(c, &sc, &g_card_map);
+        if (g_card_k > 0.0f) {
+            g_text_k = g_card_k;
+            text_at_scale(c, part);
+        }
+        draw_plain(c);
+        g_text_k = back;
+        scope_leave(c, &sc);
+        return;
+    }
     draws_unwound(c);
     scopes_unwound(c);
     if (g_draw_depth == 0) { /* a frame's interface begins */
@@ -1436,7 +1537,35 @@ static void window_draw(X86 *c) {
     Panel pn;
     if (g_drawing_on && g_draw_depth == g_root_depth + 1 && g_drawing.kind == HUD_BATTLE)
         note_placement_bar(part - WINDOW_PART);
+    Mapping card;
+    float card_k;
+    if (g_drawing_on && g_draw_depth == g_root_depth + 1 &&
+        card_mapping(&g_drawing, part - WINDOW_PART, &card, &card_k)) {
+        /* Drawn on the popup layer, over the panels (above). */
+        g_card_win = part - WINDOW_PART;
+        g_card_map = card;
+        g_card_k = card_k;
+        const uint32_t esp = c->r[R_ESP];
+        c->eip = rd32(esp);
+        c->r[R_ESP] = esp + 8u;
+        recomp_return(c);
+        return;
+    }
     if (g_drawing_on && g_draw_depth == g_root_depth + 1 && follows_picture(&g_drawing, part - WINDOW_PART)) {
+        draw_mapped(c, &g_drawing.plain);
+        return;
+    }
+    /* What a drag carries, at whatever depth its screen holds it (an
+     * artifact in the hero's screen): laid out at the finger in the plain
+     * mapping's units, not moved in by the safe area with its screen. */
+    if (g_drawing_on && homm5_is_drag_icon(part - WINDOW_PART)) {
+        if (trace_hud()) {
+            static uint32_t traced;
+            if (traced != part - WINDOW_PART)
+                fprintf(stderr, "[hud] drag icon %08x at depth %d (root %d), plain\n",
+                        part - WINDOW_PART, g_draw_depth - g_root_depth, g_root_depth);
+            traced = part - WINDOW_PART;
+        }
         draw_mapped(c, &g_drawing.plain);
         return;
     }
@@ -1464,8 +1593,23 @@ static void window_draw(X86 *c) {
  * here already, or the panel is clipped to its plain size. */
 void homm5_simple_draw(X86 *c) {
     Panel pn;
+    Mapping card;
+    float card_k;
     if (wide_ui() && g_drawing_on && g_draw_depth == g_root_depth + 1 &&
-        follows_picture(&g_drawing, c->r[R_ECX] - SIMPLE_DRAW)) {
+        card_mapping(&g_drawing, c->r[R_ECX] - SIMPLE_DRAW, &card, &card_k)) {
+        const float back = g_text_k;
+        Scope sc;
+        scope_enter(c, &sc, &card);
+        if (card_k > 0.0f)
+            g_text_k = card_k;
+        HOMM5_FN_SIMPLE_DRAW(c);
+        g_text_k = back;
+        scope_leave(c, &sc);
+        return;
+    }
+    if (wide_ui() && g_drawing_on &&
+        ((g_draw_depth == g_root_depth + 1 && follows_picture(&g_drawing, c->r[R_ECX] - SIMPLE_DRAW)) ||
+         homm5_is_drag_icon(c->r[R_ECX] - SIMPLE_DRAW))) {
         Scope sc;
         scope_enter(c, &sc, &g_drawing.plain);
         HOMM5_FN_SIMPLE_DRAW(c);
