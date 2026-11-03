@@ -205,3 +205,14 @@ void homm5_tap_click(X86 *c);
 #define FN_0074c540 homm5_tap_click
 void homm5_tap_grid(X86 *c);
 #define FN_007f8bb0 homm5_tap_grid
+
+/* CCursor::GetEdgeScroll: native/touch_native.c answers (0,0) while native
+ * touch is in charge (the launcher's "Touch: native"). */
+void homm5_edge_scroll(X86 *c);
+#define FN_00727ad0 homm5_edge_scroll
+
+/* 007279d0 (CCursor::Update): while a finger's point is held, native/touch_native.c
+ * keeps the cursor there instead of at GetCursorPos (off the window on a
+ * touch), so the battle's cursor and damage hint are drawn at the point. */
+void homm5_cursor_update(X86 *c);
+#define FN_007279d0 homm5_cursor_update

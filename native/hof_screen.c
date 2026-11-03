@@ -109,6 +109,14 @@ void hof_set_screen_size(X86 *c) {
     ret_args(c, 8u);
 }
 
+/* The screen's own size in pixels (the client area), as SetScreenSize was
+ * given it: native/touch_native.c's points are client pixels. Zero before. */
+int hof_real_screen_size(float *w, float *h) {
+    *w = g_real_w;
+    *h = g_real_h;
+    return g_known;
+}
+
 /* HOMM5_SCREEN_MODE_CHANGES for native/phone_hud.c. */
 int hof_screen_mode_changes(void) {
     return g_mode_changes;

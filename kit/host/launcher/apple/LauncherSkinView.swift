@@ -1038,6 +1038,9 @@ struct SkinSettings: View {
                             cell(L10n.battleCells) {
                                 choices([L10n.off, L10n.on], model.battleCells ? 1 : 0, size: 20) { model.setBattleCells($0 == 1) }
                             }
+                            cell(L10n.touchMode) {
+                                choices([L10n.touchCursor, L10n.touchNative], model.nativeTouch ? 1 : 0, size: 20) { model.setNativeTouch($0 == 1) }
+                            }
                             cell(L10n.silentMode) {
                                 choices([L10n.respect, L10n.ignore], model.ignoreSilentMode ? 1 : 0, size: 20) { model.setIgnoreSilentMode($0 == 1) }
                             }
@@ -1161,6 +1164,9 @@ struct SkinSettings: View {
             }
             row(L10n.battleCells) {
                 choices([L10n.off, L10n.on], model.battleCells ? 1 : 0) { model.setBattleCells($0 == 1) }
+            }
+            row(L10n.touchMode) {
+                choices([L10n.touchCursor, L10n.touchNative], model.nativeTouch ? 1 : 0) { model.setNativeTouch($0 == 1) }
             }
             row(L10n.silentMode) {
                 choices([L10n.respect, L10n.ignore], model.ignoreSilentMode ? 1 : 0) { model.setIgnoreSilentMode($0 == 1) }

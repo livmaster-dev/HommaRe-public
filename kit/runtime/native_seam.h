@@ -182,6 +182,50 @@ enum {
 };
 void recomp_touch_gesture(int gesture);
 
+/* Optional game adapter: native touch (the launcher's "Touch: native",
+ * host.touch/native). The host recognises a finger's gesture and hands it to
+ * the game with its point; the game works out what lies there and acts, on
+ * its own thread, with no cursor placed for it. Between gestures there is no
+ * cursor at all: GetCursorPos answers a point far outside the window.
+ *
+ * recomp_touch_event(kind, phase, x, y, width, height, count): a gesture at
+ * (x, y), game pixels of a width x height picture. Called under the guest
+ * scheduler baton, in order with the input around it; the adapter applies it
+ * on the game's own thread. Kind RECOMP_TOUCH_EVENT_QUERY only asks: non-zero
+ * when the game takes native touch, zero leaves the hover gestures.
+ *
+ * Kinds: DOWN, a finger touched (the first; never a second finger): from then
+ * on recomp_touch_context answers for this point; TAP, it lifted where it
+ * touched, `count` 2 for the second tap of a double tap; PRESS, it rested
+ * (BEGIN), moved while resting (MOVE), lifted (END); DRAG, it moved off the
+ * point before resting, over something that is neither a camera nor a list:
+ * BEGIN at the point it touched, MOVE, END where it lifted; RIGHT_TAP, two
+ * fingers tapped together, at the second one; POINTER, a mouse, trackpad or
+ * pencil moved the pointer: the game's own cursor again until the next DOWN.
+ * Phase CANCEL ends a press or a drag the system took away. */
+enum {
+    RECOMP_TOUCH_EVENT_QUERY = 0,
+    RECOMP_TOUCH_EVENT_DOWN = 1,
+    RECOMP_TOUCH_EVENT_TAP = 2,
+    RECOMP_TOUCH_EVENT_PRESS = 3,
+    RECOMP_TOUCH_EVENT_DRAG = 4,
+    RECOMP_TOUCH_EVENT_RIGHT_TAP = 5,
+    RECOMP_TOUCH_EVENT_POINTER = 6,
+};
+enum {
+    RECOMP_TOUCH_PHASE_BEGIN = 0,
+    RECOMP_TOUCH_PHASE_MOVE = 1,
+    RECOMP_TOUCH_PHASE_END = 2,
+    RECOMP_TOUCH_PHASE_CANCEL = 3,
+};
+int recomp_touch_event(int kind, int phase, float x, float y, int width, int height, int count);
+
+/* A key for a screen that waits for any key and takes no click (a movie, a
+ * loading screen): native touch presses one there. `scancode` an SDL scancode,
+ * `down` 1 or 0; it reaches the game as the keyboard's would, through the
+ * host's input queue. Safe from any guest thread. */
+void host_touch_key(int scancode, int down);
+
 /* Optional game adapters for the camera of a 3D map (game.toml [touch]
  * gestures = "hover"). Called from the host thread; the adapter applies them
  * on the game's own thread.

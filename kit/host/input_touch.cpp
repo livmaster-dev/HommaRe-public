@@ -4,6 +4,8 @@
 #include <SDL3/SDL_scancode.h>
 #include <math.h>
 
+#include "../runtime/native_seam.h"
+
 namespace {
 void motion(std::vector<TouchAction> *out, double x, double y, bool place = true) {
     TouchAction a;
@@ -261,7 +263,37 @@ bool TouchMapper::split_ring(uint64_t now, double *x, double *y, double *progres
     return true;
 }
 
+void TouchMapper::native_event(std::vector<TouchAction> *out, int kind, int phase, double x,
+                               double y, int count) {
+    TouchAction a;
+    a.kind = TouchAction::Native;
+    a.gesture = kind;
+    a.phase = phase;
+    a.x = x;
+    a.y = y;
+    a.button = count;
+    out->push_back(a);
+}
+
+// A tap soon after the last one and near it is its second (third...) tap, at
+// the first one's point: the game's double click wants the same spot twice.
+void TouchMapper::native_tap(std::vector<TouchAction> *out, double x, double y, uint64_t now) {
+    int count = 1;
+    if (native_taps_ && now - native_tap_ns_ < kTouchDoubleTapNs &&
+        dist(x, y, native_tap_x_, native_tap_y_) <= kTouchDoubleTapSlop) {
+        count = native_taps_ + 1;
+        x = native_tap_x_;
+        y = native_tap_y_;
+    }
+    native_taps_ = count;
+    native_tap_x_ = x;
+    native_tap_y_ = y;
+    native_tap_ns_ = now;
+    native_event(out, RECOMP_TOUCH_EVENT_TAP, RECOMP_TOUCH_PHASE_END, x, y, count);
+}
+
 void TouchMapper::reset_gesture() {
+    native_drag_ = native_press_ = native_pressed_moved_ = false;
     max_fingers_ = 0;
     dragging_ = false;
     hover_drag_ = false;
@@ -364,6 +396,15 @@ void TouchMapper::start_hover_drag(uint64_t now, std::vector<TouchAction> *out) 
         scrolling_ = true;
         scroll_y_ = f.y0;
         scroll(out, f.x, f.y);
+    } else if (native_) {
+        // Native: the battlefield and the interface alike are the game's to
+        // read (it aims on a field, drags in a window).
+        dragging_ = hover_drag_ = native_drag_ = true;
+        native_event(out, RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_BEGIN, f.x0, f.y0);
+        native_event(out, RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_MOVE, f.x, f.y);
+        split_x_ = f.x;
+        split_y_ = f.y;
+        split_t0_ = now;
     } else if (context_ & 2) { // RECOMP_TOUCH_BATTLE: aim without pressing
         aiming_ = true;
         hover_state_ = 0;
@@ -520,6 +561,16 @@ void TouchMapper::finger_down(TouchPoint p, uint64_t now, std::vector<TouchActio
     fingers_.push_back({p.id, p.x, p.y, p.x, p.y, now});
     if ((int)fingers_.size() > max_fingers_)
         max_fingers_ = (int)fingers_.size();
+    if (native_ && fingers_.size() == 1) {
+        // Native: the game hears where the finger is and works out what lies
+        // there itself; nothing is placed.
+        placed_x_ = p.x;
+        placed_y_ = p.y;
+        native_event(out, RECOMP_TOUCH_EVENT_DOWN, RECOMP_TOUCH_PHASE_BEGIN, p.x, p.y);
+        hover_state_ = 1;
+        presents_at_down_ = presents_;
+        return;
+    }
     if (hover_ && fingers_.size() == 1) {
         // Hover: the cursor goes under the finger at once, so the game shows
         // what is there; nothing is pressed until the finger lifts. No
@@ -541,7 +592,12 @@ void TouchMapper::finger_down(TouchPoint p, uint64_t now, std::vector<TouchActio
     if (fingers_.size() == 2) {
         // A second finger ends any one-finger gesture: release a drag, forget a tap.
         end_camera(out);
-        if (dragging_) {
+        if (native_drag_) {
+            native_event(out, RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_END, fingers_[0].x,
+                         fingers_[0].y);
+            split_release(out);
+            native_drag_ = dragging_ = false;
+        } else if (dragging_) {
             button(out, 0, false, fingers_[0].x, fingers_[0].y);
             split_release(out);
             dragging_ = false;
@@ -587,6 +643,20 @@ void TouchMapper::finger_motion(TouchPoint p, uint64_t now, std::vector<TouchAct
         }
         if (scrolling_) {
             scroll(out, f.x, f.y);
+            return;
+        }
+        if (native_press_) {
+            // A rested finger that moves: the game follows it (what is under
+            // it now). Its tremor is not sent.
+            if (!native_pressed_moved_ && dist(f.x0, f.y0, f.x, f.y) > kTouchTapTravel)
+                native_pressed_moved_ = true;
+            if (native_pressed_moved_)
+                native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_MOVE, f.x, f.y);
+            return;
+        }
+        if (native_drag_) {
+            native_event(out, RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_MOVE, f.x, f.y);
+            split_rest(f.x, f.y, now, out);
             return;
         }
         if (hover_ && long_fired_) {
@@ -676,12 +746,52 @@ void TouchMapper::finger_up(TouchPoint p, uint64_t now, std::vector<TouchAction>
         anchor_ = false;
         anchor_used_ = true;
         if (fingers_.size() == 1 && now - anchor_tap_t0_ < kTouchSecondTapNs &&
-            dist(anchor_tap_x0_, anchor_tap_y0_, lifted.x, lifted.y) <= kTouchTapTravel)
-            click(out, 1, fingers_[0].x, fingers_[0].y, now);
+            dist(anchor_tap_x0_, anchor_tap_y0_, lifted.x, lifted.y) <= kTouchTapTravel) {
+            if (native_)
+                native_event(out, RECOMP_TOUCH_EVENT_RIGHT_TAP, RECOMP_TOUCH_PHASE_END,
+                             fingers_[0].x, fingers_[0].y);
+            else
+                click(out, 1, fingers_[0].x, fingers_[0].y, now);
+        }
     }
     if (!fingers_.empty())
         return; // the gesture ends when the last finger lifts
     const bool moved = dist(lifted.x0, lifted.y0, lifted.x, lifted.y) > kTouchTapTravel;
+    if (native_ && native_press_ && max_fingers_ > 1 && !anchor_used_) {
+        // Fingers joined a rest for a gesture of their own: the press is over.
+        native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, lifted.x, lifted.y);
+        native_press_ = false;
+    }
+    if (native_ && (max_fingers_ == 1 || anchor_used_)) {
+        // Native: what the finger did, for the game to act on. A camera drag
+        // and a scrolled list are done already.
+        if (anchor_used_) {
+            // The rested finger lifts after its right tap: the press is over.
+            if (native_press_)
+                native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, lifted.x,
+                             lifted.y);
+        } else if (native_press_) {
+            native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, lifted.x, lifted.y);
+            if (context_ & 128) { // RECOMP_TOUCH_BATTLE_DIRECT: a rest says "only walk here"
+                TouchAction g;
+                g.kind = TouchAction::Gesture;
+                g.gesture = 1; // RECOMP_TOUCH_GESTURE_HOLD
+                out->push_back(g);
+            }
+        } else if (native_drag_) {
+            native_event(out, RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_END, lifted.x, lifted.y);
+            split_drop(now);
+        } else if (middle_held_ && pan_virtual_) {
+            pan_move(out, lifted.x, lifted.y);
+            button(out, 2, false, pan_vx_, pan_vy_);
+            middle_held_ = pan_virtual_ = false;
+        } else if (!scrolling_ && !cam_used_ && !drag_pending_ && !moved &&
+                   now - lifted.t0 < kTouchLongPressNs) {
+            native_tap(out, lifted.x, lifted.y, now);
+        }
+        reset_gesture();
+        return;
+    }
     if (anchor_used_) {
         // The resting finger lifts after its right click: nothing more.
     } else if (max_fingers_ == 1 && scrolling_) {
@@ -751,7 +861,10 @@ void TouchMapper::finger_up(TouchPoint p, uint64_t now, std::vector<TouchAction>
     } else if (max_fingers_ == 2 && two_ == Two::None && fabs(pan_acc_x_) < kTouchPanStep &&
                fabs(pan_acc_y_) < kTouchPanStep && !moved) {
         // Right click between the two fingers, where the second one landed.
-        click(out, 1, tap2_x_, tap2_y_, now);
+        if (native_)
+            native_event(out, RECOMP_TOUCH_EVENT_RIGHT_TAP, RECOMP_TOUCH_PHASE_END, tap2_x_, tap2_y_);
+        else
+            click(out, 1, tap2_x_, tap2_y_, now);
     } else if (max_fingers_ == 3 && !moved) {
         key_tap(out, SDL_SCANCODE_F10);
     } else if (max_fingers_ == 4 && !moved) {
@@ -774,8 +887,12 @@ void TouchMapper::finger_cancel(int64_t id, std::vector<TouchAction> *out) {
         return;
     // Let go where the cursor was placed: a release carries a position, and a
     // release at the origin would put the game's cursor there.
-    if (dragging_)
+    if (native_drag_)
+        native_event(out, RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_CANCEL, placed_x_, placed_y_);
+    else if (dragging_)
         button(out, 0, false, placed_x_, placed_y_);
+    if (native_press_)
+        native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_CANCEL, placed_x_, placed_y_);
     split_release(out);
     if (middle_held_)
         button(out, 2, false, pan_virtual_ ? pan_vx_ : placed_x_, pan_virtual_ ? pan_vy_ : placed_y_);
@@ -787,8 +904,12 @@ void TouchMapper::cancel_all(std::vector<TouchAction> *out) {
     press_pending_ = false; // no new click after focus loss or backgrounding
     if (release_pending_)
         release_held(out);
-    if (dragging_)
+    if (native_drag_)
+        native_event(out, RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_CANCEL, placed_x_, placed_y_);
+    else if (dragging_)
         button(out, 0, false, placed_x_, placed_y_);
+    if (native_press_)
+        native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_CANCEL, placed_x_, placed_y_);
     split_release(out);
     if (split_up_pending_) {
         split_up_pending_ = false;
@@ -819,6 +940,12 @@ void TouchMapper::tick(uint64_t now, std::vector<TouchAction> *out) {
         aiming_)
         return;
     const Finger &f = fingers_[0];
+    if (native_ && now - f.t0 >= kTouchLongPressNs && dist(f.x0, f.y0, f.x, f.y) <= kTouchTapTravel) {
+        // Native: the finger rests; the game shows what is under it.
+        long_fired_ = native_press_ = true;
+        native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_BEGIN, f.x, f.y);
+        return;
+    }
     if (hover_ && now - f.t0 >= kTouchLongPressNs && dist(f.x0, f.y0, f.x, f.y) <= kTouchTapTravel) {
         // Hover: the cursor is already under the finger; from here on a lift
         // does not click, and the game shows its tooltip at once.

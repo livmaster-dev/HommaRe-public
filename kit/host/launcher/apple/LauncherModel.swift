@@ -210,6 +210,10 @@ final class LauncherModel {
     #else
     private(set) var battleCells = LauncherModel.displaySetting(LauncherModel.battleCellsKey, 0) != 0
     #endif
+    /// "Touch": native gestures, the game acting on each at its point with no
+    /// cursor (a game that supports it; read when the game starts), or the
+    /// cursor the fingers move. Off by default (kit/host/sdl/main.cpp).
+    private(set) var nativeTouch = LauncherModel.displaySetting(LauncherModel.nativeTouchKey, 0) != 0
     /// A phone's own interface: larger panels and buttons, the corner menus as
     /// rows of buttons (the game reads it when it starts). 0 never, 1 where
     /// the screen is a phone's (a foldable's closed one, not its opened one),
@@ -357,6 +361,7 @@ final class LauncherModel {
     static let idleFramesKey = "host.display/idle_frames"
     static let cameraButtonsKey = "host.touch/camera_buttons"
     static let battleCellsKey = "host.touch/battle_cells"
+    static let nativeTouchKey = "host.touch/native"
     static let phoneInterfaceKey = "host.ui/phone_interface"
     static let silentModeKey = "host.audio/silent_mode"
     static let uiBoundsKey = "homm5.wide/ui_bounds"
@@ -390,6 +395,9 @@ final class LauncherModel {
     }
     func setBattleCells(_ on: Bool) {
         if store(Self.battleCellsKey, on ? 1 : 0) { battleCells = on }
+    }
+    func setNativeTouch(_ on: Bool) {
+        if store(Self.nativeTouchKey, on ? 1 : 0) { nativeTouch = on }
     }
     func setIgnoreSilentMode(_ on: Bool) {
         if store(Self.silentModeKey, on ? 1 : 0) { ignoreSilentMode = on }

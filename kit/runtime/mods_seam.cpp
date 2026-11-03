@@ -65,6 +65,12 @@ __attribute__((weak)) int recomp_touch_context(void) {
     return 0;
 }
 __attribute__((weak)) void recomp_touch_gesture(int) {}
+// A host with no input queue takes no key.
+__attribute__((weak)) void host_touch_key(int, int) {}
+// No native touch: the hover gestures place the game's cursor.
+__attribute__((weak)) int recomp_touch_event(int, int, float, float, int, int, int) {
+    return 0;
+}
 // Native cursor adapters can also be linked into hosts with no input devices.
 __attribute__((weak)) void dinput_discard_mouse_motion(uint32_t) {}
 __attribute__((weak)) void recomp_media_focus(int) {}
