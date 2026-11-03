@@ -243,10 +243,12 @@ display_name = "HommaRe"
 # without it the HUD stays in a 4:3 block in the middle), on an iPhone the
 # corner menus' mod (tools/phone_ui_mod.py; the layout itself is native now),
 # on every iOS device the dragged creature's icon framed for a finger
-# (tools/touch_ui_mod.py) and the screen resolution out of the game's options:
+# (tools/touch_ui_mod.py), with native touch a finger instead of the mouse
+# on the cards (tools/native_touch_ui_mod.py), and the screen resolution out
+# of the game's options:
 # the game draws at the screen's size, the launcher's render quality chooses
 # the 3D's share (tools/mobile_options_mod.py).
-ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "MobileOptions"]
+ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "NativeTouchUI", "MobileOptions"]
 cfg_defaults = { "profiles/default_profile/user.cfg" = { gfx_resolution = "screen", ui_use_hwcursor = "1" } }
 
 # The same wide-screen layout on a Mac, whose screens are wider than 4:3 too:

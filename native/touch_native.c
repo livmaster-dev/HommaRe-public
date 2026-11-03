@@ -49,6 +49,9 @@
 #define NT_FN_CURSOR_UPDATE fn_0070ddb0 /* CCursor::Update(flag), RET 4 (vtable +0x1C) */
 #define NT_SCR_ACTIVE 0x3e4        /* the battle screen's active stack */
 #define NT_ISCREEN_HIDE_TIP 0x6c   /* IScreen: hide the tooltip (00e752b0) */
+#define NT_ISCREEN_SHOW_TIP 0x70   /* IScreen: show the tooltip now (pt, next), 00e752d0 */
+#define NT_FN_CARD_WINDOW fn_007fcc80 /* CClickingTooltipCreator: the card's window, now (vt 00fb0d08 slot 0) */
+#define NT_FN_CARD_WINDOW_COMBAT fn_007fd500 /* CClickingCombatTooltipCreator's (vt 00fb0d54 slot 0) */
 #elif defined(HOMM5_NT_QUEUE)
 #define NT_SUPPORTED 1               /* an expansion: its addresses.h */
 #define NT_QUEUE HOMM5_NT_QUEUE
@@ -62,6 +65,14 @@
 #define NT_FN_CURSOR_UPDATE HOMM5_NT_FN_CURSOR_UPDATE
 #define NT_SCR_ACTIVE HOMM5_TAP_SCR_ACTIVE
 #define NT_ISCREEN_HIDE_TIP HOMM5_NT_ISCREEN_HIDE_TIP
+#define NT_ISCREEN_SHOW_TIP (HOMM5_NT_ISCREEN_HIDE_TIP + 4) /* IScreen: show the tooltip now (pt, next) */
+#ifdef HOMM5_NT_FN_CARD_WINDOW
+#define NT_FN_CARD_WINDOW HOMM5_NT_FN_CARD_WINDOW
+#define NT_FN_CARD_WINDOW_COMBAT HOMM5_NT_FN_CARD_WINDOW_COMBAT
+#endif
+#ifdef HOMM5_NT_FN_CARD_WINDOW_ATB
+#define NT_FN_CARD_WINDOW_ATB HOMM5_NT_FN_CARD_WINDOW_ATB
+#endif
 #else
 #define NT_SUPPORTED 0
 #endif
@@ -69,6 +80,12 @@
 #ifdef HOMM5_NT_REAL_SCREEN_SIZE
 int HOMM5_NT_REAL_SCREEN_SIZE(float *w, float *h);
 #endif
+
+/* A two-level card's creator (NUI::CClickingTooltipCreator, the combat one
+ * alike): its level (0 the short card, 1 the full one) and its
+ * ToFullTooltipDelay in ms, after which the short card turns full by itself
+ * (007fcc80; 0 for a battle's). */
+enum { NT_CARD_LEVEL = 0x10, NT_CARD_DELAY = 0x34 };
 
 enum {
     NT_WM_MOVE = 1, /* the queue's event types (re-nui.md 1.1) */
@@ -120,6 +137,17 @@ static int g_nt_nposts;
 static int g_nt_leave;       /* frames left before the hover is taken away (-1 none) */
 static int g_nt_release;     /* the hold goes with the leave */
 static int g_nt_key = -1, g_nt_key_frames; /* a key held for an any-key screen */
+static unsigned g_nt_frames;  /* the game's frames, counted by nt_frame */
+/* A card a finger's rest showed (or a right tap): the game's short card, at
+ * the thing it tells of. It stays after the lift; the next touch decides: a
+ * tap on it shows the full card, a tap anywhere else only closes it. */
+static int g_nt_card;            /* a card is up */
+static uint32_t g_nt_card_creator; /* the two-level creator that drew it (NUI::CClicking...TooltipCreator) */
+static uint32_t g_nt_card_win;   /* the card's window, as the creator handed it out */
+static int g_nt_card_combat;     /* drawn by a battle's creator: its levels are pages */
+static unsigned g_nt_card_frame; /* the frame the creator was last asked for it */
+static int g_nt_rdown_wait;      /* frames before a battlefield's right button goes down */
+static int g_nt_show_wait;       /* frames before the interface's card is shown at once (IScreen+0x70) */
 
 int recomp_touch_event(int kind, int phase, float x, float y, int width, int height, int count) {
 #if !NT_SUPPORTED
@@ -258,26 +286,126 @@ static void nt_key_tap(int scancode) {
 /* A battlefield shows a creature's card only while the right button is
  * down; a touch that showed one lets it go. */
 static void nt_right_up(void) {
+    g_nt_rdown_wait = g_nt_show_wait = 0;
     if (g_nt_rdown) {
         g_nt_rdown = 0;
         nt_post(NT_WM_RUP, g_nt_x, g_nt_y, 0);
     }
 }
 
+int homm5_card_on_screen(uint32_t win, float r[4]); /* native/phone_hud.c */
+void homm5_show_tip_at(X86 *c, uint32_t is, uint32_t slot, float x, float y, uint32_t top);
+int homm5_ui_at(float x, float y);
+void homm5_guest_thiscall(X86 *c, uint32_t fn, uint32_t self); /* native/save.cpp */
+
+/* The object a pointer into it belongs to: its class's RTTI (the complete
+ * object locator before the vtable) says how far into it the part is. The
+ * creators hand out the card's window as such a part (CCommonGatheringWindow
+ * +0x130 in the base game). */
+static uint32_t nt_whole_object(uint32_t part) {
+    const uint32_t vt = peek32(part), col = vt ? peek32(vt - 4u) : 0;
+    const uint32_t off = col ? peek32(col + 4u) : 0;
+    return off < 0x1000u && part > off ? part - off : part;
+}
+
+/* The card a creator drew in the last frames, if it is still the one up. */
+static uint32_t nt_card_creator(void) {
+    return g_nt_card && g_nt_card_creator && g_nt_frames - g_nt_card_frame <= 2 ? g_nt_card_creator : 0;
+}
+
+/* Whether a point (client pixels) is on the card: a finger's width around it. */
+static int nt_on_card(float x, float y) {
+    float r[4];
+    if (!nt_card_creator() || !homm5_card_on_screen(g_nt_card_win, r))
+        return 0;
+    const float slop = 6.0f * rdf32(NT_CLIENT_H) / 1000.0f;
+    return x >= r[0] - slop && x < r[2] + slop && y >= r[1] - slop && y < r[3] + slop;
+}
+
+/* The card goes, and with it the hover and the right button that kept it. */
+static void nt_card_close(X86 *c) {
+    if (!g_nt_card)
+        return;
+    if (nt_trace())
+        fprintf(stderr, "[touch-native] f%u card closed\n", g_nt_frames);
+    /* A battle's controller keeps what it showed while the point stays on
+     * the creature: the next right button there turns its page on from
+     * where it was. Its creator goes back to the first (slot 2, 007fcdc0). */
+    const uint32_t creator = nt_card_creator();
+    if (creator && g_nt_card_combat)
+        homm5_guest_thiscall(c, rd32(rd32(creator) + 8u), creator);
+    g_nt_card = 0;
+    g_nt_card_creator = g_nt_card_win = 0;
+    g_nt_press = g_nt_shown = 0;
+    nt_right_up();
+    nt_leave_now(c);
+}
+
+/* A tap on the card: the full card at once (the creator's next level, slot 1:
+ * 007fcd80, as when its ToFullTooltipDelay is over); a tap on the full one
+ * closes it. A battle's card (CClickingCombatTooltipCreator) is full from the
+ * right button on, its levels pages (the creature, then its effects): a tap
+ * turns the page, as the game's own right click does. */
+static void nt_card_tap(X86 *c) {
+    const uint32_t creator = nt_card_creator();
+    if (!creator || (!g_nt_card_combat && rd32(creator + NT_CARD_LEVEL) != 0)) {
+        nt_card_close(c);
+        return;
+    }
+    if (nt_trace())
+        fprintf(stderr, "[touch-native] f%u card %08x: the full card\n", g_nt_frames, creator);
+    homm5_guest_thiscall(c, rd32(rd32(creator) + 4u), creator);
+}
+
+/* A rest (or a right tap) shows the short card of what is under the point.
+ * On a battlefield the card of a creature shows while the right button is
+ * down (re-battle.md 4), elsewhere, and on a battle's own interface (the turn
+ * order bar), on hover: hover is "now" until the next touch. */
+static void nt_card_show(const NtEvent *e, int settled) {
+    g_nt_card = 1;
+    g_nt_card_creator = g_nt_card_win = 0;
+    g_nt_shown = 1;
+    nt_hold(e->x, e->y);
+    nt_post(NT_WM_MOVE, e->x, e->y, 0);
+    if (nt_battle_scr() && !homm5_ui_at(e->x, e->y)) {
+        /* The field picks what is under the point in its frame: a point the
+         * cursor has only now come to is picked a frame after the move. */
+        if (settled)
+            nt_post(NT_WM_RDOWN, e->x, e->y, 0);
+        else
+            g_nt_rdown_wait = 2;
+        g_nt_rdown = 1; /* up when the card goes */
+    }
+#ifdef HOMM5_NT_FN_CARD_WINDOW_ATB
+    /* Tribes of the East's turn order bar (CClickingATBTooltipCreator) shows
+     * its card on the right button only, never on hover, and a right button
+     * there takes the point in another frame than the bar on a phone's
+     * interface (the card of a stack two places over). The interface's card
+     * is shown at once instead, as the right button would (IScreen+0x70),
+     * at the point in the plain frame, a frame after the move. */
+    else if (nt_battle_scr())
+        g_nt_show_wait = 2;
+#endif
+}
+
 static void nt_apply(X86 *c, const NtEvent *e) {
     const uint32_t s = top_screen(), vt = s ? peek32(s) : 0;
     if (nt_trace())
-        fprintf(stderr, "[touch-native] event %d phase %d at %.0f,%.0f count %d screen %08x\n",
-                e->kind, e->phase, e->x, e->y, e->count, vt);
+        fprintf(stderr, "[touch-native] f%u event %d phase %d at %.0f,%.0f count %d screen %08x\n",
+                g_nt_frames, e->kind, e->phase, e->x, e->y, e->count, vt);
     switch (e->kind) {
     case RECOMP_TOUCH_EVENT_POINTER:
         nt_right_up();
+        g_nt_card = 0;
+        g_nt_card_creator = g_nt_card_win = 0;
         g_nt_active = g_nt_hold = g_nt_press = g_nt_preview = g_nt_aim = g_nt_shown = 0;
         g_nt_drag = 0;
         g_nt_leave = -1;
         return;
     case RECOMP_TOUCH_EVENT_DOWN:
         g_nt_active = 1;
+        if (g_nt_card)
+            return; /* the card stays until the gesture is known: a tap on it, or beside it */
         nt_right_up();
         if (g_nt_press || g_nt_hold || g_nt_shown)
             nt_leave_now(c); /* what the last touch showed goes */
@@ -291,6 +419,13 @@ static void nt_apply(X86 *c, const NtEvent *e) {
         return;
     case RECOMP_TOUCH_EVENT_TAP: {
         g_nt_active = 1;
+        if (g_nt_card) { /* on the card: the full card; anywhere else: the card goes, nothing more */
+            if (nt_on_card(e->x, e->y))
+                nt_card_tap(c);
+            else
+                nt_card_close(c);
+            return;
+        }
         if (vt == NT_VT_MOVIE || vt == NT_VT_LOADING) {
             nt_key_tap(vt == NT_VT_MOVIE ? NT_SDL_ESCAPE : NT_SDL_SPACE);
             return;
@@ -319,23 +454,32 @@ static void nt_apply(X86 *c, const NtEvent *e) {
         return;
     }
     case RECOMP_TOUCH_EVENT_PRESS:
-        if (e->phase == RECOMP_TOUCH_PHASE_BEGIN || e->phase == RECOMP_TOUCH_PHASE_MOVE) {
-            g_nt_press = 1;
-            nt_hold(e->x, e->y);
-            nt_post(NT_WM_MOVE, e->x, e->y, 0);
-            /* On a battlefield a rest is the right button held: the card of
-             * the creature under the finger, as long as it rests. */
-            if (e->phase == RECOMP_TOUCH_PHASE_BEGIN && nt_battle_scr()) {
-                nt_post(NT_WM_RDOWN, e->x, e->y, 0);
-                g_nt_rdown = 1;
+        if (e->phase == RECOMP_TOUCH_PHASE_BEGIN) {
+            if (g_nt_card && nt_on_card(e->x, e->y)) {
+                nt_card_tap(c); /* a rest on the card is a tap on it */
+                return;
             }
+            nt_card_close(c);
+            g_nt_preview = g_nt_aim = 0;
+            g_nt_press = 1;
+            nt_card_show(e, 1); /* the finger has rested there: the field has picked it */
+        } else if (e->phase == RECOMP_TOUCH_PHASE_MOVE) {
+            if (!g_nt_press)
+                return;
+            nt_hold(e->x, e->y); /* a card follows what the finger rests on */
+            nt_post(NT_WM_MOVE, e->x, e->y, 0);
         } else {
-            g_nt_press = 0; /* what it showed stays until the next touch */
-            nt_right_up();
+            g_nt_press = 0; /* the card stays until the next touch */
         }
         return;
     case RECOMP_TOUCH_EVENT_DRAG:
         if (e->phase == RECOMP_TOUCH_PHASE_BEGIN) {
+            if (g_nt_card) { /* the card goes; the drag is what it is */
+                nt_card_close(c);
+                nt_hold(e->x, e->y);
+                if (nt_battle_scr())
+                    nt_post(NT_WM_MOVE, e->x, e->y, 0);
+            }
             const int ctx = recomp_touch_context();
             g_nt_preview = 0;
             nt_hold(e->x, e->y);
@@ -367,23 +511,68 @@ static void nt_apply(X86 *c, const NtEvent *e) {
             }
         }
         return;
-    case RECOMP_TOUCH_EVENT_RIGHT_TAP: /* what a right click shows; it stays */
+    case RECOMP_TOUCH_EVENT_RIGHT_TAP: /* what a right click shows: the card, as a rest shows it */
         g_nt_active = 1;
-        g_nt_preview = 0;
-        g_nt_shown = 1; /* the card's controller keeps it only while hover is "now" */
-        nt_hold(e->x, e->y);
-        nt_post(NT_WM_MOVE, e->x, e->y, 0);
-        nt_post(NT_WM_RDOWN, e->x, e->y, 0);
-        if (nt_battle_scr())
-            g_nt_rdown = 1; /* a battlefield's card goes with the button: up at the next touch */
-        else
-            nt_post(NT_WM_RUP, e->x, e->y, 0);
+        nt_card_close(c);
+        g_nt_preview = g_nt_aim = g_nt_press = 0;
+        nt_card_show(e, 0);
         return;
     }
 }
 
+#ifdef NT_FN_CARD_WINDOW
+void NT_FN_CARD_WINDOW(X86 *c);
+void NT_FN_CARD_WINDOW_COMBAT(X86 *c);
+#ifdef NT_FN_CARD_WINDOW_ATB
+void NT_FN_CARD_WINDOW_ATB(X86 *c);
+#endif
+
+/* A two-level card's creator handing out its card's window (slot 0,
+ * fastcall: ECX the creator, the window in EAX): the card a finger showed is
+ * noted (a tap on it, or beside it, is told by it), and while it is up the
+ * short card stays short. */
+static void nt_card_window(X86 *c, void (*orig)(X86 *), int combat) {
+    const uint32_t self = c->r[R_ECX];
+    /* After the lift the short card stays short: for this ask its delay is
+     * as long as it gets. A battle's has none (0): its first page comes with
+     * the right button, never by itself (else the button turned it on to the
+     * second). */
+    const int hold = nt_on() && rd32(self + NT_CARD_LEVEL) == 0 && (combat || (g_nt_card && !g_nt_press));
+    const uint32_t delay = rd32(self + NT_CARD_DELAY);
+    if (hold)
+        wr32(self + NT_CARD_DELAY, 0xffffffffu);
+    orig(c);
+    if (hold)
+        wr32(self + NT_CARD_DELAY, delay);
+    if (nt_on() && g_nt_card && c->r[R_EAX]) {
+        if (nt_trace() && g_nt_card_creator != self)
+            fprintf(stderr, "[touch-native] f%u card from creator %08x, level %u\n", g_nt_frames, self,
+                    rd32(self + NT_CARD_LEVEL));
+        g_nt_card_combat = combat;
+        g_nt_card_creator = self;
+        g_nt_card_win = nt_whole_object(c->r[R_EAX]);
+        g_nt_card_frame = g_nt_frames;
+    }
+}
+
+void homm5_card_window(X86 *c) {
+    nt_card_window(c, NT_FN_CARD_WINDOW, 0);
+}
+
+void homm5_card_window_combat(X86 *c) {
+    nt_card_window(c, NT_FN_CARD_WINDOW_COMBAT, 1);
+}
+
+#ifdef NT_FN_CARD_WINDOW_ATB
+void homm5_card_window_atb(X86 *c) {
+    nt_card_window(c, NT_FN_CARD_WINDOW_ATB, 0);
+}
+#endif
+#endif
+
 /* Every frame, on the game's thread, before the screen's Update. */
 static void nt_frame(X86 *c) {
+    ++g_nt_frames;
     if (g_nt_key >= 0 && --g_nt_key_frames <= 0) {
         host_touch_key(g_nt_key, 0);
         g_nt_key = -1;
@@ -398,6 +587,17 @@ static void nt_frame(X86 *c) {
                                   (uint32_t)g_nt_posts[i].x, args, 2, top);
         }
         g_nt_nposts = 0;
+    }
+    if (g_nt_rdown_wait > 0 && --g_nt_rdown_wait == 0)
+        nt_post(NT_WM_RDOWN, g_nt_x, g_nt_y, 0);
+    if (g_nt_show_wait > 0 && --g_nt_show_wait == 0 && g_nt_card) {
+        float drawn[4];
+        const uint32_t cws = nt_top_cws();
+        if (cws && !homm5_card_on_screen(g_nt_card_win, drawn)) {
+            if (nt_trace())
+                fprintf(stderr, "[touch-native] f%u interface card at once\n", g_nt_frames);
+            homm5_show_tip_at(c, cws + 0xf8u, NT_ISCREEN_SHOW_TIP, g_nt_x, g_nt_y, (c->r[R_ESP] - 0x800u) & ~15u);
+        }
     }
     while (g_nt_count) {
         const NtEvent e = g_nt_events[g_nt_head];
@@ -426,6 +626,8 @@ static void nt_frame(X86 *c) {
     if (g_nt_hold && !g_nt_drag) {
         const uint32_t scr = nt_battle_scr();
         if (scr && rd32(scr + NT_SCR_ACTIVE) != g_nt_turn) {
+            g_nt_card = 0;
+            g_nt_card_creator = g_nt_card_win = 0;
             g_nt_hold = g_nt_preview = g_nt_aim = g_nt_press = g_nt_shown = 0;
             nt_right_up();
             nt_leave_now(c);

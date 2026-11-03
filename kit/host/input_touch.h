@@ -69,6 +69,10 @@ constexpr uint64_t kTouchTwistIdleNs = 120ull * 1000000ull;
 // down lets it go again.
 constexpr uint64_t kTouchSplitHoldNs = 700ull * 1000000ull;
 constexpr uint64_t kTouchSplitShowNs = 300ull * 1000000ull;
+// Native: a resting finger's press ring shows from this (a tap is over by
+// then), and stays this long after the press.
+constexpr uint64_t kTouchPressRingShowNs = 120ull * 1000000ull;
+constexpr uint64_t kTouchPressRingKeepNs = 250ull * 1000000ull;
 constexpr double kTouchSplitSlop = 10.0;
 constexpr double kTouchSplitCancel = 40.0;
 
@@ -239,6 +243,10 @@ class TouchMapper {
     // the finger is, in window points, and how far the count is (0 to 1; 1 once
     // Shift is held). False when there is nothing to show.
     bool split_ring(uint64_t now_ns, double *x, double *y, double *progress) const;
+    // Native: the same ring under a finger resting on the game, filling up to
+    // the press (kTouchLongPressNs; 1 there, a light tick once) and gone a
+    // moment after it. False when there is nothing to show.
+    bool press_ring(uint64_t now_ns, double *x, double *y, double *progress) const;
 
   private:
     struct Finger {

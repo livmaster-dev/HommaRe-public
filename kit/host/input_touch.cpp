@@ -263,6 +263,26 @@ bool TouchMapper::split_ring(uint64_t now, double *x, double *y, double *progres
     return true;
 }
 
+bool TouchMapper::press_ring(uint64_t now, double *x, double *y, double *progress) const {
+    if (!native_ || fingers_.size() != 1 || max_fingers_ != 1 || dragging_ || native_pressed_moved_)
+        return false;
+    const Finger &f = fingers_[0];
+    if (now - f.t0 < kTouchPressRingShowNs || dist(f.x0, f.y0, f.x, f.y) > kTouchTapTravel)
+        return false;
+    if (native_press_ && now - f.t0 >= kTouchLongPressNs + kTouchPressRingKeepNs)
+        return false;
+    if (!native_press_ && long_fired_)
+        return false; // the rest went to something else
+    *x = f.x0;
+    *y = f.y0;
+    *progress = native_press_ ? 1.0
+                              : double(now - f.t0 - kTouchPressRingShowNs) /
+                                    double(kTouchLongPressNs - kTouchPressRingShowNs);
+    if (*progress > 1)
+        *progress = 1;
+    return true;
+}
+
 void TouchMapper::native_event(std::vector<TouchAction> *out, int kind, int phase, double x,
                                double y, int count) {
     TouchAction a;

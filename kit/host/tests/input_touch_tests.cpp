@@ -1152,6 +1152,28 @@ static void test_native_rest_is_a_press_that_follows_and_ends() {
     CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, 160, 130));
 }
 
+// The ring under a resting finger fills up to the press, stays a moment after
+// it and goes; a tap is over before it shows, a drag takes it away.
+static void test_native_press_ring_counts_down_to_the_press() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    double x = 0, y = 0, progress = 0;
+    m.finger_down({1, 100, 100}, 0, &out);
+    CHECK(!m.press_ring(50 * MS, &x, &y, &progress)); // a tap's time: no ring
+    CHECK(m.press_ring(kTouchPressRingShowNs + (kTouchLongPressNs - kTouchPressRingShowNs) / 2, &x, &y,
+                       &progress) &&
+          x == 100 && y == 100 && progress > 0.4 && progress < 0.6);
+    m.tick(kTouchLongPressNs, &out);
+    CHECK(m.press_ring(kTouchLongPressNs + 10 * MS, &x, &y, &progress) && progress == 1);
+    CHECK(!m.press_ring(kTouchLongPressNs + kTouchPressRingKeepNs, &x, &y, &progress));
+    m.finger_up({1, 100, 100}, kTouchLongPressNs + 400 * MS, &out);
+    CHECK(!m.press_ring(kTouchLongPressNs + 400 * MS, &x, &y, &progress));
+    // A finger that moves off is a drag: no ring.
+    m.finger_down({1, 100, 100}, 2000 * MS, &out);
+    m.finger_motion({1, 160, 100}, 2100 * MS, &out);
+    CHECK(!m.press_ring(2300 * MS, &x, &y, &progress));
+}
+
 static void test_native_drag_waits_for_the_context_then_drags() {
     TouchMapper m = native_mapper();
     std::vector<TouchAction> out;
@@ -1302,6 +1324,7 @@ int main() {
     test_native_tap_is_down_then_tap_with_no_cursor();
     test_native_double_tap_counts_two_at_the_first_point();
     test_native_rest_is_a_press_that_follows_and_ends();
+    test_native_press_ring_counts_down_to_the_press();
     test_native_drag_waits_for_the_context_then_drags();
     test_native_drag_on_a_world_map_is_still_the_camera();
     test_native_list_drag_scrolls();

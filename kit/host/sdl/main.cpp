@@ -2489,8 +2489,11 @@ static void after_events_nearest() {
         sync_touch_hover();
         {
             // A stack dragged and held still: the ring counting down to a split.
+            // Native touch: a finger resting on the game, counting down to its
+            // press (what the game shows there, a card).
             double rx = 0, ry = 0, progress = 0;
-            const bool ring = g_touch.split_ring(now, &rx, &ry, &progress);
+            const bool ring = g_touch.split_ring(now, &rx, &ry, &progress) ||
+                              g_touch.press_ring(now, &rx, &ry, &progress);
             platform_ui_split_ring(g_window, ring, rx, ry, progress);
         }
         // The system keyboard: four fingers toggle it, and it comes up by
@@ -3711,7 +3714,8 @@ int main(int argc, char **argv) {
         // game.toml ui_mods: the interface mods (wide screen, the phone's and
         // the touch screen's), made from this install with the recipes the
         // app carries.
-        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), platform_ui_phone_interface());
+        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), platform_ui_phone_interface(),
+                     g_touch.native());
         host_text_overrides(root, host_layout().profile_dir, RECOMP_TEXTS_PAK, RECOMP_TEXTS_FILES,
                             RECOMP_TEXTS_REPLACE);
     }

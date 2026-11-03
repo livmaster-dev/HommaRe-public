@@ -228,11 +228,12 @@ invert = ["panx", "pany", "rotate"]
 portrait = false
 # On an iPhone only, the corner menus' mod (the layout itself is native). The
 # game anchors its screens to the edges itself. On every iOS device the
-# dragged creature's icon is framed for a finger and the screen resolution is
-# out of the options; everywhere the dialogue scenes span the whole screen.
+# dragged creature's icon is framed for a finger (with native touch a finger
+# instead of the mouse on the cards too) and the screen resolution is out of
+# the options; everywhere the dialogue scenes span the whole screen.
 # All are made on the device from the player's install (ui-mods/<name>.recipe,
 # kit/host/ui_mods.cpp; tools/ui_recipes.py writes them).
-ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "MobileOptions"]
+ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "NativeTouchUI", "MobileOptions"]
 cfg_defaults = { "profiles/default_profile/user_a2.cfg" = { gfx_resolution = "screen", ui_use_hwcursor = "1" } }
 
 # The dialogue scenes across the whole screen on a Mac too.

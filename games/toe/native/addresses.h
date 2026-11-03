@@ -583,3 +583,6 @@ void fn_00557470(X86 *c);
 #define HOMM5_NT_FN_CURSOR_UPDATE fn_0060dd60 /* CCursor::Update (vtable +0x1C), RET 4 */
 #define HOMM5_VT_CARD 0x00ff55c4           /* CCommonGatheringWindow: an object's card */
 #define HOMM5_NT_ISCREEN_HIDE_TIP 0x6c  /* IScreen: hide the tooltip (as in the base game) */
+#define HOMM5_NT_FN_CARD_WINDOW fn_007078f0        /* CClickingTooltipCreator: the card's window (vt 00f62bf0 slot 0; base 007fcc80) */
+#define HOMM5_NT_FN_CARD_WINDOW_COMBAT fn_007082c0 /* CClickingCombatTooltipCreator's (vt 00f62c3c slot 0; base 007fd500) */
+#define HOMM5_NT_FN_CARD_WINDOW_ATB fn_00708200    /* CClickingATBTooltipCreator's, the turn order bar's (vt 00f62c88 slot 0; ToE only) */
