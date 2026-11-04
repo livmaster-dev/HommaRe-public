@@ -55,6 +55,7 @@ enum {
     WINDOW_BACKGROUND = 0x98, /* the background CWindow::Draw draws first */
     WINDOW_CHILDREN = 0xa4,   /* std::vector of its child windows */
     DESC_NAME = 0x58,         /* the description's <Name>: begin, end, capacity */
+    DESC_VISIBLE = 0x70,      /* its <Visible>, as Show/Hide set it */
     DESC_PLACEMENT = 0x84,    /* its <Placement>: */
     PLACEMENT_SIZE = 0x20,    /* float w, h */
     NAME_MAX_ = 64,
@@ -86,6 +87,8 @@ static int layout_on(void) {
     return allowed && host_phone_layout();
 }
 
+static void discs_shown_again(void);
+
 /* A count that moves on each time layout_on changes: a screen laid out at
  * another count is laid out again (native/phone_hud.c). */
 int homm5_phone_layout_epoch(void) {
@@ -93,6 +96,8 @@ int homm5_phone_layout_epoch(void) {
     const int on = layout_on();
     if (last >= 0 && on != last) {
         ++epoch;
+        if (!on)
+            discs_shown_again();
         if (trace_layout())
             fprintf(stderr, "[layout] phone rows %s (epoch %d)\n", on ? "on" : "off", epoch);
     }
@@ -256,6 +261,52 @@ void homm5_phone_layout_axis(X86 *c, int vertical) {
                 r->w ? " (framed)" : "");
 }
 
+/* The jog dials' discs the phone's rows hid for good (their <Visible> off, as
+ * the game's Hide puts it): not drawn alone, a disc stayed a window of its
+ * screen for everything else - the game's own hit tests and the tooltip
+ * controller's search for the window under a point (00e9c5d0 in Tribes of
+ * the East) found it over the battlefield beside the rows, and asked it for
+ * its tooltip (a crash in 00e9b230 after a right button there). Shown again
+ * when the rows go (a foldable opened); a disc the game shows again itself
+ * is hidden again at its next draw. */
+static struct {
+    uint32_t win, desc;
+} g_discs[16];
+
+static void disc_hidden(uint32_t win, uint32_t desc) {
+    if (!rd8(desc + DESC_VISIBLE))
+        return;
+    wr8(desc + DESC_VISIBLE, 0);
+    int slot = -1;
+    for (int i = 0; i < 16; ++i) {
+        if (g_discs[i].win == win) {
+            slot = i;
+            break;
+        }
+        if (slot < 0 && !g_discs[i].win)
+            slot = i;
+    }
+    if (slot < 0)
+        slot = 0;
+    g_discs[slot].win = win;
+    g_discs[slot].desc = desc;
+    if (trace_layout())
+        fprintf(stderr, "[layout] disc %08x hidden\n", win);
+}
+
+static void discs_shown_again(void) {
+    for (int i = 0; i < 16; ++i) {
+        const uint32_t win = g_discs[i].win, desc = g_discs[i].desc;
+        g_discs[i].win = g_discs[i].desc = 0;
+        /* Only a window still there: the same description, a disc's name. */
+        if (!win || window_desc(win) != desc || !(named(win, "Jogdial") || named(win, "JogDialBase")))
+            continue;
+        wr8(desc + DESC_VISIBLE, 1);
+        if (trace_layout())
+            fprintf(stderr, "[layout] disc %08x shown again\n", win);
+    }
+}
+
 /* How CWindow::Draw is to draw window `win` now: 0 as it is, PL_HIDE not at
  * all, PL_BARE without its background. */
 int homm5_phone_layout_draw(uint32_t win) {
@@ -275,8 +326,11 @@ int homm5_phone_layout_draw(uint32_t win) {
                     : rdf32(desc + DESC_PLACEMENT + PLACEMENT_SIZE) != (float)r->w ||
                           rdf32(desc + DESC_PLACEMENT + PLACEMENT_SIZE + 4) != (float)r->h)
             continue;
-        if (row_of(win, desc) == r)
+        if (row_of(win, desc) == r) {
+            if (r->flags & PL_HIDE)
+                disc_hidden(win, desc);
             return r->flags & PL_HIDE ? PL_HIDE : PL_BARE;
+        }
     }
     return 0;
 }

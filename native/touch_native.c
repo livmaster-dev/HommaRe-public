@@ -322,6 +322,13 @@ static int nt_on_card(float x, float y) {
     return x >= r[0] - slop && x < r[2] + slop && y >= r[1] - slop && y < r[3] + slop;
 }
 
+/* A rest's card that never came (nothing with a card there, or a tooltip of
+ * one line, which is no creator's): the next touch is a touch like any. */
+static void nt_card_forget(void) {
+    g_nt_card = 0;
+    g_nt_card_creator = g_nt_card_win = 0;
+}
+
 /* The card goes, and with it the hover and the right button that kept it. */
 static void nt_card_close(X86 *c) {
     if (!g_nt_card)
@@ -404,8 +411,9 @@ static void nt_apply(X86 *c, const NtEvent *e) {
         return;
     case RECOMP_TOUCH_EVENT_DOWN:
         g_nt_active = 1;
-        if (g_nt_card)
+        if (nt_card_creator())
             return; /* the card stays until the gesture is known: a tap on it, or beside it */
+        nt_card_forget(); /* a rest that showed no card (or a one-line tooltip) holds no touch back */
         nt_right_up();
         if (g_nt_press || g_nt_hold || g_nt_shown)
             nt_leave_now(c); /* what the last touch showed goes */
@@ -419,13 +427,14 @@ static void nt_apply(X86 *c, const NtEvent *e) {
         return;
     case RECOMP_TOUCH_EVENT_TAP: {
         g_nt_active = 1;
-        if (g_nt_card) { /* on the card: the full card; anywhere else: the card goes, nothing more */
+        if (nt_card_creator()) { /* on the card: the full card; anywhere else: the card goes, nothing more */
             if (nt_on_card(e->x, e->y))
                 nt_card_tap(c);
             else
                 nt_card_close(c);
             return;
         }
+        nt_card_forget();
         if (vt == NT_VT_MOVIE || vt == NT_VT_LOADING) {
             nt_key_tap(vt == NT_VT_MOVIE ? NT_SDL_ESCAPE : NT_SDL_SPACE);
             return;
