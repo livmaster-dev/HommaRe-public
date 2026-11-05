@@ -179,7 +179,8 @@ bool parse(const fs::path &path, Recipe &r) {
             f.whole = true;
             f.base64 = key == "new64";
             r.files.push_back(std::move(f));
-        } else if (key == "turn" && v.size() > 1 && v[1] == "left" && !r.files.empty() && !r.files.back().whole) {
+        } else if (key == "turn" && v.size() > 1 && v[1] == "left" && !r.files.empty() &&
+                   !r.files.back().whole) {
             r.files.back().turn_left = true;
         } else if (key == "@" && v.size() > 2 && !r.files.empty() && !r.files.back().whole) {
             Edit e;
@@ -448,8 +449,8 @@ std::pair<std::string, For> profile_path(const std::string &out) {
 
 } // namespace
 
-void host_ui_mods(const std::string &game_root, const std::string &profile_dir, const std::string &recipe_dir,
-                  bool phone, bool native_touch) {
+void host_ui_mods(const std::string &game_root, const std::string &profile_dir,
+                  const std::string &recipe_dir, bool phone, bool native_touch) {
     std::error_code ec;
     if (game_root.empty() || profile_dir.empty() || recipe_dir.empty() || !fs::is_directory(recipe_dir, ec))
         return;

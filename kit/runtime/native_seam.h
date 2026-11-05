@@ -226,6 +226,11 @@ int recomp_touch_event(int kind, int phase, float x, float y, int width, int hei
  * host's input queue. Safe from any guest thread. */
 void host_touch_key(int scancode, int down);
 
+/* A light haptic tick under the finger (a phone's Taptic Engine; nothing
+ * where there is none): native touch marks with it what a finger's rest
+ * brought up (a card). Safe from any guest thread. */
+void host_touch_haptic(void);
+
 /* Optional game adapters for the camera of a 3D map (game.toml [touch]
  * gestures = "hover"). Called from the host thread; the adapter applies them
  * on the game's own thread.
@@ -275,6 +280,25 @@ int recomp_ui_scroll(float x, float y, float dy, int width, int height);
  * applies it on the game's own thread. Called from the host thread. */
 int recomp_screen_state(char *buf, int cap, unsigned *serial);
 void recomp_screen_command(const char *command);
+
+/* Optional game adapter: the commands a game offers on the screen showing now,
+ * for an on-screen panel to press (iOS: the control panel beside the camera
+ * buttons) - keys a touch screen has no other way to press. One JSON
+ * document, as recomp_screen_state passes one:
+ *   {"screen": "<the game's name for the screen>", "lang": "en",
+ *    "commands": [{"id", "label", "keys", "kind", "quick", "symbol",
+ *                  "key", "mods"}, ...]}
+ * id names the command's art and keeps its pin; label is the command in the
+ * game's language and keys the keys a keyboard presses for it ("Ctrl+1");
+ * symbol a system symbol to draw where there is no art. kind: "tap" presses
+ * key (an SDL scancode) with mods (scancodes) held; "latch" holds key until
+ * the next click on the game has been let go, or until pressed again;
+ * "next_tap_right" makes the next tap on the game a right click. quick: shown
+ * without opening the panel, 1 on any screen, 2 on a large one, 0 never.
+ * Returns as recomp_screen_state does: the length when the document changed
+ * since *serial, 0 when not, -1 when the screen offers no command. Called
+ * from the host thread every turn; the game resolves the keys itself. */
+int recomp_hotkeys_state(char *buf, int cap, unsigned *serial);
 
 /* Optional game adapter: the app is going to the background (iOS), where it
  * may be closed without ever reaching the game's own exit. A game that saves

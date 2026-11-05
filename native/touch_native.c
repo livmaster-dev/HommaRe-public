@@ -554,9 +554,14 @@ static void nt_card_window(X86 *c, void (*orig)(X86 *), int combat) {
     if (hold)
         wr32(self + NT_CARD_DELAY, delay);
     if (nt_on() && g_nt_card && c->r[R_EAX]) {
-        if (nt_trace() && g_nt_card_creator != self)
-            fprintf(stderr, "[touch-native] f%u card from creator %08x, level %u\n", g_nt_frames, self,
-                    rd32(self + NT_CARD_LEVEL));
+        if (g_nt_card_creator != self) {
+            /* A new card under the finger: a haptic tick says it came (no
+             * ring counts the rest down; a rest on nothing feels nothing). */
+            host_touch_haptic();
+            if (nt_trace())
+                fprintf(stderr, "[touch-native] f%u card from creator %08x, level %u\n", g_nt_frames, self,
+                        rd32(self + NT_CARD_LEVEL));
+        }
         g_nt_card_combat = combat;
         g_nt_card_creator = self;
         g_nt_card_win = nt_whole_object(c->r[R_EAX]);

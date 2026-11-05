@@ -202,6 +202,8 @@ final class LauncherModel {
     private(set) var idleFrames = LauncherModel.displaySetting(LauncherModel.idleFramesKey, 0)
     /// The camera buttons over the game's 3D map (touch devices).
     private(set) var cameraButtons = LauncherModel.displaySetting(LauncherModel.cameraButtonsKey, 1) != 0
+    /// The game's commands beside them (its keys a touch screen cannot press).
+    private(set) var commandPanel = LauncherModel.displaySetting(LauncherModel.commandPanelKey, 1) != 0
     /// "Touch-friendly battle": a melee by two taps, the enemy, then the cell
     /// to strike it from (a game that supports it; read when the game starts).
     /// On by default on an iPhone or iPad (kit/host/sdl/main.cpp).
@@ -360,6 +362,7 @@ final class LauncherModel {
     static let renderQualityKey = "host.display/render_quality"
     static let idleFramesKey = "host.display/idle_frames"
     static let cameraButtonsKey = "host.touch/camera_buttons"
+    static let commandPanelKey = "host.touch/hotkeys"
     static let battleCellsKey = "host.touch/battle_cells"
     static let nativeTouchKey = "host.touch/native"
     static let phoneInterfaceKey = "host.ui/phone_interface"
@@ -392,6 +395,9 @@ final class LauncherModel {
     }
     func setCameraButtons(_ on: Bool) {
         if store(Self.cameraButtonsKey, on ? 1 : 0) { cameraButtons = on }
+    }
+    func setCommandPanel(_ on: Bool) {
+        if store(Self.commandPanelKey, on ? 1 : 0) { commandPanel = on }
     }
     func setBattleCells(_ on: Bool) {
         if store(Self.battleCellsKey, on ? 1 : 0) { battleCells = on }

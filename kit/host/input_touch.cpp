@@ -220,7 +220,8 @@ void TouchMapper::split_tick(uint64_t now, std::vector<TouchAction> *out) {
         split_up_pending_ = false;
         key(out, SDL_SCANCODE_LSHIFT, false);
     }
-    if (!hover_drag_ || !dragging_ || split_shift_ || fingers_.size() != 1)
+    if (!hover_drag_ || !dragging_ || split_shift_ || fingers_.size() != 1 ||
+        latched(SDL_SCANCODE_LSHIFT))
         return;
     if ((context_ & 256) && now - split_t0_ >= kTouchSplitHoldNs) {
         split_shift_ = true;
@@ -249,8 +250,9 @@ void TouchMapper::split_release(std::vector<TouchAction> *out) {
 }
 
 bool TouchMapper::split_ring(uint64_t now, double *x, double *y, double *progress) const {
-    if (!hover_drag_ || !dragging_ || fingers_.size() != 1 || !(context_ & 256))
-        return false;
+    if (!hover_drag_ || !dragging_ || fingers_.size() != 1 || !(context_ & 256) ||
+        latched(SDL_SCANCODE_LSHIFT))
+        return false; // a Shift the panel holds splits the drop already
     if (!split_shift_ && now - split_t0_ < kTouchSplitShowNs)
         return false;
     *x = fingers_[0].x;
@@ -258,26 +260,6 @@ bool TouchMapper::split_ring(uint64_t now, double *x, double *y, double *progres
     *progress = split_shift_ ? 1.0
                              : double(now - split_t0_ - kTouchSplitShowNs) /
                                    double(kTouchSplitHoldNs - kTouchSplitShowNs);
-    if (*progress > 1)
-        *progress = 1;
-    return true;
-}
-
-bool TouchMapper::press_ring(uint64_t now, double *x, double *y, double *progress) const {
-    if (!native_ || fingers_.size() != 1 || max_fingers_ != 1 || dragging_ || native_pressed_moved_)
-        return false;
-    const Finger &f = fingers_[0];
-    if (now - f.t0 < kTouchPressRingShowNs || dist(f.x0, f.y0, f.x, f.y) > kTouchTapTravel)
-        return false;
-    if (native_press_ && now - f.t0 >= kTouchLongPressNs + kTouchPressRingKeepNs)
-        return false;
-    if (!native_press_ && long_fired_)
-        return false; // the rest went to something else
-    *x = f.x0;
-    *y = f.y0;
-    *progress = native_press_ ? 1.0
-                              : double(now - f.t0 - kTouchPressRingShowNs) /
-                                    double(kTouchLongPressNs - kTouchPressRingShowNs);
     if (*progress > 1)
         *progress = 1;
     return true;
@@ -310,6 +292,114 @@ void TouchMapper::native_tap(std::vector<TouchAction> *out, double x, double y, 
     native_tap_y_ = y;
     native_tap_ns_ = now;
     native_event(out, RECOMP_TOUCH_EVENT_TAP, RECOMP_TOUCH_PHASE_END, x, y, count);
+}
+
+// ---- The panel's commands ----
+
+bool TouchMapper::held_long_enough(uint64_t now, uint64_t due, uint64_t deadline,
+                                   uint32_t presents) const {
+    if (now < due)
+        return false;
+    return !presents_known_ || now >= deadline || presents_ - presents >= kTouchClickHoldFrames;
+}
+
+bool TouchMapper::command_tap(int key_code, const int *mods, int nmods, uint64_t now,
+                              std::vector<TouchAction> *out) {
+    if (!fingers_.empty() || nmods < 0 || nmods > 3)
+        return false;
+    // The same key still down from a quick press before: up first, so the
+    // game sees two presses.
+    for (size_t i = 0; i < key_ups_.size(); ++i)
+        if (key_ups_[i].keys[0] == key_code) {
+            for (int j = 0; j < key_ups_[i].n; ++j)
+                key(out, key_ups_[i].keys[j], false);
+            key_ups_.erase(key_ups_.begin() + (long)i);
+            break;
+        }
+    KeyUp up{};
+    up.keys[up.n++] = key_code;
+    for (int i = nmods - 1; i >= 0; --i)
+        if (!latched(mods[i])) // a held modifier stays held
+            up.keys[up.n++] = mods[i];
+    for (int i = up.n - 1; i >= 1; --i)
+        key(out, up.keys[i], true);
+    key(out, key_code, true);
+    up.due = now + kTouchClickHoldNs;
+    up.deadline = now + kTouchClickHoldMaxNs;
+    up.presents = presents_;
+    key_ups_.push_back(up);
+    return true;
+}
+
+bool TouchMapper::latched(int key_code) const {
+    for (int i = 0; i < latch_n_; ++i)
+        if (latch_keys_[i] == key_code)
+            return true;
+    return false;
+}
+
+bool TouchMapper::command_latch(int key_code, std::vector<TouchAction> *out) {
+    for (int i = 0; i < latch_n_; ++i)
+        if (latch_keys_[i] == key_code) {
+            // Pressed again: let go now.
+            key(out, key_code, false);
+            latch_keys_[i] = latch_keys_[--latch_n_];
+            if (!latch_n_)
+                latch_pressed_ = latch_up_pending_ = false;
+            return false;
+        }
+    if (latch_n_ == 4)
+        return false;
+    latch_keys_[latch_n_++] = key_code;
+    key(out, key_code, true);
+    return true;
+}
+
+void TouchMapper::latch_release(std::vector<TouchAction> *out) {
+    for (int i = 0; i < latch_n_; ++i)
+        key(out, latch_keys_[i], false);
+    latch_n_ = 0;
+    latch_pressed_ = latch_up_pending_ = false;
+}
+
+void TouchMapper::command_reset(std::vector<TouchAction> *out) {
+    latch_release(out);
+    next_right_ = false;
+}
+
+TouchMapper::PressWatch::~PressWatch() {
+    if (!mapper->latch_n_)
+        return;
+    for (size_t i = from; i < out->size(); ++i)
+        if ((*out)[i].kind == TouchAction::Button && (*out)[i].down)
+            mapper->latch_pressed_ = true;
+}
+
+// A tap's keys go up once held long enough; held modifiers go up once the
+// click or drag they were held for has been let go and that release seen.
+void TouchMapper::command_tick(uint64_t now, std::vector<TouchAction> *out) {
+    for (size_t i = 0; i < key_ups_.size();) {
+        const KeyUp &k = key_ups_[i];
+        if (held_long_enough(now, k.due, k.deadline, k.presents)) {
+            for (int j = 0; j < k.n; ++j)
+                key(out, k.keys[j], false);
+            key_ups_.erase(key_ups_.begin() + (long)i);
+        } else {
+            ++i;
+        }
+    }
+    if (!latch_n_)
+        return;
+    if (latch_pressed_ && !latch_up_pending_ && fingers_.empty() && !press_pending_ &&
+        !release_pending_ && !dragging_ && !middle_held_) {
+        latch_up_pending_ = true;
+        latch_up_due_ = now + kTouchClickHoldNs;
+        latch_up_deadline_ = now + kTouchClickHoldMaxNs;
+        latch_up_presents_ = presents_;
+    }
+    if (latch_up_pending_ &&
+        held_long_enough(now, latch_up_due_, latch_up_deadline_, latch_up_presents_))
+        latch_release(out);
 }
 
 void TouchMapper::reset_gesture() {
@@ -567,6 +657,7 @@ void TouchMapper::two_finger_world(uint64_t now, std::vector<TouchAction> *out) 
 }
 
 void TouchMapper::finger_down(TouchPoint p, uint64_t now, std::vector<TouchAction> *out) {
+    const PressWatch watch{this, out, out->size()};
     // Finish an earlier tap before starting this finger, even if its press
     // has not reached a presented frame yet. Both taps keep their own point.
     if (press_pending_)
@@ -639,6 +730,7 @@ void TouchMapper::finger_down(TouchPoint p, uint64_t now, std::vector<TouchActio
 }
 
 void TouchMapper::finger_motion(TouchPoint p, uint64_t now, std::vector<TouchAction> *out) {
+    const PressWatch watch{this, out, out->size()};
     for (Finger &f : fingers_)
         if (f.id == p.id) {
             f.x = p.x;
@@ -745,6 +837,7 @@ void TouchMapper::finger_motion(TouchPoint p, uint64_t now, std::vector<TouchAct
 }
 
 void TouchMapper::finger_up(TouchPoint p, uint64_t now, std::vector<TouchAction> *out) {
+    const PressWatch watch{this, out, out->size()};
     Finger lifted{p.id, p.x, p.y, p.x, p.y, now};
     for (size_t i = 0; i < fingers_.size(); ++i)
         if (fingers_[i].id == p.id) {
@@ -777,6 +870,22 @@ void TouchMapper::finger_up(TouchPoint p, uint64_t now, std::vector<TouchAction>
     if (!fingers_.empty())
         return; // the gesture ends when the last finger lifts
     const bool moved = dist(lifted.x0, lifted.y0, lifted.x, lifted.y) > kTouchTapTravel;
+    if (next_right_ && max_fingers_ == 1 && !moved && !anchor_used_ && !scrolling_ && !dragging_ &&
+        !middle_held_ && !cam_used_ && !long_fired_ && !native_press_ && !native_drag_ &&
+        now - lifted.t0 < kTouchLongPressNs) {
+        // The panel asked for the game's information on what this tap lands on:
+        // its right click's, without the hover's tooltip beside it.
+        next_right_ = false;
+        preview_ = false;
+        hover_state_ = 1;
+        if (native_)
+            native_event(out, RECOMP_TOUCH_EVENT_RIGHT_TAP, RECOMP_TOUCH_PHASE_END, lifted.x,
+                         lifted.y);
+        else
+            click(out, 1, lifted.x, lifted.y, now, false);
+        reset_gesture();
+        return;
+    }
     if (native_ && native_press_ && max_fingers_ > 1 && !anchor_used_) {
         // Fingers joined a rest for a gesture of their own: the press is over.
         native_event(out, RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, lifted.x, lifted.y);
@@ -939,6 +1048,12 @@ void TouchMapper::cancel_all(std::vector<TouchAction> *out) {
         button(out, 2, false, pan_virtual_ ? pan_vx_ : placed_x_, pan_virtual_ ? pan_vy_ : placed_y_);
     release_twist(out);
     end_camera(out);
+    for (const KeyUp &k : key_ups_)
+        for (int j = 0; j < k.n; ++j)
+            key(out, k.keys[j], false);
+    key_ups_.clear();
+    latch_release(out);
+    next_right_ = false;
     preview_ = false;
     fingers_.clear();
     end_edge_hold(out);
@@ -946,6 +1061,7 @@ void TouchMapper::cancel_all(std::vector<TouchAction> *out) {
 }
 
 void TouchMapper::tick(uint64_t now, std::vector<TouchAction> *out) {
+    const PressWatch watch{this, out, out->size()};
     if (press_pending_ &&
         (presents_known_ ? presents_ != presents_at_place_ : now >= press_deadline_))
         press_held(out, now);
@@ -954,6 +1070,7 @@ void TouchMapper::tick(uint64_t now, std::vector<TouchAction> *out) {
     if (twist_key_ && now - twist_moved_ns_ >= kTouchTwistIdleNs)
         release_twist(out); // the fingers stopped turning
     split_tick(now, out);
+    command_tick(now, out);
     if (drag_pending_ && fingers_.size() == 1 && max_fingers_ == 1)
         start_hover_drag(now, out); // the frame it waited for has come
     if (fingers_.size() != 1 || max_fingers_ != 1 || dragging_ || long_fired_ || middle_held_ ||

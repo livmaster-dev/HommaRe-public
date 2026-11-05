@@ -40,6 +40,7 @@
 #include "../input_touch.h"
 #include "../input_trackpad.h"
 #include "../controls/controls_host.h"
+#include "../controls/json.h"
 #include "../../mods/controls_settings.h"
 #include "../controls/gamepad_sdl.h"
 #include "../../mods/mods_internal.h"
@@ -1377,6 +1378,14 @@ extern "C" void host_touch_key(int scancode, int down) {
     push_touch_key(scancode, down != 0);
 }
 
+// runtime/native_seam.h: the tick for what a resting finger brought up. The
+// game asks from its own thread; the tick is given on the host's next turn
+// (after_events), where the platform's haptics live.
+static std::atomic<bool> g_touch_haptic{false};
+extern "C" void host_touch_haptic(void) {
+    g_touch_haptic.store(true, std::memory_order_relaxed);
+}
+
 namespace {
 
 // The on-screen controls' hooks.
@@ -2454,6 +2463,176 @@ void sync_native_screen() {
     }
 }
 
+// The commands the game offers on its screen now (recomp_hotkeys_state), the
+// document as the game wrote it: what the control panel offers besides the
+// camera. Empty when there are none. A document stands once the game has kept
+// it kHotkeysSettleNs: while it loads, the game turns its screens' key sections
+// on for a frame or two each (the map's, a battle's), which would flash the
+// panel.
+std::string g_hotkeys_document;
+uint32_t g_hotkeys_generation = 0;
+constexpr uint64_t kHotkeysSettleNs = 300ull * 1000000ull;
+constexpr uint64_t kHotkeysGoneNs = 80ull * 1000000ull;
+constexpr uint64_t kHotkeysAskNs = 15ull * 1000000ull;
+
+// One command of the document, as the panel presses it.
+struct HotkeyCommand {
+    std::string id, kind;
+    int key = 0;
+    int mods[3] = {};
+    int nmods = 0;
+};
+static std::vector<HotkeyCommand> g_hotkeys;
+
+static void parse_hotkeys() {
+    g_hotkeys.clear();
+    controls::Json doc;
+    std::string error;
+    if (g_hotkeys_document.empty() || !controls::json_parse(g_hotkeys_document, &doc, &error))
+        return;
+    const controls::Json *commands = doc.get("commands");
+    if (!commands || commands->type != controls::Json::Array)
+        return;
+    for (const controls::Json &c : commands->a) {
+        HotkeyCommand h;
+        h.id = c.str("id", "");
+        h.kind = c.str("kind", "tap");
+        h.key = int(c.num("key", 0));
+        if (const controls::Json *mods = c.get("mods"))
+            for (const controls::Json &m : mods->a)
+                if (h.nmods < 3)
+                    h.mods[h.nmods++] = int(m.n);
+        g_hotkeys.push_back(h);
+    }
+}
+
+// The document's screen and its commands' ids: what the panel's cells are.
+// The rest (where the game's interface is) may change every few frames.
+static std::string hotkeys_core(const std::string &document) {
+    controls::Json doc;
+    std::string error;
+    if (document.empty() || !controls::json_parse(document, &doc, &error))
+        return std::string();
+    std::string core = doc.str("screen", "");
+    const controls::Json *commands = doc.get("commands");
+    if (commands && commands->type == controls::Json::Array)
+        for (const controls::Json &c : commands->a)
+            core += " " + c.str("id", "");
+    return core;
+}
+
+static void sync_hotkeys() {
+    static std::vector<char> buf(8192);
+    static unsigned serial = 0;
+    static std::string latest, latest_core, shown_core;
+    static uint64_t latest_ns = 0, asked_ns = 0;
+    // RECOMP_HOTKEYS_SAMPLE=<file>: that document instead of the game's, from
+    // the start, to work on the panel without reaching a screen that has one.
+    static const std::string sample = [] {
+        const char *path = recomp_env("HOTKEYS_SAMPLE");
+        std::string text;
+        if (path && *path) {
+            std::ifstream in(path, std::ios::binary);
+            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            fprintf(stderr, "[host] hotkeys sample %s: %zu bytes\n", path, text.size());
+        }
+        return text;
+    }();
+    if (!sample.empty()) {
+        if (g_hotkeys_document != sample) {
+            g_hotkeys_document = sample;
+            ++g_hotkeys_generation;
+            parse_hotkeys();
+        }
+        return;
+    }
+    // Only a touch screen has the panel; the game is asked once a frame's
+    // worth at most (the turn comes up to every millisecond).
+    static const bool touch = platform_ui_touch_device();
+    const uint64_t now = SDL_GetTicksNS();
+    if (!touch || now - asked_ns < kHotkeysAskNs)
+        return;
+    asked_ns = now;
+    int n = recomp_hotkeys_state(buf.data(), int(buf.size()), &serial);
+    if (n >= int(buf.size())) {
+        buf.resize(size_t(n) + 1024);
+        n = recomp_hotkeys_state(buf.data(), int(buf.size()), &serial);
+    }
+    static const bool trace = recomp_env("TRACE_HOTKEYS") != nullptr;
+    if (n < 0 && !latest.empty()) {
+        latest.clear();
+        latest_core.clear();
+        latest_ns = now;
+        serial = 0;
+        if (trace)
+            fprintf(stderr, "[panel] t%llu game: none\n", (unsigned long long)(now / 1000000));
+    } else if (n > 0 && n < int(buf.size())) {
+        if (trace)
+            fprintf(stderr, "[panel] t%llu game: %d bytes\n", (unsigned long long)(now / 1000000),
+                    n);
+        latest.assign(buf.data(), size_t(n));
+        std::string core = hotkeys_core(latest);
+        if (core != latest_core) {
+            latest_core = std::move(core);
+            latest_ns = now;
+        }
+    }
+    // A document stands once its screen and commands have kept
+    // kHotkeysSettleNs; none (a video, a menu, a scene over the map) takes the
+    // panel away sooner, after a blink's worth (the map's own messages drop
+    // its section for a frame or two). Only the game's interface moved: the
+    // panel follows at once.
+    if (latest == g_hotkeys_document)
+        return;
+    if (latest_core != shown_core &&
+        now - latest_ns < (latest.empty() ? kHotkeysGoneNs : kHotkeysSettleNs))
+        return;
+    g_hotkeys_document = latest;
+    ++g_hotkeys_generation;
+    parse_hotkeys();
+    if (latest_core == shown_core)
+        return;
+    // Another screen, or other commands: keys held for the ones before, and
+    // their right click, are over.
+    shown_core = latest_core;
+    std::vector<TouchAction> actions;
+    g_touch.command_reset(&actions);
+    push_touch_actions(actions);
+}
+
+// A command pressed on the control panel, by its id: as the document says.
+static void press_hotkey(const char *id) {
+    static const bool trace = recomp_env("TRACE_HOTKEYS") != nullptr;
+    if (trace)
+        fprintf(stderr, "[panel] command %s%s\n", id,
+                g_native_screen_up ? " (native screen up)" : "");
+    if (g_native_screen_up)
+        return;
+    for (const HotkeyCommand &h : g_hotkeys) {
+        if (h.id != id)
+            continue;
+        std::vector<TouchAction> actions;
+        if (h.kind == "latch" && h.key)
+            g_touch.command_latch(h.key, &actions);
+        else if (h.kind == "next_tap_right")
+            g_touch.set_next_tap_right(!g_touch.next_tap_right());
+        else if (h.key)
+            g_touch.command_tap(h.key, h.mods, h.nmods, SDL_GetTicksNS(), &actions);
+        push_touch_actions(actions);
+        return;
+    }
+}
+
+// The commands holding now, for the panel to show them pressed.
+static std::string active_hotkeys() {
+    std::string active;
+    for (const HotkeyCommand &h : g_hotkeys)
+        if ((h.kind == "latch" && g_touch.latched(h.key)) ||
+            (h.kind == "next_tap_right" && g_touch.next_tap_right()))
+            active += (active.empty() ? "" : " ") + h.id;
+    return active;
+}
+
 static void after_events_nearest();
 
 // The housekeeping every turn does once the events are in. It rounds to
@@ -2489,11 +2668,10 @@ static void after_events_nearest() {
         sync_touch_hover();
         {
             // A stack dragged and held still: the ring counting down to a split.
-            // Native touch: a finger resting on the game, counting down to its
-            // press (what the game shows there, a card).
+            // (A finger resting for a card has no ring: the card, when one
+            // comes, comes with a haptic tick, native/touch_native.c.)
             double rx = 0, ry = 0, progress = 0;
-            const bool ring = g_touch.split_ring(now, &rx, &ry, &progress) ||
-                              g_touch.press_ring(now, &rx, &ry, &progress);
+            const bool ring = g_touch.split_ring(now, &rx, &ry, &progress);
             platform_ui_split_ring(g_window, ring, rx, ry, progress);
         }
         // The system keyboard: four fingers toggle it, and it comes up by
@@ -2518,16 +2696,41 @@ static void after_events_nearest() {
                 }
             }
         }
-        // The camera buttons over the 3D map, unless the launcher turned them off.
+        if (g_touch_haptic.exchange(false, std::memory_order_relaxed))
+            platform_ui_haptic_tap();
+        sync_native_screen();
+        sync_hotkeys();
+        // The control panel: the camera buttons over the 3D map and the game's
+        // commands, unless the launcher turned either off. No commands over a
+        // native screen or while the system keyboard types into a text field.
         static const bool camera_buttons = [] {
             int64_t on = 1;
             mods_settings_file_get("host.touch/camera_buttons", &on);
             return on != 0;
         }();
-        platform_ui_camera_buttons(g_window,
-                                   camera_buttons && (context & RECOMP_TOUCH_MAP_SCREEN),
-                                   g_phone_form.load(), recomp_camera_step);
-        sync_native_screen();
+        static const bool hotkeys = [] {
+            int64_t on = 1;
+            mods_settings_file_get("host.touch/hotkeys", &on);
+            return on != 0;
+        }();
+        {
+            const std::string active = active_hotkeys();
+            ControlPanel panel;
+            panel.camera = camera_buttons && (context & RECOMP_TOUCH_MAP_SCREEN);
+            panel.commands = hotkeys && !g_native_screen_up && !(context & RECOMP_TOUCH_TEXT)
+                                 ? g_hotkeys_document.c_str()
+                                 : "";
+            panel.generation = g_hotkeys_generation;
+            panel.active = active.c_str();
+            panel.phone = g_phone_form.load();
+            panel.keyboard = !platform_ui_keypad_wanted() && !recomp_env("KEYPAD");
+            const PointRect pic = game_rect_points();
+            panel.pic_x = pic.x;
+            panel.pic_y = pic.y;
+            panel.pic_w = pic.w;
+            panel.pic_h = pic.h;
+            platform_ui_control_panel(g_window, panel, recomp_camera_step, press_hotkey);
+        }
         // The controls follow the hardware keyboard (attached: key layouts
         // hidden), a physical controller (connected: pad layouts hidden and
         // its state fed to the pad) and the settings rows; the view is
@@ -2837,10 +3040,11 @@ void report(FILE *out, bool abnormal) {
 // the app that started it, and its startup-video choice: an empty movie list
 // with this marker in the profile's video/ (LauncherModel.setSkipIntro).
 [[maybe_unused]] static const char *const kLauncherKeys[] = {
-    "host.display/frame_limit", "host.display/energy_saver", "host.display/idle_frames",
-    "host.display/render_quality", "host.touch/camera_buttons", "host.input/trackpad_camera",
-    "host.display/metal_hud", "homm5.perf/gpu_skin", "host.touch/battle_cells", "host.touch/native",
-    "host.ui/phone_interface", "host.audio/silent_mode", "homm5.wide/ui_bounds", "host.ui/native_menus"};
+    "host.display/frame_limit",    "host.display/energy_saver", "host.display/idle_frames",
+    "host.display/render_quality", "host.touch/camera_buttons", "host.touch/hotkeys",
+    "host.input/trackpad_camera",  "host.display/metal_hud",    "homm5.perf/gpu_skin",
+    "host.touch/battle_cells",     "host.touch/native",         "host.ui/phone_interface",
+    "host.audio/silent_mode",      "homm5.wide/ui_bounds",      "host.ui/native_menus"};
 static const char kIntroMarker[] = "<!-- launcher: skip the startup videos -->";
 static const char *const kIntroFiles[] = {"video/intro.xml", "video/intro_a1.xml"};
 
@@ -3049,19 +3253,20 @@ static void seed_default_settings() {
 #endif
     static const Default table[] = {
         {"host.display/frame_limit", desktop_frame_limit, 1, 1},
-        {"host.display/energy_saver", 2, 2, 2},      // never
-        {"host.display/render_quality", 4, 3, 4},    // performance; iPad balanced
-        {"host.display/idle_frames", 1, 1, 1},       // 30 fps after a minute idle: on
-        {"host.display/metal_hud", 0, 0, 0},         // off
-        {"homm5.perf/gpu_skin", 1, -1, -1},          // animated models on the GPU
-        {"homm5.wide/ui_bounds", 2, -1, -1},         // interface within 16:9
-        {"host.input/trackpad_camera", 0, -1, -1},   // two fingers: height
-        {"host.touch/camera_buttons", -1, 0, 0},     // hidden
-        {"host.touch/battle_cells", -1, 1, 1},       // touch-friendly battle: on
-        {"host.touch/native", -1, 0, 0},             // touch: the cursor the fingers move
-        {"host.audio/silent_mode", -1, 0, 0},        // respect the silent switch
-        {"host.ui/phone_interface", -1, 0, 1},       // iPad never, iPhone automatic
-        {"host.ui/native_menus", -1, 2, 1},          // native menus: iPhone on, iPad off
+        {"host.display/energy_saver", 2, 2, 2},    // never
+        {"host.display/render_quality", 4, 3, 4},  // performance; iPad balanced
+        {"host.display/idle_frames", 1, 1, 1},     // 30 fps after a minute idle: on
+        {"host.display/metal_hud", 0, 0, 0},       // off
+        {"homm5.perf/gpu_skin", 1, -1, -1},        // animated models on the GPU
+        {"homm5.wide/ui_bounds", 2, -1, -1},       // interface within 16:9
+        {"host.input/trackpad_camera", 0, -1, -1}, // two fingers: height
+        {"host.touch/camera_buttons", -1, 0, 0},   // hidden
+        {"host.touch/hotkeys", -1, 1, 1},          // the game's commands: shown
+        {"host.touch/battle_cells", -1, 1, 1},     // touch-friendly battle: on
+        {"host.touch/native", -1, 0, 0},           // touch: the cursor the fingers move
+        {"host.audio/silent_mode", -1, 0, 0},      // respect the silent switch
+        {"host.ui/phone_interface", -1, 0, 1},     // iPad never, iPhone automatic
+        {"host.ui/native_menus", -1, 2, 1},        // native menus: iPhone on, iPad off
     };
     const int device = !platform_ui_touch_device() ? 0 : platform_ui_phone() ? 2 : 1;
     for (const Default &d : table) {
@@ -3714,8 +3919,8 @@ int main(int argc, char **argv) {
         // game.toml ui_mods: the interface mods (wide screen, the phone's and
         // the touch screen's), made from this install with the recipes the
         // app carries.
-        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), platform_ui_phone_interface(),
-                     g_touch.native());
+        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"),
+                     platform_ui_phone_interface(), g_touch.native());
         host_text_overrides(root, host_layout().profile_dir, RECOMP_TEXTS_PAK, RECOMP_TEXTS_FILES,
                             RECOMP_TEXTS_REPLACE);
     }

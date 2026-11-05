@@ -586,3 +586,10 @@ void fn_00557470(X86 *c);
 #define HOMM5_NT_FN_CARD_WINDOW fn_007078f0        /* CClickingTooltipCreator: the card's window (vt 00f62bf0 slot 0; base 007fcc80) */
 #define HOMM5_NT_FN_CARD_WINDOW_COMBAT fn_007082c0 /* CClickingCombatTooltipCreator's (vt 00f62c3c slot 0; base 007fd500) */
 #define HOMM5_NT_FN_CARD_WINDOW_ATB fn_00708200    /* CClickingATBTooltipCreator's, the turn order bar's (vt 00f62c88 slot 0; ToE only) */
+
+/* The touch panel's commands (native/hotkeys.c): the active key sections'
+ * vector, kept by 005b59b0 (the base game's 006bb7e0), and the profile's
+ * files, named for the expansion. */
+#define HOMM5_BIND_SECTIONS 0x0110b680
+#define HOMM5_INPUT_CFG "input_a2.cfg"
+#define HOMM5_GLOBAL_CFG "global_a2.cfg"

@@ -332,6 +332,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RECOMP_NATIVE_LAUNCHER)
 endif()
 if(IOS)
   set(POP_PLATFORM_UI ${HOST}/sdl/platform_ui_ios.mm)
+  # Under ARC by name: the Xcode generator drops the language-conditioned
+  # POP_OBJC_ARC, and the views keep objects the file does not retain itself.
+  set_source_files_properties(${HOST}/sdl/platform_ui_ios.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   list(APPEND FW_METAL "-framework UIKit" "-framework UniformTypeIdentifiers" "-framework CoreHaptics")
 elseif(ANDROID)
   set(POP_PLATFORM_UI ${HOST}/sdl/platform_ui_desktop.cpp ${HOST}/launcher/launcher_platform_android.cpp)

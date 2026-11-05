@@ -2001,3 +2001,56 @@ static void hud_tips(X86 *c, void (*orig)(X86 *)) {
 void homm5_tooltip_timer(X86 *c) { hud_tips(c, HOMM5_FN_TOOLTIP_TIMER); }
 void homm5_tooltip_move(X86 *c) { hud_tips(c, HOMM5_FN_TOOLTIP_MOVE); }
 #endif
+
+/* For native/hotkeys.c: where the interface of the screens drawn in the last
+ * frame stands, so the host's command panel keeps clear of it. Each root's
+ * children that show, as drawn (a panel at its phone scale, the rest in the
+ * root's mapping), as fractions of the screen's picture: x0, y0, x1, y1.
+ * Whole-screen layers (half the picture or more) and what follows the picture
+ * (a stack's counter) are left out. How many; at most `cap`. Called on the
+ * game's thread. */
+int homm5_window_shown(uint32_t win); /* native/phone_layout.c */
+
+int homm5_hud_busy(float (*out)[4], int cap) {
+    const int f = !g_hud_frame; /* the last frame drawn whole */
+    int n = 0;
+    for (int i = 0; i < g_hud_count[f] && n < cap; ++i) {
+        const Hud *h = &g_huds[f][i];
+        if (h->kind == HUD_FULL || h->plain.rw <= 0.0f || h->plain.rh <= 0.0f)
+            continue;
+        const uint32_t win = h->root - ROOT_MAIN;
+        const uint32_t b = rd32(win + WINDOW_CHILDREN), e = rd32(win + WINDOW_CHILDREN + 4);
+        if (b < 0x10000u || e < b || e - b > 4u * 256u)
+            continue;
+        for (uint32_t at = b; at < e && n < cap; at += 4) {
+            const uint32_t child = rd32(at);
+            float r[4];
+            if (!child || !window_rect(child, r) || !homm5_window_shown(child) ||
+                homm5_phone_layout_draw(child) == LAYOUT_HIDE || follows_picture(h, child))
+                continue;
+#ifdef HOMM5_VT_CARD
+            if (rd32(child) == HOMM5_VT_CARD)
+                continue; /* a card a finger brought up comes and goes: not interface */
+#endif
+            Panel pn;
+            const Mapping m = panel_of(h, child, &pn, 0) ? panel_mapping(h, &pn) : hud_mapping(h);
+            if (!(m.vw > 0.0f) || !(m.vh > 0.0f))
+                continue;
+            const float sx = m.rw / m.vw / h->plain.rw, sy = m.rh / m.vh / h->plain.rh;
+            float q[4] = {(r[0] - m.ox) * sx, (r[1] - m.oy) * sy, (r[2] - m.ox) * sx,
+                          (r[3] - m.oy) * sy};
+            int finite = 1;
+            for (int k = 0; k < 4; ++k) {
+                finite &= q[k] == q[k] && q[k] > -1e9f && q[k] < 1e9f;
+                q[k] = clampf_(q[k], 0.0f, 1.0f);
+            }
+            if (!finite)
+                continue;
+            if (q[2] - q[0] <= 0.005f || q[3] - q[1] <= 0.005f ||
+                (q[2] - q[0]) * (q[3] - q[1]) >= 0.5f)
+                continue;
+            memcpy(out[n++], q, sizeof q);
+        }
+    }
+    return n;
+}

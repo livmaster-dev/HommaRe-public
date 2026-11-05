@@ -167,6 +167,18 @@ void homm5_window_name(uint32_t win, char *out, size_t cap) {
     snprintf(out, cap, "%s", name);
 }
 
+/* Whether a window is shown, as IWindow::IsVisible says (00e3bf30 in the
+ * base game, the same code in both expansions): its own flag and every
+ * parent's, up to the screen's root. For native/hotkeys.c. */
+int homm5_window_shown(uint32_t win) {
+    for (int guard = 32; guard-- && guest_ptr(win); win = rd32(win + WINDOW_PARENT)) {
+        const uint32_t desc = window_desc(win);
+        if (!desc || !rd8(desc + DESC_VISIBLE))
+            return 0;
+    }
+    return 1;
+}
+
 static int named(uint32_t win, const char *name) {
     char got[NAME_MAX_];
     desc_name(window_desc(win), got);
