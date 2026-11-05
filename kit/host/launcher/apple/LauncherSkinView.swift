@@ -1035,6 +1035,9 @@ struct SkinSettings: View {
                             cell(L10n.cameraButtons) {
                                 choices([L10n.showVideos, L10n.hideButtons], model.cameraButtons ? 0 : 1, size: 20) { model.setCameraButtons($0 == 0) }
                             }
+                            cell(L10n.commandPanel) {
+                                choices([L10n.showVideos, L10n.hideButtons], model.commandPanel ? 0 : 1, size: 20) { model.setCommandPanel($0 == 0) }
+                            }
                             cell(L10n.battleCells) {
                                 choices([L10n.off, L10n.on], model.battleCells ? 1 : 0, size: 20) { model.setBattleCells($0 == 1) }
                             }
@@ -1161,6 +1164,9 @@ struct SkinSettings: View {
             #if os(iOS)
             row(L10n.cameraButtons) {
                 choices([L10n.showVideos, L10n.hideButtons], model.cameraButtons ? 0 : 1) { model.setCameraButtons($0 == 0) }
+            }
+            row(L10n.commandPanel) {
+                choices([L10n.showVideos, L10n.hideButtons], model.commandPanel ? 0 : 1) { model.setCommandPanel($0 == 0) }
             }
             row(L10n.battleCells) {
                 choices([L10n.off, L10n.on], model.battleCells ? 1 : 0) { model.setBattleCells($0 == 1) }

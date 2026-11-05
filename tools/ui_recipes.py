@@ -48,6 +48,8 @@ def mods(game, toe):
              wide + sel + (["--border", HOF_BORDER] if gid == "hof" else [])),
             (recipes / "PhoneUI.recipe", "phone/PhoneUI%s%s" % (suffix, ext), ["phone_ui_mod.py"] + sel),
             (recipes / "TouchUI.recipe", "touch/TouchUI%s%s" % (suffix, ext), ["touch_ui_mod.py"] + sel),
+            (recipes / "NativeTouchUI.recipe", "touch/NativeTouchUI%s%s" % (suffix, ext),
+             ["native_touch_ui_mod.py"] + sel),
             (recipes / "MobileOptions.recipe", "mobile/MobileOptions%s%s" % (suffix, ext),
              ["mobile_options_mod.py"] + sel),
         ]

@@ -127,6 +127,7 @@ enum L10n {
     static var showVideos: String { t("showVideos") }
     static var skipVideos: String { t("skipVideos") }
     static var cameraButtons: String { t("cameraButtons") }
+    static var commandPanel: String { t("commandPanel") }
     static var hideButtons: String { t("hideButtons") }
     static var battleCells: String { t("battleCells") }
     static var touchMode: String { t("touchMode") }

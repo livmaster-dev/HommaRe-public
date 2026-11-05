@@ -4,6 +4,29 @@ What changed for players in each release of HommaRe. The builds are in
 [Releases](../../releases); the recompilation kit underneath keeps its own notes in
 [kit/CHANGELOG.md](kit/CHANGELOG.md).
 
+## 0.1-playable-433 (2026-11-05)
+
+- **A command panel on iPad and iPhone,** in all three games: the camera buttons' panel
+  now also carries the game's hotkeys for the screen you are on: the kingdom overview,
+  objectives, heroes' mana, sleep, dig, the underground, the Tear of Asha map, quick
+  save and load on the map; creature info, the initiative bar, wait, Ctrl's melee
+  attack and Shift's split in battle, arrange and start before it. Its blue arrow opens
+  all of them with their names; hold a button and drag it to reorder. The panel keeps
+  clear of the game's own buttons, leaves out a command whose button the game shows,
+  and presses the keys your profile binds. *Command buttons* in the launcher turns it
+  off.
+- **Native touch (new, off by default):** *Touch: Native* in the launcher hands a
+  finger's taps to the game at their point, with no cursor to steer. Rest a finger on a
+  creature, a hero or a stack for its short card, with a light tick of the phone when it
+  comes; it stays after you lift. Tap the card for the full one, anywhere else to close
+  it. In battle the first tap shows the move or the attack with its damage, a second
+  tap acts. The cards show a hand instead of the right mouse button. Movies and loading
+  screens take a tap as a key.
+- **iPhone:** the jog dial's hidden disc no longer catches a finger beside the phone's
+  button rows (Tribes of the East could close after a long press there). On a foldable
+  iPhone the safe area no longer changes every frame (that filled the log with hundreds
+  of megabytes).
+
 ## 0.1-playable-421 (2026-10-31)
 
 - **German, French and Polish GOG releases,** in all three games: install them from

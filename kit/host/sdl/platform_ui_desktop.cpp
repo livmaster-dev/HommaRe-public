@@ -198,7 +198,8 @@ bool platform_ui_handle_lifecycle(const SDL_Event &event) {
     return false;
 }
 
-void platform_ui_camera_buttons(SDL_Window *, bool, bool, void (*)(int)) {}
+void platform_ui_control_panel(SDL_Window *, const ControlPanel &, void (*)(int),
+                               void (*)(const char *)) {}
 void platform_ui_split_ring(SDL_Window *, bool, double, double, double) {}
 void platform_ui_hand_over_lifecycle() {}
 

@@ -525,6 +525,18 @@ enum LauncherCatalog {
    "pl": "Przyciski kamery",
    "zh-Hans": "镜头按钮"
   },
+  "commandPanel": {
+   "en": "Command buttons",
+   "ru": "Кнопки команд",
+   "cs": "Tlačítka příkazů",
+   "de": "Befehlstasten",
+   "es": "Botones de órdenes",
+   "fr": "Boutons de commandes",
+   "it": "Pulsanti comandi",
+   "hu": "Parancsgombok",
+   "pl": "Przyciski poleceń",
+   "zh-Hans": "命令按钮"
+  },
   "battleCells": {
    "en": "Touch-friendly battle",
    "ru": "Сенсорный бой",

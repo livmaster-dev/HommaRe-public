@@ -669,4 +669,13 @@
 #define HOMM5_NT_FN_CURSOR_UPDATE fn_007279d0 /* CCursor::Update (vtable +0x1C), RET 4 */
 #define HOMM5_VT_CARD 0x0103b8bc           /* CCommonGatheringWindow: an object's card */
 #define HOMM5_NT_ISCREEN_HIDE_TIP 0x68  /* IScreen: hide the tooltip (one slot before the base game's 0x6c) */
+#define HOMM5_NT_FN_CARD_WINDOW fn_007e9e60        /* CClickingTooltipCreator: the card's window (vt 00fb5628 slot 0; base 007fcc80) */
+#define HOMM5_NT_FN_CARD_WINDOW_COMBAT fn_007ea6e0 /* CClickingCombatTooltipCreator's (vt 00fb5674 slot 0; base 007fd500) */
 #define HOMM5_NT_REAL_SCREEN_SIZE hof_real_screen_size /* native/hof_screen.c: the client size */
+
+/* The touch panel's commands (native/hotkeys.c): the active key sections'
+ * vector, kept by 006e5360 (the base game's 006bb7e0), and the profile's
+ * files, named for the expansion. */
+#define HOMM5_BIND_SECTIONS 0x0114aacc
+#define HOMM5_INPUT_CFG "input_a1.cfg"
+#define HOMM5_GLOBAL_CFG "global_a1.cfg"

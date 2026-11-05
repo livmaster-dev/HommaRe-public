@@ -199,3 +199,14 @@ void homm5_edge_scroll(X86 *c);
  * touch), so the battle's cursor and damage hint are drawn at the point. */
 void homm5_cursor_update(X86 *c);
 #define FN_0060dd60 homm5_cursor_update
+
+/* 007078f0 / 007082c0 / 00708200: a two-level card's creator (NUI::CClickingTooltipCreator,
+ * CClickingCombatTooltipCreator, CClickingATBTooltipCreator) handing out its card's window (slot 0).
+ * native/touch_native.c notes the card a finger showed, so a tap on it shows the
+ * full card and a tap beside it closes it, and keeps it short after the lift. */
+void homm5_card_window(X86 *c);
+#define FN_007078f0 homm5_card_window
+void homm5_card_window_combat(X86 *c);
+#define FN_007082c0 homm5_card_window_combat
+void homm5_card_window_atb(X86 *c);
+#define FN_00708200 homm5_card_window_atb

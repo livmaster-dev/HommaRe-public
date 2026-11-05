@@ -239,6 +239,31 @@ class TouchMapper {
     // the finger is, in window points, and how far the count is (0 to 1; 1 once
     // Shift is held). False when there is nothing to show.
     bool split_ring(uint64_t now_ns, double *x, double *y, double *progress) const;
+    // Commands from an on-screen panel (runtime/native_seam.h
+    // recomp_hotkeys_state), in SDL scancodes:
+    // - command_tap presses `key` with up to three modifiers (pressed first)
+    //   and lets go of them all as a click is let go, kTouchClickHoldNs and
+    //   kTouchClickHoldFrames presented frames later. False, with nothing
+    //   pressed, while a finger is on the game: its gesture owns the input.
+    // - command_latch holds a modifier (Ctrl, Shift) until the next click or
+    //   drag on the game has been let go and its release seen, or until it is
+    //   pressed again. Returns whether it is held now.
+    // - set_next_tap_right: the next tap on the game right-clicks where it
+    //   lands (what the game says about the thing there), then the taps are
+    //   left clicks again.
+    bool command_tap(int key, const int *mods, int nmods, uint64_t now_ns,
+                     std::vector<TouchAction> *out);
+    bool command_latch(int key, std::vector<TouchAction> *out);
+    bool latched(int key) const;
+    void set_next_tap_right(bool on) {
+        next_right_ = on;
+    }
+    bool next_tap_right() const {
+        return next_right_;
+    }
+    // The screen the commands were for is gone: held modifiers go up and the
+    // next tap is a left click again.
+    void command_reset(std::vector<TouchAction> *out);
 
   private:
     struct Finger {
@@ -349,6 +374,34 @@ class TouchMapper {
     void split_tick(uint64_t now, std::vector<TouchAction> *out);
     void split_drop(uint64_t now);
     void split_release(std::vector<TouchAction> *out);
+    // The panel's commands: a tap's keys waiting to be let go, the held
+    // modifiers and whether the game has been clicked since they went down,
+    // and the right click the next tap becomes.
+    struct KeyUp {
+        int keys[4];
+        int n;
+        uint64_t due, deadline;
+        uint32_t presents;
+    };
+    std::vector<KeyUp> key_ups_;
+    int latch_keys_[4] = {};
+    int latch_n_ = 0;
+    bool latch_pressed_ = false;
+    bool latch_up_pending_ = false;
+    uint64_t latch_up_due_ = 0, latch_up_deadline_ = 0;
+    uint32_t latch_up_presents_ = 0;
+    bool next_right_ = false;
+    void command_tick(uint64_t now, std::vector<TouchAction> *out);
+    void latch_release(std::vector<TouchAction> *out);
+    bool held_long_enough(uint64_t now, uint64_t due, uint64_t deadline, uint32_t presents) const;
+    // Notes a button pressed on the game while a modifier is held (the click
+    // or drag that lets it go), whichever entry point emitted it.
+    struct PressWatch {
+        TouchMapper *mapper;
+        const std::vector<TouchAction> *out;
+        size_t from;
+        ~PressWatch();
+    };
     bool release_ready(uint64_t now) const;
     void place(std::vector<TouchAction> *out, double x, double y, bool snap = true);
     // chain: a tap soon after the last left click and near it lands exactly on

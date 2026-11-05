@@ -404,8 +404,12 @@ void HOMM5_CAMERA_UPDATE_ORIG(X86 *c);
 /* When the map's camera last ran its frame, and since when it has run without
  * a break. The adventure screen is on top of the screen stack while a map is
  * still loading behind the loading screen; its camera runs every frame only
- * once the map is drawn (and once, alone, during the load). */
+ * once the map is drawn (and once, alone, during the load). A break is a gap
+ * of MAP_GAP_MS: a map that has just come up still loads as it draws, with
+ * frames up to a second apart (2026-11-04, iPhone: the panel came and went
+ * with each, a 300 ms break took the map away). */
 static volatile int64_t g_map_frame_ms, g_map_since_ms;
+#define MAP_GAP_MS 1500
 
 static int64_t now_ms(void) {
     struct timespec ts;
@@ -413,12 +417,15 @@ static int64_t now_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* When a zoom-only camera last ran its frame (zoom_view_camera found it). */
-static volatile int64_t g_zoom_frame_ms;
+/* When a zoom-only camera last ran its frame (zoom_view_camera found it),
+ * and since when without a break of MAP_GAP_MS, as the map's: a battle that
+ * has just come up loads as it draws too. */
+static volatile int64_t g_zoom_frame_ms, g_zoom_since_ms;
 
 int homm5_zoom_camera_live(void) {
     const int64_t last = __atomic_load_n(&g_zoom_frame_ms, __ATOMIC_RELAXED);
-    return last && now_ms() - last < 300;
+    const int64_t since = __atomic_load_n(&g_zoom_since_ms, __ATOMIC_RELAXED);
+    return last && now_ms() - last < MAP_GAP_MS && last - since >= 250;
 }
 
 /* How far out the map's camera is, 0 at its nearest and 1 at its farthest
@@ -432,7 +439,7 @@ float homm5_map_zoom(void) {
 int homm5_map_camera_live(void) {
     const int64_t last = __atomic_load_n(&g_map_frame_ms, __ATOMIC_RELAXED);
     const int64_t since = __atomic_load_n(&g_map_since_ms, __ATOMIC_RELAXED);
-    return last && now_ms() - last < 300 && last - since >= 250;
+    return last && now_ms() - last < MAP_GAP_MS && last - since >= 250;
 }
 
 /* The placement phase on a phone: the troops are placed on the field's near
@@ -514,8 +521,11 @@ void homm5_camera_update(X86 *c) {
     const uint32_t cam = map_camera(op);
     if (cam) {
         const int64_t now = now_ms();
-        if (now - __atomic_load_n(&g_map_frame_ms, __ATOMIC_RELAXED) >= 300)
+        const int64_t gap = now - __atomic_load_n(&g_map_frame_ms, __ATOMIC_RELAXED);
+        if (gap >= MAP_GAP_MS)
             __atomic_store_n(&g_map_since_ms, now, __ATOMIC_RELAXED); /* a new run */
+        else if (gap >= 200 && trace_camera())
+            fprintf(stderr, "[camera] map frame after %lld ms\n", (long long)gap);
         __atomic_store_n(&g_map_frame_ms, now, __ATOMIC_RELAXED);
         {
             CamState s;
@@ -540,7 +550,10 @@ void homm5_camera_update(X86 *c) {
         if (g_battle_cam && rd32(op + OP_CAMERA) == g_battle_cam)
             battle_phase(op);
         if (zoom_view_camera(op)) {
-            __atomic_store_n(&g_zoom_frame_ms, now_ms(), __ATOMIC_RELAXED);
+            const int64_t now = now_ms();
+            if (now - __atomic_load_n(&g_zoom_frame_ms, __ATOMIC_RELAXED) >= MAP_GAP_MS)
+                __atomic_store_n(&g_zoom_since_ms, now, __ATOMIC_RELAXED); /* a new run */
+            __atomic_store_n(&g_zoom_frame_ms, now, __ATOMIC_RELAXED);
             apply_gesture(op, rd32(op + OP_CAMERA), 1);
         }
     }

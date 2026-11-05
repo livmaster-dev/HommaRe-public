@@ -128,9 +128,11 @@ void recomp_app_background(void) {
 
 static void nt_frame(X86 *c);           /* native/touch_native.c, below */
 static int homm5_native_hover(void);
+void homm5_hotkeys_frame(X86 *c); /* native/hotkeys.c: the panel's buttons and language */
 
 void homm5_hover_timeout(X86 *c) {
     nt_frame(c);
+    homm5_hotkeys_frame(c);
     const uint32_t asked = __atomic_load_n(&g_save_asked, __ATOMIC_ACQUIRE);
     if (asked != __atomic_load_n(&g_save_answered, __ATOMIC_ACQUIRE)) {
         homm5_save_settings(c);
@@ -268,6 +270,28 @@ static int drag_splits(void) {
                     known ? "a split may follow" : "no split");
     }
     return known;
+}
+
+/* The root window of the map's or a battle's screen when it is on top (in
+ * native/phone_layout.c's terms: its children at +0xa4), or zero: the
+ * screen's CWindowScreen is 0xf8 before the pointer it keeps. For
+ * native/hotkeys.c, which looks for the game's own buttons there. */
+uint32_t homm5_top_root(void) {
+    const uint32_t screen = top_screen();
+    const uint32_t vt = screen ? peek32(screen) : 0;
+    const uint32_t sub = vt == VT_ADVENTURE ? SUB_ADVENTURE : vt == VT_COMBAT ? SUB_COMBAT : 0;
+    const uint32_t windows = sub ? peek32(screen - sub + SCREEN_WINDOWS) : 0;
+    return windows > 0xf8u ? windows - 0xf8u : 0;
+}
+
+/* What the top screen is: 1 the adventure map, 2 a battle, 0 anything else
+ * (a town, a menu, a loading screen). For native/hotkeys.c: a screen's key
+ * section stays on under a town's, and a map's camera may have drawn its
+ * last frame a moment ago. */
+int homm5_top_screen_kind(void) {
+    const uint32_t screen = top_screen();
+    const uint32_t vt = screen ? peek32(screen) : 0;
+    return vt == VT_ADVENTURE ? 1 : vt == VT_COMBAT ? 2 : 0;
 }
 
 int homm5_ui_under_cursor(void); /* native/phone_hud.c */

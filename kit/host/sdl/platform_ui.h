@@ -95,14 +95,30 @@ void platform_ui_seed_profile(const std::string &profile_dir);
 // mods are for it. Always false off iOS.
 bool platform_ui_phone_interface();
 
-// On-screen camera buttons over a game's 3D map - zoom in, zoom out, turn left,
-// turn right - shown while `visible`; a press calls `press` with a
-// RECOMP_CAMERA_* step (runtime/native_seam.h). Call it every turn: it only
-// acts on a change. `phone`: laid out for a phone-sized window (main.cpp's
-// phone form); a change builds them again at the other size. iOS: a column of
-// round buttons at the top right (a phone's: by the camera housing), which
-// take their touches themselves. Desktop and Android: nothing.
-void platform_ui_camera_buttons(SDL_Window *window, bool visible, bool phone, void (*press)(int step));
+// The control panel over the game: the camera's buttons over a 3D map - zoom
+// in, zoom out, turn left, turn right - and the commands the game offers on its
+// screen (runtime/native_seam.h recomp_hotkeys_state), each with its name, in
+// a place clear of the game's interface where the document says where that
+// stands ("busy"). Shown while it has either.
+struct ControlPanel {
+    bool camera = false;       // the camera's buttons
+    const char *commands = ""; // the game's document, "" for none
+    uint32_t generation = 0;   // changes whenever `commands` does
+    const char *active = "";   // ids of commands holding now (a held key), space-separated
+    bool phone = false;        // laid out for a phone-sized window (main.cpp's phone form)
+    bool keyboard = false;     // a hardware keyboard (unused: the commands stay)
+    // The game's picture in window points, which the document's "busy" (the
+    // game's interface, as fractions of it) is measured against; 0 for the
+    // whole window.
+    double pic_x = 0, pic_y = 0, pic_w = 0, pic_h = 0;
+};
+// A camera button calls `camera` with a RECOMP_CAMERA_* step, a command
+// `command` with its id. Call it every turn: it only acts on a change; another
+// `phone` builds it again at the other size. iOS: a framed column of round
+// buttons at the top right (a phone's: at the left, by the camera housing),
+// which take their touches themselves. Desktop and Android: nothing.
+void platform_ui_control_panel(SDL_Window *window, const ControlPanel &panel,
+                               void (*camera)(int step), void (*command)(const char *id));
 
 // The ring that counts down a resting drag to a split (TouchMapper::split_ring):
 // centred at (x, y) in window points, `progress` 0 to 1 (1: held, a light tap
