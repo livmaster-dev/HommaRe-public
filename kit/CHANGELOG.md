@@ -1,5 +1,36 @@
 # Changelog
 
+## iOS control panel: the game's commands beside the camera
+
+- A new seam, `recomp_hotkeys_state(buf, cap, serial)` in
+  `runtime/native_seam.h`: a game that answers it hands the host a JSON
+  document of the commands its screen offers now (id, label, keys, kind,
+  the key and modifiers as scancodes) and where its interface is ("busy",
+  fractions of the picture). The host takes a new screen or new commands
+  once they have kept 300 ms, a moved interface at once, and asks at most
+  every 15 ms, only on a touch screen.
+- iOS: the camera panel becomes `RecompControlPanel`
+  (`platform_ui_control_panel` replaces `platform_ui_camera_buttons`): the
+  camera's buttons and the commands, a stretchable frame from the panel's
+  art, a blue arrow that opens all of them as a grid with labels, hold and
+  drag to reorder (kept per screen in the defaults), placed clear of the
+  game's interface. Its placement is worked out only when its inputs
+  change. `RECOMP_HOTKEYS_SAMPLE=<file>` shows a document from the start.
+- `TouchMapper::command_tap`, `command_latch` (a modifier held until the
+  click or gesture it was for has been let go, or pressed again),
+  `set_next_tap_right` and `command_reset` (another screen or other
+  commands); seven new tests.
+- `host_touch_haptic()`: a game asks for a light haptic tick from any
+  thread, given on the host's next turn. Native touch's press ring is gone
+  (`TouchMapper::press_ring`): a rest that brings up a card says so with the
+  tick; the ring is the stack split's only.
+- Recipes (`ui_mods`): format 3, `new64` (a whole file the port drew, in
+  base64) and `touch/` mods made only with native touch.
+- The setting `host.touch/hotkeys` (on by default on a touch screen), shown
+  in the launcher as "Command buttons" in its ten languages.
+- `platform_ui_ios.mm` is compiled with ARC on iOS too (the Xcode generator
+  ignored the language generator expression); an `#error` guards it.
+
 ## Native touch: gestures handed to the game, no hidden cursor
 
 - A new seam, `recomp_touch_event(kind, phase, x, y, w, h, count)` in
