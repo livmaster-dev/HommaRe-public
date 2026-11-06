@@ -127,8 +127,12 @@ enum L10n {
     static var showVideos: String { t("showVideos") }
     static var skipVideos: String { t("skipVideos") }
     static var cameraButtons: String { t("cameraButtons") }
+    static var commandPanel: String { t("commandPanel") }
     static var hideButtons: String { t("hideButtons") }
     static var battleCells: String { t("battleCells") }
+    static var touchMode: String { t("touchMode") }
+    static var touchNative: String { t("touchNative") }
+    static var touchCursor: String { t("touchCursor") }
     static var phoneInterface: String { t("phoneInterface") }
     static var silentMode: String { t("silentMode") }
     static var respect: String { t("respect") }
@@ -174,7 +178,9 @@ enum L10n {
     static var interrupted: String { t("interrupted") }
 
     static func interruptedDetail(_ setup: String) -> String {
-        t("interruptedDetail", ["setup": (setup as NSString).lastPathComponent])
+        // A download from GOG.com (InstallMarker.setup "GOG.com") unpacks nothing.
+        if setup == "GOG.com" { return t("gogInterruptedDetail") }
+        return t("interruptedDetail", ["setup": (setup as NSString).lastPathComponent])
     }
 
     static var notFoundDetail: String {
@@ -294,4 +300,42 @@ enum L10n {
     }
 
     static var defaultLegal: String { t("defaultLegal") }
+
+    // The GOG.com panel and download (LauncherGog.swift, LauncherGogView.swift).
+    static var gogTitle: String { t("gogTitle") }
+    static var gogIntro: String { t("gogIntro") }
+    static var gogSignIn: String { t("gogSignIn") }
+    static var gogSignOut: String { t("gogSignOut") }
+    static var gogSignedIn: String { t("gogSignedIn") }
+    static func gogSignedInAs(_ name: String) -> String { t("gogSignedInAs", ["name": name]) }
+    static var gogSigningIn: String { t("gogSigningIn") }
+    static var gogChecking: String { t("gogChecking") }
+    static var gogOwned: String { t("gogOwned") }
+    static var gogNotOwned: String { t("gogNotOwned") }
+    static var gogDownload: String { t("gogDownload") }
+    static var gogGameLanguage: String { t("gogGameLanguage") }
+    static var gogUseInstallers: String { t("gogUseInstallers") }
+    static func gogDownloadSize(_ size: Int64) -> String { t("gogDownloadSize", ["size": bytes(size)]) }
+    static func gogSignInFailed(_ reason: String) -> String { t("gogSignInFailed", ["reason": reason]) }
+    static var gogExpired: String { t("gogExpired") }
+    static var gogSignInFirst: String { t("gogSignInFirst") }
+    static var gogKeychain: String { t("gogKeychain") }
+    static func gogNotInLibrary(_ name: String) -> String { t("gogNotInLibrary", ["name": name]) }
+    static func gogNoBuild(_ name: String) -> String { t("gogNoBuild", ["name": name]) }
+    static var gogNoLink: String { t("gogNoLink") }
+
+    static func gogMissingFiles(_ paths: [String]) -> String {
+        t("gogMissingFiles", ["list": paths.prefix(3).joined(separator: ", ") + (paths.count > 3 ? "…" : "")])
+    }
+
+    static func gogVerifyFailed(_ paths: [String]) -> String {
+        let list = paths.prefix(3).joined(separator: ", ") + (paths.count > 3 ? "…" : "")
+        return t("gogVerifyFailed", ["count": "\(paths.count)", "list": list])
+    }
+
+    static var gogDamaged: String { t("gogDamaged") }
+    static func gogHttp(_ host: String, _ code: Int) -> String { t("gogHttp", ["host": host, "code": "\(code)"]) }
+    static func gogUnexpected(_ host: String) -> String { t("gogUnexpected", ["host": host]) }
+    static func downloading(_ name: String) -> String { t("downloading", ["name": name]) }
+    static var phaseDownloading: String { t("phaseDownloading") }
 }

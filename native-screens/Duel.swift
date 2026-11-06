@@ -2,8 +2,8 @@
 // one after the other, from the game's ready heroes: one hero each in a
 // duel, three each in a 3x3. The presets (names, portraits) come from the
 // game's own table in the paks; the document says whose turn it is, what each
-// player holds and the settings (arena, battle speed), which are the first
-// player's to change.
+// player holds and the settings (arena, battle speed; Hammers of Fate:
+// dynamic battles instead of a speed), which are the first player's to change.
 
 import SwiftUI
 
@@ -15,8 +15,10 @@ struct DuelScreen: Decodable {
     let players: [Player]
     let arenas: [String]
     let arena: Int
-    let speeds: [String]
-    let speed: Int
+    let speeds: [String]?
+    let speed: Int?
+    /// Hammers of Fate: a dynamic battles flag instead of a speed.
+    let dynamic: Flag?
     let settings_enabled: Bool
     let arena_label: String
     let speed_label: String
@@ -25,6 +27,11 @@ struct DuelScreen: Decodable {
     let buttons: [ScreenButton]
     /// A network duel's chat (Lan.swift).
     let chat: ChatState?
+
+    struct Flag: Decodable {
+        let label: String
+        let on: Bool
+    }
 
     struct Player: Decodable {
         /// A preset index, -1 random, -2 nothing yet; one per slot.
@@ -89,12 +96,13 @@ struct DuelView: View {
                 }
             }
             HStack(alignment: .top, spacing: 10) {
-                VStack(spacing: 8) {
-                    ForEach(0..<min(2, screen.players.count), id: \.self) { k in
-                        playerCard(k)
+                // A phone's height: the column scrolls rather than push the
+                // buttons off the screen.
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 8) {
+                        players
+                        settings
                     }
-                    settings
-                    Spacer(minLength: 0)
                 }
                 .frame(width: 290)
                 VStack(spacing: 8) {
@@ -129,12 +137,23 @@ struct DuelView: View {
         i == -1 ? screen.random : presets.indices.contains(i) ? presets[i].name : "—"
     }
 
-    private func playerCard(_ k: Int) -> some View {
+    /// Both players in one panel, the one choosing lit.
+    private var players: some View {
+        VStack(spacing: 2) {
+            ForEach(0..<min(2, screen.players.count), id: \.self) { k in
+                playerRow(k)
+            }
+        }
+        .padding(6)
+        .panel()
+    }
+
+    private func playerRow(_ k: Int) -> some View {
         let p = screen.players[k]
         let active = k == screen.turn
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 2) {
             Text(screen.player_names[safe: k] ?? "")
-                .font(Theme.heading(17))
+                .font(Theme.heading(16))
                 .foregroundStyle(active ? Theme.gold : Theme.textDim)
             HStack(spacing: 6) {
                 ForEach(Array(p.picks.enumerated()), id: \.offset) { s, pick in
@@ -143,7 +162,7 @@ struct DuelView: View {
                     } label: {
                         HStack(spacing: 6) {
                             portrait(pick, side: k, small: true)
-                                .frame(width: 44, height: 44)
+                                .frame(width: 40, height: 40)
                             if !screen.triple {
                                 Text(pickName(pick))
                                     .font(Theme.body(15, weight: .medium))
@@ -161,9 +180,10 @@ struct DuelView: View {
                 }
             }
         }
-        .padding(8)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .panel(active ? Theme.panel : Theme.well)
+        .background(RoundedRectangle(cornerRadius: 8).fill(active ? Theme.rowSelected : .clear))
         .opacity(p.shown || active ? 1 : 0.6)
     }
 
@@ -180,7 +200,14 @@ struct DuelView: View {
     private var settings: some View {
         VStack(spacing: 4) {
             choice(screen.arena_label, screen.arenas, screen.arena, "arena")
-            choice(screen.speed_label, screen.speeds, screen.speed, "speed")
+            if let speeds = screen.speeds, let speed = screen.speed {
+                choice(screen.speed_label, speeds, speed, "speed")
+            }
+            if let dynamic = screen.dynamic {
+                SwitchRow(label: dynamic.label, on: dynamic.on) {
+                    store.send("dynamic", ["value": $0 ? 1 : 0])
+                }
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)

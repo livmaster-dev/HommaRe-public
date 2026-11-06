@@ -49,6 +49,19 @@ from `0x00040004`, pseudo modules from `0x60000000`.
 `eflags_misc` `0x202` so `PUSHFD` reads `0x202`. The CRT's `__ftol`,
 `__ctrlfp` and `__statfp` depend on those x87 values.
 
+The guest's floating point gives the same bits on every host, which network
+play needs (each peer computes the game from the commands they exchange). The
+basic operations are IEEE doubles and floats, rounded once: every target
+compiles with `-ffp-contract=off`, so no `a * b + c` becomes an FMA on arm64
+alone. Conversions to integer, rounding modes and precision control are
+computed in `x86.h` with x86's answers (the integer indefinite, never the
+host's undefined cast). The transcendental functions, the translator's FSIN,
+FPATAN, FYL2X... and the CRT's `sin`, `pow`, `exp`... imports, are the bundled
+`recomp_libm_*` (`third_party/musl-libm`), not the host C library's, whose last
+bits differ between glibc, Apple, the UCRT, bionic and emscripten; a NaN they
+return is the x86 CRT's. `tests/fp_determinism_tests.cpp` hashes all of it and
+fails on a host that computes differently.
+
 ## The shim contract
 
 ```c
@@ -154,9 +167,12 @@ keyboard, `0052cd40` mouse) tell their creator they are ready by setting a
 field it polls and then loop on `WaitForSingleObject` for the rest of the
 process, so a body run to completion inside `CreateThread` never comes back.
 
-Each guest thread owns a register file, a 256 KB guest stack, a TEB and a TLS
+Each guest thread owns a register file, a guest stack, a TEB and a TLS
 array, and runs on its own host thread so guest code can nest host C frames
-freely. **Exactly one of them executes at a time**, named by a baton held
+freely. The stack is what `CreateThread` asked for, but never less than the
+image's `SizeOfStackReserve` (1 MB for Heroes V) nor 256 KB, as on Windows: a
+guest stack is a heap block, and a thread that outgrows it writes over the heap
+below. **Exactly one of them executes at a time**, named by a baton held
 under a mutex. Nothing in the guest arena, the shims or the generated code
 needs a lock, because there is never more than one guest instruction in
 flight — the same invariant the single-threaded runtime had.
@@ -251,6 +267,16 @@ dropped unless `MSG_PEEK`); a broadcast without `SO_BROADCAST` is `WSAEACCES`;
 `select` with no sockets is `WSAEINVAL`, not a sleep; `getsockname` on an
 unbound socket is `WSAEINVAL`. `gethostname` is the game's id, and
 `gethostbyname` of it lists every interface's address, loopback last.
+
+Byte order. The guest builds its packets and sockaddrs in its own memory, so
+the payload is the same bytes from every host. Addresses and ports cross
+between the guest and the platform layer as network-order bytes, copied whole;
+where the runtime needs an octet or a port's number (a moved port, a dotted
+quad, the trace) it goes through `net_order.h`, byte by byte, never through
+the host's `htons` or the host's byte order. The guest's own `htons`, `htonl`,
+`inet_addr` and `inet_ntoa` work on the guest's little-endian values and always
+swap. The runtime as a whole assumes a little-endian host (guest memory is
+read with `memcpy`); `x86.h` refuses to build on any other.
 
 Broadcasts. Heroes V's LAN screen looks for games with a datagram to
 255.255.255.255 and another to the directed broadcast it derives from its own

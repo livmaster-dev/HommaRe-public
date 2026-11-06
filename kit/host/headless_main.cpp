@@ -356,6 +356,11 @@ extern "C" void host_present(const void *pixels, int w, int h, int bpp, const ui
 }
 
 // Same display seam as the windowed presenter, using the headless file sink.
+// Presented frames, as the windowed host's present.cpp counts them: a game's
+// native code reads it (HommaRe's camera.c paces its gestures by it).
+extern "C" uint32_t host_present_count(void) {
+    return g_present_count;
+}
 extern "C" void host_display_present_window(const uint32_t *argb, int w, int h) {
     host_present(argb, w, h, 32, nullptr, w * 4);
 }

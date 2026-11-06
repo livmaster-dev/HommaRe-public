@@ -979,7 +979,442 @@ static void test_double_tap_lands_on_the_first_point() {
     CHECK(own);
 }
 
+// A hover drag of the interface (a stack, an artifact) is not snapped onto the
+// window's edges: near the bottom the dragged stack stays under the finger
+// instead of jumping onto the last row.
+static void test_hover_ui_drag_is_not_snapped_to_an_edge() {
+    TouchMapper m;
+    m.set_hover(true);
+    m.set_bounds(1000, 800);
+    m.set_edge_insets(0, 0, 0, 21);
+    m.set_context(0);
+    std::vector<TouchAction> out;
+    m.finger_down({1, 500, 700}, 0, &out);
+    m.finger_motion({1, 500, 740}, 50 * MS, &out);
+    out.clear();
+    m.finger_motion({1, 500, 785}, 100 * MS, &out); // inside 16 + 21 of the bottom
+    CHECK(out.size() == 1 && out[0].kind == TouchAction::Motion && out[0].y == 785);
+    out.clear();
+    m.finger_up({1, 500, 790}, 150 * MS, &out);
+    bool released_there = false;
+    for (const TouchAction &a : out)
+        released_there |= a.kind == TouchAction::Button && !a.down && a.y == 790;
+    CHECK(released_there);
+}
+
+static bool has_key(const std::vector<TouchAction> &out, int scancode, bool down) {
+    for (const TouchAction &a : out)
+        if (a.kind == TouchAction::Key && a.scancode == scancode && a.down == down)
+            return true;
+    return false;
+}
+
+// A stack dragged and held still holds Shift, which outlives the drop by the
+// frames that see the button go up: the game reads Shift at the drop and
+// opens its split window.
+static void test_hover_resting_stack_drag_holds_shift_through_the_drop() {
+    TouchMapper m;
+    m.set_hover(true);
+    m.set_context(256); // RECOMP_TOUCH_DRAG_SPLIT
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_motion({1, 160, 100}, 50 * MS, &out);
+    double x = 0, y = 0, p = 0;
+    m.tick(50 * MS + kTouchSplitShowNs - 1, &out);
+    CHECK(!m.split_ring(50 * MS + kTouchSplitShowNs - 1, &x, &y, &p)); // a passing pause
+    CHECK(m.split_ring(50 * MS + kTouchSplitShowNs + 100 * MS, &x, &y, &p) && x == 160 && p > 0 &&
+          p < 1);
+    out.clear();
+    m.tick(50 * MS + kTouchSplitHoldNs - 1, &out);
+    CHECK(!has_key(out, SDL_SCANCODE_LSHIFT, true));
+    m.finger_motion({1, 165, 103}, 300 * MS, &out); // a tremor keeps the rest
+    m.tick(50 * MS + kTouchSplitHoldNs, &out);
+    CHECK(has_key(out, SDL_SCANCODE_LSHIFT, true));
+    CHECK(m.split_ring(50 * MS + kTouchSplitHoldNs + 10 * MS, &x, &y, &p) && p == 1);
+    m.frames_presented(20);
+    out.clear();
+    m.finger_up({1, 165, 103}, 1000 * MS, &out);
+    CHECK(has_button(out) && !has_key(out, SDL_SCANCODE_LSHIFT, false));
+    out.clear();
+    m.tick(1000 * MS + kTouchClickHoldNs, &out);
+    CHECK(out.empty()); // no frame has seen the drop yet
+    m.frames_presented(22);
+    m.tick(1000 * MS + kTouchClickHoldNs, &out);
+    CHECK(out.size() == 1 && has_key(out, SDL_SCANCODE_LSHIFT, false));
+}
+
+// Moving on after Shift went down lets it go: the drag is a plain move again
+// until the finger rests anew.
+static void test_hover_split_shift_goes_when_the_finger_moves_on() {
+    TouchMapper m;
+    m.set_hover(true);
+    m.set_context(256);
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_motion({1, 160, 100}, 50 * MS, &out);
+    m.tick(50 * MS + kTouchSplitHoldNs, &out);
+    CHECK(has_key(out, SDL_SCANCODE_LSHIFT, true));
+    out.clear();
+    m.finger_motion({1, 260, 100}, 50 * MS + kTouchSplitHoldNs + 50 * MS, &out);
+    CHECK(has_key(out, SDL_SCANCODE_LSHIFT, false));
+    out.clear();
+    m.finger_up({1, 260, 100}, 50 * MS + kTouchSplitHoldNs + 100 * MS, &out);
+    m.tick(2000 * MS, &out);
+    CHECK(!has_key(out, SDL_SCANCODE_LSHIFT, false)); // nothing left to release
+}
+
+// Only a drag the game says splits: an artifact's (no flag) never holds Shift,
+// and a second finger that ends a drag lets Shift go with the button.
+static void test_hover_split_needs_the_game_and_ends_with_the_drag() {
+    TouchMapper m;
+    m.set_hover(true);
+    m.set_context(0);
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_motion({1, 160, 100}, 50 * MS, &out);
+    m.tick(2000 * MS, &out);
+    CHECK(!has_key(out, SDL_SCANCODE_LSHIFT, true));
+    m.finger_up({1, 160, 100}, 2100 * MS, &out);
+    m.tick(3000 * MS, &out);
+    out.clear();
+    m.set_context(256);
+    m.finger_down({2, 100, 100}, 4000 * MS, &out);
+    m.finger_motion({2, 160, 100}, 4050 * MS, &out);
+    m.tick(4050 * MS + kTouchSplitHoldNs, &out);
+    CHECK(has_key(out, SDL_SCANCODE_LSHIFT, true));
+    out.clear();
+    m.finger_down({3, 400, 400}, 4050 * MS + kTouchSplitHoldNs + 50 * MS, &out);
+    CHECK(has_button(out) && has_key(out, SDL_SCANCODE_LSHIFT, false));
+}
+
+// --- native gestures (runtime/native_seam.h recomp_touch_event) -------------
+
+#include "../../runtime/native_seam.h"
+
+static bool native_is(const TouchAction &a, int kind, int phase, double x, double y) {
+    return a.kind == TouchAction::Native && a.gesture == kind && a.phase == phase && a.x == x &&
+           a.y == y;
+}
+
+static TouchMapper native_mapper() {
+    TouchMapper m;
+    m.set_native(true);
+    m.frames_presented(10);
+    return m;
+}
+
+static void test_native_tap_is_down_then_tap_with_no_cursor() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 120}, 0, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_DOWN, RECOMP_TOUCH_PHASE_BEGIN, 100, 120));
+    out.clear();
+    m.finger_up({1, 103, 121}, 40 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_TAP, RECOMP_TOUCH_PHASE_END, 103, 121) &&
+          out[0].button == 1);
+    out.clear();
+    m.frames_presented(20);
+    m.tick(500 * MS, &out);
+    CHECK(out.empty()); // nothing deferred: no press, no release, no placement
+}
+
+static void test_native_double_tap_counts_two_at_the_first_point() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_up({1, 100, 100}, 40 * MS, &out);
+    out.clear();
+    m.finger_down({2, 110, 108}, 200 * MS, &out);
+    m.finger_up({2, 110, 108}, 240 * MS, &out);
+    CHECK(out.size() == 2 && native_is(out[1], RECOMP_TOUCH_EVENT_TAP, RECOMP_TOUCH_PHASE_END, 100, 100) &&
+          out[1].button == 2);
+    out.clear();
+    m.finger_down({3, 300, 100}, 400 * MS, &out); // elsewhere: a single tap again
+    m.finger_up({3, 300, 100}, 440 * MS, &out);
+    CHECK(out.size() == 2 && out[1].gesture == RECOMP_TOUCH_EVENT_TAP && out[1].button == 1);
+}
+
+static void test_native_rest_is_a_press_that_follows_and_ends() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.finger_motion({1, 104, 100}, 100 * MS, &out); // tremor: nothing
+    m.tick(kTouchLongPressNs, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_BEGIN, 104, 100));
+    out.clear();
+    m.finger_motion({1, 110, 100}, 500 * MS, &out); // still within the tremor
+    CHECK(out.empty());
+    m.finger_motion({1, 160, 130}, 600 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_MOVE, 160, 130));
+    out.clear();
+    m.finger_up({1, 160, 130}, 700 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, 160, 130));
+}
+
+static void test_native_drag_waits_for_the_context_then_drags() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.finger_motion({1, 140, 100}, 50 * MS, &out); // the game has not looked yet
+    CHECK(out.empty());
+    m.frames_presented(12);
+    m.tick(60 * MS, &out);
+    CHECK(out.size() == 2 && native_is(out[0], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_BEGIN, 100, 100) &&
+          native_is(out[1], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_MOVE, 140, 100));
+    out.clear();
+    m.finger_motion({1, 180, 110}, 80 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_MOVE, 180, 110));
+    out.clear();
+    m.finger_up({1, 190, 110}, 100 * MS, &out);
+    CHECK(!out.empty() && native_is(out[0], RECOMP_TOUCH_EVENT_DRAG, RECOMP_TOUCH_PHASE_END, 190, 110));
+    for (const TouchAction &a : out)
+        CHECK(a.kind != TouchAction::Button && a.kind != TouchAction::Motion);
+}
+
+static void test_native_drag_on_a_world_map_is_still_the_camera() {
+    TouchMapper m = native_mapper();
+    m.set_camera_gestures(true);
+    m.set_context(RECOMP_TOUCH_WORLD);
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.frames_presented(12);
+    m.finger_motion({1, 150, 100}, 50 * MS, &out);
+    CHECK(out.size() == 2 && out[0].kind == TouchAction::Camera && out[0].phase == 0 &&
+          out[1].kind == TouchAction::Camera);
+    out.clear();
+    m.finger_up({1, 160, 100}, 90 * MS, &out);
+    for (const TouchAction &a : out)
+        CHECK(a.kind == TouchAction::Camera); // no tap, no placement after the pan
+}
+
+static void test_native_list_drag_scrolls() {
+    TouchMapper m = native_mapper();
+    m.set_context(RECOMP_TOUCH_LIST);
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    m.frames_presented(12);
+    m.finger_motion({1, 102, 150}, 50 * MS, &out);
+    CHECK(!out.empty() && out[0].kind == TouchAction::Wheel);
+    out.clear();
+    m.finger_up({1, 102, 150}, 90 * MS, &out);
+    CHECK(out.empty());
+}
+
+static void test_native_two_finger_tap_is_a_right_tap() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_down({2, 200, 100}, 20 * MS, &out);
+    out.clear();
+    m.finger_up({2, 200, 100}, 80 * MS, &out);
+    m.finger_up({1, 100, 100}, 90 * MS, &out);
+    CHECK(out.size() == 1 && out[0].kind == TouchAction::Native &&
+          out[0].gesture == RECOMP_TOUCH_EVENT_RIGHT_TAP);
+}
+
+static void test_native_tap_beside_a_rest_right_taps_at_the_rest_and_ends_it() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.tick(kTouchLongPressNs, &out);
+    out.clear();
+    m.finger_down({2, 300, 100}, 500 * MS, &out);
+    m.finger_up({2, 300, 100}, 560 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_RIGHT_TAP, RECOMP_TOUCH_PHASE_END, 100, 100));
+    out.clear();
+    m.finger_up({1, 100, 100}, 900 * MS, &out);
+    CHECK(out.size() == 1 && native_is(out[0], RECOMP_TOUCH_EVENT_PRESS, RECOMP_TOUCH_PHASE_END, 100, 100));
+}
+
+static void test_native_cancel_ends_a_drag_and_a_press() {
+    TouchMapper m = native_mapper();
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.tick(kTouchLongPressNs, &out);
+    out.clear();
+    m.finger_cancel(1, &out);
+    CHECK(out.size() == 1 && out[0].gesture == RECOMP_TOUCH_EVENT_PRESS &&
+          out[0].phase == RECOMP_TOUCH_PHASE_CANCEL);
+    out.clear();
+    m.finger_down({2, 100, 100}, 2000 * MS, &out);
+    m.frames_presented(12);
+    m.finger_motion({2, 160, 100}, 2050 * MS, &out);
+    out.clear();
+    m.cancel_all(&out);
+    CHECK(out.size() == 1 && out[0].gesture == RECOMP_TOUCH_EVENT_DRAG &&
+          out[0].phase == RECOMP_TOUCH_PHASE_CANCEL);
+}
+
+// The panel's commands (runtime/native_seam.h recomp_hotkeys_state).
+
+// A command's key goes down with its modifiers first and up, key first, as a
+// click's button does: after the hold time and two presented frames.
+static void test_panel_tap_presses_mods_then_key_and_holds_like_a_click() {
+    TouchMapper m;
+    std::vector<TouchAction> out;
+    m.frames_presented(10);
+    const int mods[] = {SDL_SCANCODE_LCTRL};
+    CHECK(m.command_tap(SDL_SCANCODE_1, mods, 1, 0, &out));
+    CHECK(out.size() == 2 && out[0].kind == TouchAction::Key &&
+          out[0].scancode == SDL_SCANCODE_LCTRL && out[0].down &&
+          out[1].scancode == SDL_SCANCODE_1 && out[1].down);
+    out.clear();
+    m.frames_presented(11);
+    m.tick(kTouchClickHoldNs, &out);
+    CHECK(out.empty()); // the hold time, but one frame only
+    m.frames_presented(12);
+    m.tick(kTouchClickHoldNs - 1, &out);
+    CHECK(out.empty()); // two frames, not yet the hold time
+    m.tick(kTouchClickHoldNs, &out);
+    CHECK(out.size() == 2 && out[0].scancode == SDL_SCANCODE_1 && !out[0].down &&
+          out[1].scancode == SDL_SCANCODE_LCTRL && !out[1].down);
+}
+
+// A finger on the game owns the input: a command then presses nothing.
+static void test_panel_tap_waits_for_the_fingers() {
+    TouchMapper m;
+    std::vector<TouchAction> out;
+    m.finger_down({1, 100, 100}, 0, &out);
+    out.clear();
+    CHECK(!m.command_tap(SDL_SCANCODE_M, nullptr, 0, 10 * MS, &out) && out.empty());
+    m.finger_up({1, 100, 100}, 50 * MS, &out);
+    m.tick(1000 * MS, &out);
+    out.clear();
+    CHECK(m.command_tap(SDL_SCANCODE_M, nullptr, 0, 1000 * MS, &out) &&
+          has_key(out, SDL_SCANCODE_M, true));
+}
+
+// A held Ctrl outlives a battlefield's preview tap and goes once the strike's
+// click has been let go and seen.
+static void test_panel_latch_holds_until_a_click_on_the_game_is_let_go() {
+    TouchMapper m;
+    m.set_hover(true);
+    m.set_context(2);
+    std::vector<TouchAction> out;
+    CHECK(m.command_latch(SDL_SCANCODE_LCTRL, &out) && m.latched(SDL_SCANCODE_LCTRL));
+    CHECK(has_key(out, SDL_SCANCODE_LCTRL, true));
+    out.clear();
+    m.finger_down({1, 200, 200}, 0, &out);
+    m.finger_up({1, 200, 200}, 80 * MS, &out);
+    m.tick(1000 * MS, &out);
+    CHECK(!has_button(out) && !has_key(out)); // a preview: Ctrl stays for the strike
+    m.finger_down({1, 200, 200}, 2000 * MS, &out);
+    m.finger_up({1, 200, 200}, 2080 * MS, &out);
+    m.tick(2200 * MS, &out); // the press
+    m.tick(2290 * MS, &out); // its release
+    CHECK(has_button(out) && m.latched(SDL_SCANCODE_LCTRL) &&
+          !has_key(out, SDL_SCANCODE_LCTRL, false));
+    out.clear();
+    m.tick(2290 * MS + kTouchClickHoldNs - 1, &out);
+    CHECK(out.empty());
+    m.tick(2290 * MS + kTouchClickHoldNs, &out);
+    CHECK(has_key(out, SDL_SCANCODE_LCTRL, false) && !m.latched(SDL_SCANCODE_LCTRL));
+}
+
+// Pressed again, a held modifier goes at once.
+static void test_panel_latch_pressed_again_lets_go() {
+    TouchMapper m;
+    std::vector<TouchAction> out;
+    CHECK(m.command_latch(SDL_SCANCODE_LSHIFT, &out));
+    out.clear();
+    CHECK(!m.command_latch(SDL_SCANCODE_LSHIFT, &out));
+    CHECK(out.size() == 1 && has_key(out, SDL_SCANCODE_LSHIFT, false));
+    CHECK(!m.latched(SDL_SCANCODE_LSHIFT));
+}
+
+// A Shift the panel holds splits a stack's drop: the resting drag neither
+// counts down nor presses Shift a second time, and Shift goes after the drop.
+static void test_panel_shift_splits_without_the_rest() {
+    TouchMapper m;
+    m.set_hover(true);
+    m.set_context(256);
+    std::vector<TouchAction> out;
+    m.command_latch(SDL_SCANCODE_LSHIFT, &out);
+    out.clear();
+    m.finger_down({1, 100, 100}, 0, &out);
+    m.finger_motion({1, 160, 100}, 50 * MS, &out);
+    m.tick(50 * MS + kTouchSplitHoldNs, &out);
+    double x = 0, y = 0, p = 0;
+    CHECK(!has_key(out) && !m.split_ring(50 * MS + kTouchSplitHoldNs, &x, &y, &p));
+    m.finger_up({1, 160, 100}, 1000 * MS, &out);
+    CHECK(has_button(out) && m.latched(SDL_SCANCODE_LSHIFT));
+    out.clear();
+    m.tick(1000 * MS, &out);
+    m.tick(1000 * MS + kTouchClickHoldNs, &out);
+    CHECK(has_key(out, SDL_SCANCODE_LSHIFT, false) && !m.latched(SDL_SCANCODE_LSHIFT));
+}
+
+// The information command: the next tap right-clicks where it lands, once.
+static void test_panel_next_tap_right_clicks_once() {
+    TouchMapper m;
+    m.set_hover(true);
+    m.set_context(2);
+    std::vector<TouchAction> out;
+    m.set_next_tap_right(true);
+    m.finger_down({1, 200, 200}, 0, &out);
+    m.finger_up({1, 200, 200}, 80 * MS, &out);
+    m.tick(200 * MS, &out);
+    m.tick(400 * MS, &out);
+    int rights = 0;
+    for (const TouchAction &a : out)
+        if (a.kind == TouchAction::Button) {
+            CHECK(a.button == 1 && a.x == 200 && a.y == 200);
+            ++rights;
+        }
+    CHECK(rights == 2 && !m.next_tap_right());
+    CHECK(m.hover_state() == 1); // the right click's card, not the hover's as well
+    out.clear();
+    m.finger_down({1, 300, 300}, 1000 * MS, &out);
+    m.finger_up({1, 300, 300}, 1080 * MS, &out);
+    m.tick(1500 * MS, &out);
+    CHECK(!has_button(out)); // the battlefield's preview again
+}
+
+// Focus loss lets go of every key the panel holds.
+static void test_panel_keys_go_with_the_focus() {
+    TouchMapper m;
+    std::vector<TouchAction> out;
+    m.command_latch(SDL_SCANCODE_LCTRL, &out);
+    m.command_tap(SDL_SCANCODE_M, nullptr, 0, 0, &out);
+    m.set_next_tap_right(true);
+    out.clear();
+    m.cancel_all(&out);
+    CHECK(has_key(out, SDL_SCANCODE_M, false) && has_key(out, SDL_SCANCODE_LCTRL, false));
+    CHECK(!m.latched(SDL_SCANCODE_LCTRL) && !m.next_tap_right());
+    out.clear();
+    m.tick(1000 * MS, &out);
+    CHECK(out.empty());
+}
+
+// Another screen: the held keys and the right click are over.
+static void test_panel_reset_lets_go() {
+    TouchMapper m;
+    std::vector<TouchAction> out;
+    m.command_latch(SDL_SCANCODE_LCTRL, &out);
+    m.set_next_tap_right(true);
+    out.clear();
+    m.command_reset(&out);
+    CHECK(out.size() == 1 && has_key(out, SDL_SCANCODE_LCTRL, false));
+    CHECK(!m.latched(SDL_SCANCODE_LCTRL) && !m.next_tap_right());
+}
+
 int main() {
+    test_panel_reset_lets_go();
+    test_panel_tap_presses_mods_then_key_and_holds_like_a_click();
+    test_panel_tap_waits_for_the_fingers();
+    test_panel_latch_holds_until_a_click_on_the_game_is_let_go();
+    test_panel_latch_pressed_again_lets_go();
+    test_panel_shift_splits_without_the_rest();
+    test_panel_next_tap_right_clicks_once();
+    test_panel_keys_go_with_the_focus();
+    test_hover_ui_drag_is_not_snapped_to_an_edge();
+    test_hover_resting_stack_drag_holds_shift_through_the_drop();
+    test_hover_split_shift_goes_when_the_finger_moves_on();
+    test_hover_split_needs_the_game_and_ends_with_the_drag();
     test_double_tap_lands_on_the_first_point();
     test_hover_drag_waits_for_the_game_to_see_the_finger();
     test_hover_state_follows_the_finger();
@@ -1025,6 +1460,15 @@ int main() {
     test_two_finger_drag_pans_with_arrows();
     test_two_finger_tap_is_right_click_three_is_f10_four_toggles_keyboard();
     test_second_finger_cancels_pending_tap();
+    test_native_tap_is_down_then_tap_with_no_cursor();
+    test_native_double_tap_counts_two_at_the_first_point();
+    test_native_rest_is_a_press_that_follows_and_ends();
+    test_native_drag_waits_for_the_context_then_drags();
+    test_native_drag_on_a_world_map_is_still_the_camera();
+    test_native_list_drag_scrolls();
+    test_native_two_finger_tap_is_a_right_tap();
+    test_native_tap_beside_a_rest_right_taps_at_the_rest_and_ends_it();
+    test_native_cancel_ends_a_drag_and_a_press();
     if (g_failures) {
         fprintf(stderr, "%d failures\n", g_failures);
         return 1;

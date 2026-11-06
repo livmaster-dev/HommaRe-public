@@ -293,6 +293,15 @@ copying them beside the executable. The build host needs a POSIX shell and GNU
 make; MSYS2 is only required when building on Windows itself. Translated app
 packages, including the DLLs and their notice, land in `build/windows/package/`.
 
+Linux on 64-bit ARM builds natively with the `linux` preset, or cross-compiles
+on x86-64 Linux with the host's clang and lld (`cmake/toolchains/linux-aarch64.cmake`).
+`tools/linux_sysroot.py --arch arm64` makes a Debian 12 sysroot in a rootless
+podman or docker container (its apt runs under qemu-user's binfmt_misc entry),
+and `tools/build.py --arch arm64` builds against it with the `linux-arm64`
+presets, into `build/linux-arm64/` (`build/linux-arm64-stub/` for the stub);
+the translation in `build/recomp/gen` is shared. With qemu-user installed, the
+tests run through it: `tools/test.py --preset linux-arm64-stub --native`.
+
 ## Check a change
 
 ```sh

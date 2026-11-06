@@ -1,5 +1,144 @@
 # Changelog
 
+## iOS control panel: the game's commands beside the camera
+
+- A new seam, `recomp_hotkeys_state(buf, cap, serial)` in
+  `runtime/native_seam.h`: a game that answers it hands the host a JSON
+  document of the commands its screen offers now (id, label, keys, kind,
+  the key and modifiers as scancodes) and where its interface is ("busy",
+  fractions of the picture). The host takes a new screen or new commands
+  once they have kept 300 ms, a moved interface at once, and asks at most
+  every 15 ms, only on a touch screen.
+- iOS: the camera panel becomes `RecompControlPanel`
+  (`platform_ui_control_panel` replaces `platform_ui_camera_buttons`): the
+  camera's buttons and the commands, a stretchable frame from the panel's
+  art, a blue arrow that opens all of them as a grid with labels, hold and
+  drag to reorder (kept per screen in the defaults), placed clear of the
+  game's interface. Its placement is worked out only when its inputs
+  change. `RECOMP_HOTKEYS_SAMPLE=<file>` shows a document from the start.
+- `TouchMapper::command_tap`, `command_latch` (a modifier held until the
+  click or gesture it was for has been let go, or pressed again),
+  `set_next_tap_right` and `command_reset` (another screen or other
+  commands); seven new tests.
+- `host_touch_haptic()`: a game asks for a light haptic tick from any
+  thread, given on the host's next turn. Native touch's press ring is gone
+  (`TouchMapper::press_ring`): a rest that brings up a card says so with the
+  tick; the ring is the stack split's only.
+- Recipes (`ui_mods`): format 3, `new64` (a whole file the port drew, in
+  base64) and `touch/` mods made only with native touch.
+- The setting `host.touch/hotkeys` (on by default on a touch screen), shown
+  in the launcher as "Command buttons" in its ten languages.
+- `platform_ui_ios.mm` is compiled with ARC on iOS too (the Xcode generator
+  ignored the language generator expression); an `#error` guards it.
+
+## Native touch: gestures handed to the game, no hidden cursor
+
+- A new seam, `recomp_touch_event(kind, phase, x, y, w, h, count)` in
+  `runtime/native_seam.h`: a game that answers it gets a finger's gestures
+  (down, tap with its count, press, drag, right tap, and "a mouse is back")
+  at their point, and acts on them itself. `host_touch_key` presses a key
+  for screens that wait for any key. Weak stubs answer "no", so a game
+  without it keeps the cursor model.
+- `TouchMapper::set_native`: one finger turns into those gestures instead of
+  a placed cursor and clicks; the camera, lists and two to four fingers are
+  as before. Nine new tests in `input_touch_tests`.
+- The host moves its cursor off the window while a finger is in charge
+  (`GetCursorPos` looks past the game), and a mouse, trackpad or Pencil
+  brings it back. A list follows a finger with an exact scroll at its point.
+- The setting `host.touch/native` (off by default; `RECOMP_TOUCH_NATIVE=0|1`
+  overrides it), shown in the launcher on iPad and iPhone as "Touch: Cursor /
+  Native" in its ten languages. `RECOMP_TOUCH_SCRIPT=<file>` plays scripted
+  fingers for runs without a screen.
+
+## Host code rounds to nearest wherever the guest reaches it
+
+- The host's tick (`boot_tick`), the scheduler's idle waiter and the turn's
+  housekeeping after the events (`after_events`) switch to round-to-nearest
+  and back: they are reached from translated code without an import, in the
+  guest's rounding mode (toward zero in Heroes V). The window's safe insets
+  came out one ulp apart on alternate turns, so every turn published a
+  change: a log line and a display generation each frame. On a foldable
+  iPhone (the Duo, a camera in a corner) that was 600 MB of log in two
+  minutes and a busy CPU at the main menu.
+
+## Guest threads get the stack they ask for
+
+- `CreateThread` gives a thread at least its `dwStackSize` and at least the
+  image's `SizeOfStackReserve` (Windows' default), never less than 256 KB and
+  never more than 16 MB. Every thread used to get 256 KB: Hammers of Fate's
+  network threads run a routine with half a megabyte of locals, wrote below
+  their stack into the heap, and the LAN game crashed (in the NDb registry on
+  the client, at game start or later; in the create menu on the host).
+
+## The same arithmetic on every host
+
+- Every target compiles with `-ffp-contract=off` (no FMA contraction, which
+  arm64 did and x86_64 did not) and `-fsigned-char`.
+- The guest's transcendental functions (FSIN, FCOS, FPTAN, FPATAN, FYL2X,
+  FYL2XP1, F2XM1 and the CRT's `_CI*` and `_libm_sse2_*` imports) are a
+  bundled subset of musl's libm (`third_party/musl-libm`), not the host C
+  library's; a NaN they return is the x86 CRT's. FSCALE of an out-of-range
+  scale gives x86's answer on arm64 too.
+- `fp_determinism_tests` hashes the conversions, rounding and libm results and
+  fails where a host computes differently.
+- A translation made before this keeps calling the host's libm until it is
+  regenerated (`tools/build.py --regenerate`).
+
+## iOS: inactive is not background
+
+- SDL3 reports "will resign active" (Control Center, Notification Center, a call
+  banner, the app switcher) as `SDL_EVENT_WILL_ENTER_BACKGROUND`, often twice.
+  The lifecycle watcher now tells inactive from background: inactive pauses the
+  sound only; the game's settings are saved after 2 s inactive or at once in the
+  background, where presentation stops too. Repeated notifications are no-ops,
+  and save requests that pile up are answered by one save.
+- `host_note_app_active`: SDL3 never queues lifecycle events, so the host's
+  "away / just back" state, which keeps a foldable's transient scene sizes from
+  resizing the game, was never set. The watcher sets it now.
+- A multi-game app's launcher hands the lifecycle over to the game module it
+  starts (`platform_ui_hand_over_lifecycle`).
+- The run before's log is also kept in `Documents/Logs` (the newest ten), where
+  the Files app shows it.
+- `RECOMP_IOS_LIFECYCLE_STRESS=<ms>` posts the inactive/active (and every fourth
+  time background) notifications in a loop, for a lifecycle test with nobody at
+  the device.
+
+## Touch: a stack dragged and held still splits
+
+- Hover gestures: a finger that rests ~0.7 s during a drag the game marks
+  `RECOMP_TOUCH_DRAG_SPLIT` (256 in `recomp_touch_context`) holds Shift until the
+  drop, and a little past it, so the game's own "Shift + drop" (a split window)
+  sees it. Moving the finger 40 points on lets Shift go. `TouchMapper::split_ring`
+  reports the count-down; iOS draws it as a ring around the finger
+  (`platform_ui_split_ring`), with a tick once Shift is down.
+- A hover drag of the interface is no longer snapped onto the window's edges: a
+  dragged item near the bottom edge stayed glued to the last row instead of
+  following the finger.
+- Key events the touch path pushes carry the modifiers it holds. They carried
+  none, and the host takes a modifier's state from an event's `mod`, so a
+  touch-held Shift (or a pad button bound to one) never reached the game.
+
+## SSE arithmetic in the guest's rounding mode
+
+- `X86.mxcsr` holds the guest's MXCSR. The CRT's `_control87`/`_controlfp_s`
+  set it along with the x87 control word, as the UCRT does on x86, and
+  `LDMXCSR`/`STMXCSR` load and read it (STMXCSR returned a constant 0x1f80).
+- Its rounding field is the host's rounding mode (MXCSR on x86-64, FPCR on
+  AArch64, `fesetround` elsewhere) while translated code runs, so SSE
+  arithmetic and conversions round the way the guest asked; host code still
+  runs to nearest. `imports_dispatch` switches around each shim, `guest_call`
+  and the landings of a guest longjmp or SEH unwind switch back; a new thread
+  starts at 0x1f80. No cost while the guest rounds to nearest.
+- Heroes V (all three games) calls `_control87(0xa031f, ~0)` - round toward
+  zero - and parses its game database with SSE arithmetic, then checksums the
+  result for multiplayer: rounding to nearest made "0.05" 0x3d4cccce instead of
+  0x3d4ccccc, so the game database checksum differed from the original game's
+  and an original host refused HommaRe ("Client Game Database checksum does not
+  match Host Game Database checksum"). The game's simulation computes in that
+  mode too.
+- FST to a float rounds per the x87 RC whatever the host's mode (it assumed
+  nearest), and FBSTP works out nearest-even itself.
+
 ## Sockets on every platform
 
 - `runtime/winsock.cpp` runs on the platform layer's sockets: `platform/os.h`
@@ -48,6 +187,22 @@
   while the profile's list is empty; once a server answered, the most recent one is.
 - `RECOMP_AUTO_KEYS` takes `text:...`, typed into such a prompt.
 - The settings menu's TrueType canvas moved to `runtime/gdi32_canvas.h`, shared with it.
+
+## A GS login without the password (ubi-gs)
+
+- `runtime/gs_login.cpp`: when a GS title's server list came from a server the player
+  chose, the password its router LOGIN carries is a token instead,
+  base64url(scrypt(password, "ubi-gs login v1\0" + server id + "\0" + lower(name),
+  N 2^13, r 8, p 1, 12 bytes)), 16 characters. The server id is servers.ini's
+  `[Servers] ServerID=<hex>`, else the chosen address (`host:port`), which the stand-in
+  reads from the body the game gets.
+- A server whose servers.ini carries `LoginNonce=<hex>` gets `~r:` + token once
+  (registration) and then `~1:` + base64url(HMAC-SHA256(V, nonce)[0..12]), V =
+  HMAC-SHA256(token, "ubi-gs verifier v1"); the profile's `ubi-gs-logins.txt` keeps
+  which server, name and token fingerprint registered (a refused `~1:` drops its line).
+- `native_seam.h`: `recomp_gs_login_password` and `recomp_gs_login_result`, for the
+  game's native hooks on its SDK's login and the router's answer.
+- `sha256.h` gives the raw digest (`Sha256::digest`).
 
 ## Linux
 

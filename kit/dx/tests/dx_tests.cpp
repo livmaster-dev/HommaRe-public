@@ -8636,6 +8636,113 @@ static void test_device_data_stride16() {
     CHECK_EQ(call_method(ms, DID_GetDeviceData, {12, data, inout, 0}), DIERR_INVALIDPARAM);
 }
 
+// A mouse set to DIPROPAXISMODE_ABS reports its axes as positions, in the
+// buffer and in the state, as Heroes V asks for: it takes each event's dwData
+// less the one before it as the step (006b8710). Relative values there made
+// three wheel notches out zoom out once, and a single notch after a double
+// one zoom back in.
+static void test_mouse_absolute_axes() {
+    cpu_reset();
+    memset(&g_input, 0, sizeof g_input);
+    uint32_t create = tramp("DINPUT.dll", "DirectInputCreateA");
+    call_shim(create, {0x400000, 0x0500, sc(0), 0});
+    uint32_t di = rd32(sc(0));
+    uint32_t guid = sc(0x40);
+    uint8_t mouse[16] = {0x60, 0x2B, 0x1D, 0x6F, 0xA0, 0xD5, 0xCF, 0x11,
+                         0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00};
+    for (int i = 0; i < 16; ++i)
+        wr8(guid + (uint32_t)i, mouse[i]);
+    call_method(di, DI_CreateDevice, {guid, sc(8), 0});
+    uint32_t ms = rd32(sc(8));
+    CHECK(ms != 0);
+    uint32_t df = sc(0x100);
+    gm_zero(df, 24);
+    wr32(df + 0, 24);
+    wr32(df + 4, 16);
+    wr32(df + 12, SDK_DIMOUSESTATE);
+    call_method(ms, DID_SetDataFormat, {df});
+
+    // Relative until asked otherwise.
+    uint32_t prop = sc(0x300);
+    gm_zero(prop, SDK_DIPROPDWORD);
+    wr32(prop + 0, SDK_DIPROPDWORD);
+    wr32(prop + 4, 16);
+    CHECK_EQ(call_method(ms, 5 /* GetProperty */, {2 /* DIPROP_AXISMODE */, prop}), DI_OK);
+    CHECK_EQ(rd32(prop + 16), 1u); // DIPROPAXISMODE_REL
+    wr32(prop + 16, 0);            // DIPROPAXISMODE_ABS, the game's call (006b8370)
+    CHECK_EQ(call_method(ms, DID_SetProperty, {2, prop}), DI_OK);
+    CHECK_EQ(call_method(ms, 5 /* GetProperty */, {2, prop}), DI_OK);
+    CHECK_EQ(rd32(prop + 16), 0u);
+    wr32(prop + 16, 0x400);
+    CHECK_EQ(call_method(ms, DID_SetProperty, {1 /* DIPROP_BUFFERSIZE */, prop}), DI_OK);
+    CHECK_EQ(call_method(ms, DID_Acquire, {}), DI_OK);
+
+    uint32_t inout = sc(0x500), data = sc(0x800);
+    auto read_z = [&](uint32_t flags) -> int32_t {
+        wr32(inout, 10);
+        CHECK_EQ(call_method(ms, DID_GetDeviceData, {SDK_DIDEVICEOBJECTDATA, data, inout, flags}),
+                 DI_OK);
+        CHECK_EQ(rd32(inout), 1);
+        CHECK_EQ(rd32(data + 0), 8); // DIMOFS_Z
+        return (int32_t)rd32(data + 4);
+    };
+    // The user's trace: notches out one at a time, then two between polls,
+    // then one again, then in.
+    const int32_t steps[] = {-120, -120, -120, -240, -120, +240, +120};
+    int32_t want = 0, last = 0;
+    for (int32_t step : steps) {
+        g_input.mouse_dz = step;
+        want += step;
+        const int32_t got = read_z(0);
+        CHECK_EQ(got, want);
+        CHECK_EQ(got - last, step); // the game's step is the notches themselves
+        last = got;
+    }
+    // A peek reports without moving on.
+    g_input.mouse_dz = -120;
+    CHECK_EQ(read_z(1 /* DIGDD_PEEK */), want - 120);
+    CHECK_EQ(read_z(0), want - 120);
+    want -= 120;
+
+    // X and Y the same way; the state reports the position too.
+    g_input.mouse_dx = 5;
+    g_input.mouse_dy = -3;
+    uint32_t state = sc(0x400);
+    CHECK_EQ(call_method(ms, DID_GetDeviceState, {SDK_DIMOUSESTATE, state}), DI_OK);
+    CHECK_EQ((int32_t)rd32(state + 0), 5);
+    CHECK_EQ((int32_t)rd32(state + 4), -3);
+    CHECK_EQ((int32_t)rd32(state + 8), want);
+    g_input.mouse_dx = 2;
+    CHECK_EQ(call_method(ms, DID_GetDeviceState, {SDK_DIMOUSESTATE, state}), DI_OK);
+    CHECK_EQ((int32_t)rd32(state + 0), 7);
+    wr32(inout, 10);
+    CHECK_EQ(call_method(ms, DID_GetDeviceData, {SDK_DIDEVICEOBJECTDATA, data, inout, 0}), DI_OK);
+    CHECK_EQ(rd32(inout), 3); // x 5, y -3, x 2
+    CHECK_EQ((int32_t)rd32(data + 0 * SDK_DIDEVICEOBJECTDATA + 4), 5);
+    CHECK_EQ((int32_t)rd32(data + 1 * SDK_DIDEVICEOBJECTDATA + 4), -3);
+    CHECK_EQ((int32_t)rd32(data + 2 * SDK_DIDEVICEOBJECTDATA + 4), 7);
+
+    // Discarded motion never moved the mouse; an overflow's dropped events did.
+    g_input.mouse_dx = 40;
+    call_method(ms, 25 /* Poll */, {});
+    dinput_discard_mouse_motion(ms);
+    g_input.mouse_dx = 1;
+    CHECK_EQ(call_method(ms, DID_GetDeviceState, {SDK_DIMOUSESTATE, state}), DI_OK);
+    CHECK_EQ((int32_t)rd32(state + 0), 8);
+    wr32(prop + 16, 2);
+    CHECK_EQ(call_method(ms, DID_SetProperty, {1 /* DIPROP_BUFFERSIZE */, prop}), DI_OK);
+    for (int32_t step : {-120, -120, -120}) {
+        g_input.mouse_dz = step;
+        g_input.mouse_dx = 1;
+        call_method(ms, 25 /* Poll */, {});
+    }
+    wr32(inout, 10);
+    CHECK_EQ(call_method(ms, DID_GetDeviceData, {SDK_DIDEVICEOBJECTDATA, data, inout, 0}), DI_OK);
+    CHECK_EQ(rd32(inout), 2); // the last poll's x and z
+    CHECK_EQ((int32_t)rd32(data + 0 * SDK_DIDEVICEOBJECTDATA + 4), 11);
+    CHECK_EQ((int32_t)rd32(data + 1 * SDK_DIDEVICEOBJECTDATA + 4), want - 360);
+}
+
 // GetClipStatus writes 32 bytes; the dword after must be untouched.
 static void test_clipstatus_canary() {
     cpu_reset();
@@ -13806,6 +13913,7 @@ int main() {
         {"FindDevice, literal", test_find_device_literal},
         {"viewport record", test_viewport_record},
         {"GetDeviceData stride", test_device_data_stride16},
+        {"mouse absolute axes", test_mouse_absolute_axes},
         {"GetClipStatus canary", test_clipstatus_canary},
         {"overflow rejection", test_overflow_rejection},
         {"identity and parent", test_identity_and_parent},

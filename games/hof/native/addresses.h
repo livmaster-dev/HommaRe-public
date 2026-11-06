@@ -63,6 +63,8 @@
 #define HOMM5_STRETCH_ROOTS 1
 /* A battle's stack counter (native/hof_screen.c hof_counter_window). */
 #define HOMM5_COUNTER_WINDOW hof_counter_window
+/* A window's SetPlacement (the base game's 00e3b9f0). */
+#define HOMM5_FN_SET_PLACEMENT fn_00e479c0
 /* Screen mode changes (native/hof_screen.c): the roots are laid out again
  * after one (native/phone_hud.c). */
 #define HOMM5_SCREEN_MODE_CHANGES hof_screen_mode_changes
@@ -96,6 +98,10 @@
 #define HOMM5_VT_LIST 0x01033278
 #define HOMM5_VT_SCROLLER 0x01037c40
 #define HOMM5_VT_TEXT_VIEW 0x01038670
+/* A text view the game places by code (the battle's damage hint under the
+ * cursor) counts its x from the interface's own left edge, as the cursor
+ * does, not from the screen's (native/ui_bounds.c). */
+#define HOMM5_VT_PLACED_FROM_INTERFACE HOMM5_VT_TEXT_VIEW
 #define HOMM5_HUD_ROOT_RECT 1
 #define HOMM5_UI_REAL_W 0x010d4e2c /* the effective width native/hof_screen.c keeps there */
 #define HOMM5_UI_REAL_H 0x010d4e30
@@ -219,6 +225,11 @@
 #define NS_MENU_REACTION 0x008b0a30     /* V hash; ECX = screen+0x168 */
 #define NS_MENU_SWITCH 0x008b0df0       /* V vt 00fbf4c0 slot 0; ECX = screen+0x170; RET 4; index 0..9 only */
 #define NS_MENU_CREDITS 0x00947150      /* V queues CCreateCreditsScreenCmd (vt 00fc8340) */
+/* V the main menu's "options" handler (registered by name in 008b1b90); ECX =
+ * screen, RET 4 (the argument unused): switch(3), which in HoF only hides the
+ * panel (no case 3, base 008ad570 opens Options there), then the options'
+ * setup and CCreateGameOptionsScreen queued (00878380). */
+#define NS_MENU_OPTIONS 0x008b1210
 #define NS_MENU_EXIT 0x00820030         /* V hash */
 #define NS_PROFILE_VALID 0x0093f940     /* V hash */
 #define NS_PROFILE_NAME 0x0093f990      /* V hash */
@@ -243,6 +254,33 @@
 #define NS_LOAD_CLOSE 0x00746780        /* V same body (close-top + defer, AL=1, RET 4), registered at the same spots */
 #define NS_LOAD_TYPE 0x00734b50         /* V hash */
 #define NS_LOAD_SIZE 0x00734ea0         /* V hash */
+/* A LAN game's and a hot seat's load screens (CLoadScreen<SLanSaveHeaderInfo>,
+ * CLoadScreen<SHotSeatHeaderInfo>), also at +0x1d4 with the same fields; their
+ * headers are longer (research notes lan-load-hof-map.md). */
+#define NS_VT_LOAD_LAN 0x00fa9d48
+#define NS_LOAD_LAN_CLICK 0x007491c0
+#define NS_LOAD_LAN_LOAD 0x00737bf0
+#define NS_LOAD_LAN_CONFIRMED 0x00746380
+#define NS_L_LAN_ROW 0x254
+#define NS_VT_LOAD_HS 0x00fa9738
+#define NS_LOAD_HS_CLICK 0x007490e0
+#define NS_LOAD_HS_LOAD 0x00738900
+#define NS_LOAD_HS_CONFIRMED 0x00738a90
+#define NS_L_HS_ROW 0x94
+/* The in-game Save screens, CSaveScreen<SHeaderInfo>, <SLanSaveHeaderInfo> and
+ * <SHotSeatHeaderInfo>: all 0x1f0 with their IScreen at +0x1e8, the load
+ * screen's NS_L_* fields and the kind's row click and delete (research notes
+ * save-screens-hof-map.md). */
+#define NS_VT_SAVE 0x00fa9340
+#define NS_SUB_SAVE 0x1e8
+#define NS_SAVE_SAVE 0x00737610         /* primary vt slot 0x38; thiscall (screen, 0), RET 4 */
+#define NS_S_EDIT 0x1b8                 /* the name's IEditLine (base 0x298) */
+#define NS_VT_SAVE_LAN 0x00fa9e0c
+#define NS_SAVE_LAN_SAVE 0x007468b0
+#define NS_VT_SAVE_HS 0x00fa99c4
+#define NS_SAVE_HS_SAVE 0x007391a0
+#define NS_SAVE_CAN 0x00734f60          /* fastcall ECX [screen+0x18c]: AL may save now */
+#define NS_S_GAME 0x18c
 #define NS_DIFF_OF_SAVE 0x00b0a010      /* V hash */
 #define NS_DIFF_ENTRY 0x00b09fd0        /* V hash */
 
@@ -270,7 +308,44 @@
 #define NS_VT_OPT_COMBO 0x00fbb91c      /* V RTTI SComboBoxOption */
 #define NS_VT_OPT_SLIDER 0x00fbb94c     /* V RTTI SSliderOption */
 
-/* screens_duel.c: not enabled; the HoF duel and 3x3 hero views differ (report §3, §5). */
+/* screens_duel.c: hot seat's duels. The views differ from the base (no speed, a dynamic battles
+ * flag; the 3x3 slots are {preset, random} and set through a state). Read-only research
+ * 2026-10-31 (session scratch hofduel/hof-duel.md); V = seen in HoF code or data. */
+#define NS_VT_DUEL         0x00fccdfc /* V RTTI CHSDMWaitScreen<CHeroInfoView> IScreen */
+#define NS_VT_DUEL3        0x00fccd5c /* V RTTI CHSDMWaitScreen<CTripleHeroesView> IScreen */
+#define NS_SUB_DUEL        0x1a8      /* V (base 0x1d0) */
+#define NS_DUEL_NEXT       0x009a4560 /* V "start": thiscall (screen, 0), RET 4 */
+#define NS_DUEL_BACK       0x009a44c0 /* V "back"/"cancel" */
+#define NS_DUEL3_NEXT      0x009a45b0 /* V */
+#define NS_DUEL3_BACK      0x009a4510 /* V */
+#define NS_DUEL_ARENAS     0x009c5b50 /* V fastcall ECX = NS_DUEL_ARENAS_OF; entry 0 is Random arena */
+#define NS_DUEL_ARENAS_OF  0x0115eed4 /* V */
+/* NS_DUEL_SPEED_NAME: none (no speed). V */
+#define NS_D_PANEL         0x170      /* V CDMScreenView* (base 0x17c) */
+#define NS_D_VIEWS         0x174      /* V (base 0x180) */
+#define NS_D_TURN          0x180      /* V the current view (base 0x18c) */
+#define NS_D_MOVER         0x188      /* V 3x3 (base 0x194) */
+#define NS_D_COUNT         0x18c      /* V presets (base 0x198) */
+#define NS_P_GET_SETTINGS  0x30       /* V 009c56c0 (base 0x38) */
+#define NS_P_SET_SETTINGS  0x2c       /* V 009c5530 (base 0x34) */
+/* P_GRID 0x44, P_START 0x14: same. V */
+#define NS_DUEL_SETTINGS_SIZE 0xc     /* V {arena, byte dynamic, byte locked, arena used} */
+#define NS_S_DYNAMIC       0x04       /* V the "time_pressing" check box (saved as duel_realtime_default) */
+#define NS_DUEL_SHOWN      0x1c       /* V shown, and set with a pick */
+#define NS_DUEL_SET        0x1c       /* V */
+#define NS_DUEL_RANDOM     0x30       /* V */
+#define NS_DUEL_INDEX      0x2c       /* V (a random pick holds the rolled one) */
+#define NS_TRIPLE_SHOWN    0x18       /* V (the state's first byte) */
+#define NS_TRIPLE_STATE    0x18       /* V {byte shown; vector items +4..+0xc; byte ready +0x10} */
+#define NS_TRIPLE_SLOTS    0x1c       /* V */
+#define NS_TRIPLE_SLOT_SIZE 0x08      /* V {int preset (-1 none); byte random} */
+#define NS_TRIPLE_INDEX    0x00       /* V */
+#define NS_TRIPLE_RANDOM   0x04       /* V */
+#define NS_DUEL3_STATE_SIZE 0x14      /* V */
+#define NS_DUEL3_STATE_COPY 0x009c9260 /* V copy: thiscall (dst, src*), RET 4 */
+#define NS_DUEL3_ROLL      0x009cbf60 /* V thiscall (mover, state*), RET 4: random slots rolled */
+#define NS_DUEL3_SET       0x009ccbb0 /* V thiscall (view, state*), RET 4 */
+#define NS_DUEL3_MOVER     0x009cbe10 /* V fastcall ECX mover: the picked presets greyed */
 
 /* screens_question.c (+ overrides.h) */
 #define NS_VT_MSGBOX 0x00fb38a4         /* V RTTI CCommonMsgBox, 13 slots agree */
@@ -367,6 +442,36 @@
 #define NS_E_MODE 0x1b4
 #define NS_PAK_DIRS "data,dataa1" /* the paks it mounts, for the native views' pictures */
 
+/* GameSpy clDataList string readers and the fixed buffers of all 52 calls of
+ * the unbounded one (native/net_guard.c). The unbounded reader is the base
+ * game's 004432d0, the bounded one 00443390; PLAYERINFO's seven fields
+ * (0042a520, the base game's 0042a5e0) go into 12/16/36/36/68/132/132. The
+ * sites are in the base game's order (net_guard.c names each), the sizes the
+ * same. */
+#define HOMM5_GS_STR_ORIG fn_00443240
+#define HOMM5_GS_STR_BOUNDED fn_00443300
+#define HOMM5_GS_STR_SITES \
+    {0x0042a5e8u, 12}, {0x0042a5fcu, 16}, {0x0042a610u, 36}, {0x0042a624u, 36}, {0x0042a638u, 68}, \
+        {0x0042a64cu, 132}, {0x0042a660u, 132}, {0x0042497cu, 36}, {0x004249bfu, 132}, \
+        {0x004249dau, 132}, {0x00424f60u, 36}, {0x00424f9fu, 132}, {0x00424fb6u, 132}, \
+        {0x0043f498u, 16}, {0x0043f4aeu, 132}, \
+        {0x0042723au, 36}, {0x004272b4u, 36}, {0x0042733fu, 132}, {0x0042383eu, 132}, \
+        {0x00423876u, 132}, {0x004222bau, 132}, {0x00428cafu, 132}, {0x00430434u, 36}, \
+        {0x00425f0au, 16}, {0x004233e6u, 16}, {0x004259b0u, 36}, {0x004260c7u, 16}, \
+        {0x0041fc01u, 36}, {0x0041fc17u, 36}, {0x0041fc2du, 128}, {0x0041fc43u, 128}, \
+        {0x00421ebdu, 129}, {0x0042201du, 129}, {0x0042253cu, 36}, {0x0042257du, 36}, \
+        {0x004227d9u, 16}, {0x004227edu, 129}, {0x004227fdu, 129}, {0x0042291fu, 16}, \
+        {0x00422aafu, 16}, {0x00423b2fu, 16}, {0x00423c8fu, 16}, {0x00425cc8u, 16}, \
+        {0x00425cf8u, 16}, {0x004276cau, 36}, {0x00427d87u, 33}, {0x00427f60u, 36}, \
+        {0x00429649u, 16}, {0x00429682u, 132}, {0x0042975fu, 16}, {0x00429773u, 36}, \
+        {0x0042979au, 1024},
+
+/* The GS login (native/gs_login.c): the SDK's login entry, reached from
+ * ProcessLogin (00e06a10) through the thunk 00419340, and
+ * ProcessLoginRouterResult. */
+#define HOMM5_FN_GS_LOGIN fn_00419a30
+#define HOMM5_FN_GS_LOGIN_RESULT fn_00e06e30
+
 /* ---- ubi.com screens (native/screens_ubi.c): Hammers of Fate 2.1 ----
  * research notes lan/ubi-screens-expansions.md. Base 1.60 value in the comment. */
 #define NS_UBI_VT_LOGIN         0x00fc6150  /* base 00fc2cb0; V RTTI CMPRegisterScreen IScreen */
@@ -452,7 +557,17 @@
 #define NS_LAN_HAS_FILTERS      0           /* no show/hide_running, show/hide_observable, no CGamesView2 bytes; V */
 #define NS_LAN_HAS_SPEED        0           /* no SGameInfo combat speed, no speed names; V */
 #define NS_LAN_GI_PLAYERS       0x84        /* players in = [info+0x84], as HoF's own list reads it (009b6cf1); V */
-#define NS_LAN_UBI_ONLY         1           /* the lobbies natively in ubi.com mode only */
+/* the duel's create dialog (CMPDMCreateScreen; lan-screens-hof.md §1, §2.7) */
+#define NS_LAN_VT_DUEL_CREATE   0x00fcb1c8  /* base 00fc7cec; V RTTI */
+#define NS_LAN_SUB_DUEL_CREATE  0x19c       /* base 0x1b0; V */
+#define NS_LAN_DUEL_CREATE_OK   0x0097a370  /* base 0099c900; V `create` */
+#define NS_LAN_DUEL_CREATE_CANCEL 0x0097a2a0 /* base 0099c760; V `cancel` */
+#define NS_LAN_DC_NAME          0x170       /* base 0x17c; V init 00979ad0 */
+#define NS_LAN_DC_PASSWORD      0x174       /* base 0x180; V */
+#define NS_LAN_DC_LOCKED        0x178       /* base 0x184; V `lockedgame` */
+#define NS_LAN_DC_REALTIME      0x17c       /* new; V `realtime` */
+#define NS_LAN_DC_TRIPLE        0x184       /* base 0x18c; V `triple_heroes` */
+/* no presets combo, no speed slider (NS_LAN_HAS_SPEED 0); V */
 
 /* ---- network game: create (ns_mp_create) and players (ns_mp_wait), Hammers of Fate 2.1 ----
  * research notes lan/mp-create-wait-expansions.md. Base 1.60 value in the comment. */
@@ -481,6 +596,13 @@
 /* NS_MPC_SPEED_NAME: none (no combat speed in HoF). */
 
 #define NS_VT_MPW              0x00fbd9f4  /* base 00fbaae0; V RTTI CMPWaitScreen IScreen */
+/* A loaded LAN game's players (NUI::CMPUbiComLoadScreen, a CMPWaitScreen):
+ * the load logic keeps its model at +0x230 and sets +0x2d0 once the game
+ * starts (research notes lan-load-hof-map.md). */
+#define NS_VT_MPL              0x00fbdab0
+#define NS_SUB_MPL             0x1dc
+#define NS_MPL_MODEL           0x230
+#define NS_MPL_STARTED         0x2d0
 #define NS_SUB_MPW             0x1c0       /* base 0x1cc; V */
 #define NS_MPW_START           0x00927720  /* base 00962750; V re-checked ([+0x180], [+0x1a8]; RET 4) */
 #define NS_MPW_BACK            0x009276f0  /* base 00962720; V re-checked */
@@ -505,3 +627,55 @@
 #define NS_MPW_GI_PLAYERS      0x84        /* players in = [info+0x84], as HoF's own list reads it; V */
 #define NS_MPO_QUICK_LABEL     "Быстрая схватка", "Quick combat"   /* HoF's own words; V */
 #define NS_MPO_AUTOSAVE_LABEL  "Динамичные бои", "Dynamic battles" /* `realtime` in HoF; V */
+
+/* The battle's "strike from a cell" mode (native/tap_attack.c): the base
+ * game's functions matched instruction by instruction (research notes
+ * tap-attack-hof-map.md, 2026-10-31). The combat screen's fields sit 0x144
+ * (up to the controller) and 0x140 (from the phase on) lower, and the
+ * ICombat and ICombatBase vtables are in another order. */
+#define HOMM5_TAP_SCREEN_VTABLE 0x00fad58c /* NUI::CCombatArenaScreen, the full object */
+#define HOMM5_TAP_FN_ACTION fn_0074e880    /* the action for what is under the cursor */
+#define HOMM5_TAP_FN_CLICK fn_0074c540     /* win_left_button_up */
+#define HOMM5_TAP_FN_PICK fn_0074e210      /* what is under the cursor, into P, RET 8 */
+#define HOMM5_TAP_CURSOR_X 0x0114bbd4      /* NUI::CCursor's position */
+#define HOMM5_TAP_CURSOR_Y 0x0114bbd8
+#define HOMM5_TAP_FN_GRID fn_007f8bb0      /* the grid cells' states */
+#define HOMM5_TAP_SET_CELL 0x007f9480
+#define HOMM5_TAP_ATTACK_CELLS 0x00bc6140
+#define HOMM5_TAP_MOVE_ATTACK 0x00bf6ac0
+#define HOMM5_TAP_MOVE_ATTACK_VTABLE 0x01009a0c
+#define HOMM5_TAP_RELEASE 0x00614700
+#define HOMM5_TAP_FREE 0x0060de20
+#define HOMM5_TAP_SCR_COMBAT 0x294
+#define HOMM5_TAP_SCR_ACTIVE 0x2a0
+#define HOMM5_TAP_SCR_PHASE 0x2f0
+#define HOMM5_TAP_SCR_S 0x2fc
+#define HOMM5_TAP_SCR_P 0x304
+#define HOMM5_TAP_SCR_GRID 0x3b0
+#define HOMM5_TAP_SCR_SHIFT 0x44
+#define HOMM5_TAP_SCR_CTRL 0x4c
+#define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x6c
+#define HOMM5_TAP_UNIT_CELL 0x70
+#define HOMM5_TAP_UNIT_SIZE 0x6c
+
+/* native/touch_native.c (native touch), mapped from the base game with
+ * games/map_addresses.py; the screen and window layouts it reads match. */
+#define HOMM5_NT_QUEUE 0x0061c790          /* the WndProc's event queue (base 005f3140) */
+#define HOMM5_NT_QUEUE_LIST 0x011335d4     /* its list (base 01133ed4) */
+#define HOMM5_NT_CWS_ISCREEN_VT 0x01035804 /* CWindowScreen's IScreen part */
+#define HOMM5_NT_VT_MOVIE 0x00fc81dc       /* NUI::CVideoScreen */
+#define HOMM5_NT_VT_LOADING 0x00fb87bc     /* NUI::CPWLScreenInterface */
+#define HOMM5_NT_FN_EDGE_SCROLL fn_00727ad0 /* CCursor::GetEdgeScroll (vtable +0x20) */
+#define HOMM5_NT_FN_CURSOR_UPDATE fn_007279d0 /* CCursor::Update (vtable +0x1C), RET 4 */
+#define HOMM5_VT_CARD 0x0103b8bc           /* CCommonGatheringWindow: an object's card */
+#define HOMM5_NT_ISCREEN_HIDE_TIP 0x68  /* IScreen: hide the tooltip (one slot before the base game's 0x6c) */
+#define HOMM5_NT_FN_CARD_WINDOW fn_007e9e60        /* CClickingTooltipCreator: the card's window (vt 00fb5628 slot 0; base 007fcc80) */
+#define HOMM5_NT_FN_CARD_WINDOW_COMBAT fn_007ea6e0 /* CClickingCombatTooltipCreator's (vt 00fb5674 slot 0; base 007fd500) */
+#define HOMM5_NT_REAL_SCREEN_SIZE hof_real_screen_size /* native/hof_screen.c: the client size */
+
+/* The touch panel's commands (native/hotkeys.c): the active key sections'
+ * vector, kept by 006e5360 (the base game's 006bb7e0), and the profile's
+ * files, named for the expansion. */
+#define HOMM5_BIND_SECTIONS 0x0114aacc
+#define HOMM5_INPUT_CFG "input_a1.cfg"
+#define HOMM5_GLOBAL_CFG "global_a1.cfg"

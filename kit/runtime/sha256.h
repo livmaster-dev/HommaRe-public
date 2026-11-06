@@ -1,6 +1,7 @@
 // sha256.h - SHA-256 (FIPS 180-4), just enough to fingerprint files: the
 // loader checks the game's image with it, the host the game files its
-// interface mods are made from (host/ui_mods.cpp).
+// interface mods are made from (host/ui_mods.cpp); gs_login.cpp builds its
+// HMAC and scrypt on the raw digest.
 #pragma once
 
 #include <cstdint>
@@ -84,7 +85,8 @@ struct Sha256 {
         }
     }
 
-    std::string hex() {
+    // The digest's 32 bytes; the object is spent afterwards.
+    void digest(uint8_t out[32]) {
         uint64_t bits = len * 8;
         uint8_t pad = 0x80;
         update(&pad, 1);
@@ -95,9 +97,17 @@ struct Sha256 {
         for (int i = 0; i < 8; ++i)
             tail[i] = (uint8_t)(bits >> (56 - 8 * i));
         update(tail, 8);
-        char out[65];
         for (int i = 0; i < 8; ++i)
-            snprintf(out + i * 8, 9, "%08x", h[i]);
+            for (int j = 0; j < 4; ++j)
+                out[i * 4 + j] = (uint8_t)(h[i] >> (24 - 8 * j));
+    }
+
+    std::string hex() {
+        uint8_t d[32];
+        digest(d);
+        char out[65];
+        for (int i = 0; i < 32; ++i)
+            snprintf(out + i * 2, 3, "%02x", d[i]);
         return std::string(out, 64);
     }
 };

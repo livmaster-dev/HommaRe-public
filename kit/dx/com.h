@@ -358,7 +358,12 @@ struct ComObj {
     uint32_t data_format_size = 0;
     uint32_t buffer_size = 0;  // DIPROP_BUFFERSIZE
     uint32_t notify_event = 0; // SetEventNotification, 0 when none
-    uint32_t axis_mode_absolute = 0;
+    // DIPROP_AXISMODE: a mouse's axes are relative unless the guest asks for
+    // DIPROPAXISMODE_ABS. In absolute mode they report a position, the sum of
+    // all motion so far: `pos` is where the axes are, `sent` where they stood
+    // after the last buffered event handed out (pos less what is still queued).
+    bool axis_absolute = false;
+    uint32_t pos[3] = {0, 0, 0}, sent[3] = {0, 0, 0};
     uint8_t last_keys[256] = {0};
     uint8_t last_buttons[8] = {0};
     int32_t last_x = 0, last_y = 0, last_z = 0;

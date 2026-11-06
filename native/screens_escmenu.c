@@ -124,7 +124,7 @@ static void esc_document(Json *j, Scratch *s, uint32_t screen) {
     read_menu(s, screen);
     const int battle = rd32(screen + E_MODE) == 1;
     j_lit(j, "{\"screen\":\"esc_menu\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", battle ? ns_tr("Бой", "Battle") : ns_tr("Меню", "Menu"));
     j_lit(j, ",\"buttons\":[");

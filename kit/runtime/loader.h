@@ -39,6 +39,9 @@ uint32_t loader_image_size();
 // IMAGE_BASE + SizeOfImage, i.e. one past the last image byte. 0 before a load.
 uint32_t loader_image_limit();
 uint32_t loader_entry_point();
+// SizeOfStackReserve from the image's optional header: the stack Windows gives a
+// thread whose creator asks for less (or for 0). 0 before a load.
+uint32_t loader_stack_reserve();
 const std::vector<SectionInfo> &loader_sections();
 
 // A mapped PE module. Auxiliary modules come from game.toml [modules.aux.*].

@@ -20,7 +20,22 @@ FakeDevice::Tex *FakeDevice::tex(Texture t) {
     return it == textures_.end() ? nullptr : &it->second;
 }
 
+void FakeDevice::hold_allocations_of(std::thread::id who) {
+    std::lock_guard lock(gate_mutex_);
+    held_thread_ = who;
+    gate_cv_.notify_all();
+}
+int FakeDevice::allocations_held() const {
+    std::lock_guard lock(gate_mutex_);
+    return held_;
+}
 Texture FakeDevice::create_texture(const TextureDesc &desc) {
+    {
+        std::unique_lock gate(gate_mutex_);
+        ++held_;
+        gate_cv_.wait(gate, [&] { return held_thread_ != std::this_thread::get_id(); });
+        --held_;
+    }
     std::lock_guard lock(mutex_);
     if (desc.width <= 0 || desc.height <= 0)
         return {};
@@ -255,6 +270,8 @@ void FakeDevice::on_complete(CommandBuffer cb, std::function<void(CommandStatus,
 void FakeDevice::commit(CommandBuffer cb) {
     std::vector<std::function<void(CommandStatus, double)>> run;
     std::function<void()> present;
+    if (commit_hook_)
+        commit_hook_();
     {
         std::lock_guard lock(mutex_);
         auto &c = commands_[cb.id];

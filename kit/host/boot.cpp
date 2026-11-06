@@ -11,6 +11,7 @@
 #include "../runtime/native_seam.h"
 #include "../runtime/imports.h"
 #include "../runtime/win32.h"
+#include "../runtime/x86.h"
 #include "../runtime/mods_seam.h"
 #include "../runtime/gdi32_internal.h"
 #include "../runtime/display_seam.h"
@@ -217,6 +218,15 @@ bool g_in_tick = false;
 uint32_t g_last_tick_ms = 0xffffffffu;
 
 void boot_tick() {
+    // Host code rounds to nearest (runtime/x86.h, SSE rounding control), but
+    // a clock read reaches here from host code the guest called without an
+    // import (a COM method of the graphics device), where the FPU still
+    // rounds the guest's way - toward zero in Heroes V. The host's own work
+    // in the tick, the window's layout among it, would round one way on one
+    // turn and the other on the next.
+    const unsigned guest_rc = recomp_host_rc();
+    if (guest_rc != 0)
+        recomp_host_set_rc(0);
     if (g_opt.tick)
         g_opt.tick();
 
@@ -241,6 +251,8 @@ void boot_tick() {
         fflush(stderr);
         longjmp(g_bail, 1);
     }
+    if (guest_rc != 0)
+        recomp_host_set_rc(guest_rc);
 }
 
 uint32_t boot_time_source() {

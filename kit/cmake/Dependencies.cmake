@@ -192,6 +192,16 @@ if(RECOMP_VIDEO)
       --nm=${RECOMP_FFMPEG_TOOLCHAIN_BIN}/llvm-nm
       --strip=${RECOMP_FFMPEG_TOOLCHAIN_BIN}/llvm-strip
       --windres=${CMAKE_RC_COMPILER})
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CROSSCOMPILING)
+    # Linux for another processor (cmake/toolchains/linux-aarch64.cmake): the
+    # same clang and lld for the toolchain's target, against its sysroot.
+    # FFmpeg's own NEON code stays in. GNU strip may not know the target.
+    list(APPEND RECOMP_FFMPEG_CONFIGURE
+      --enable-cross-compile --target-os=linux --arch=${CMAKE_SYSTEM_PROCESSOR}
+      --cc=${CMAKE_C_COMPILER} --sysroot=${CMAKE_SYSROOT}
+      --ar=${CMAKE_AR} --ranlib=${CMAKE_RANLIB} --nm=${CMAKE_NM} --disable-stripping
+      --extra-cflags=--target=${CMAKE_C_COMPILER_TARGET}
+      "--extra-ldflags=--target=${CMAKE_C_COMPILER_TARGET} -fuse-ld=lld")
   else()
     if(RECOMP_FFMPEG_MSVC)
       # cl.exe and link.exe from the Visual Studio developer environment;

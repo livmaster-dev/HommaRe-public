@@ -1572,17 +1572,29 @@ static inline int write_track_mode() {
 }
 
 #if D9_PAGE_PROTECT
-// Page protection (mode 3). The host page (16 KiB on arm64 Apple) is the unit:
-// a tracked buffer's guest copy starts on one and is padded to whole ones
+// Page protection (mode 3). The host page is the unit, whatever the kernel's
+// size: 4 KiB on x86, 16 KiB on Apple silicon (macOS, iOS, Asahi Linux) and
+// some other ARM Linux kernels, 64 KiB on some ARM servers. A tracked
+// buffer's guest copy starts on one and is padded to whole ones
 // (buffer_stage), so nothing else shares its pages. g_prot holds, per host
 // page of the tracked span, 1 while this code has it write-protected; the
 // fault handler acts only on those, so any other fault passes to the handler
 // that was installed before (the runtime's crash report).
+// RECOMP_D3D9_HOST_PAGE=N (TEST ONLY): N-byte pages, a power of two above the
+// kernel's own, as a kernel with N-byte pages would have them. Protecting a
+// run of smaller pages behaves the same, so the alignment, padding and fault
+// arithmetic of 16 and 64 KiB pages run on a 4 KiB machine (d3d9_tests pages).
 static uint32_t g_host_page = 0, g_host_page_shift = 0;
 static inline uint32_t host_page() {
     if (__builtin_expect(!g_host_page, 0)) {
-        g_host_page = (uint32_t)sysconf(_SC_PAGESIZE);
-        g_host_page_shift = (uint32_t)__builtin_ctz(g_host_page);
+        uint32_t page = (uint32_t)sysconf(_SC_PAGESIZE);
+        if (const char *v = recomp_env("D3D9_HOST_PAGE")) {
+            const uint32_t want = (uint32_t)strtoul(v, nullptr, 0);
+            if (want > page && want <= (1u << 20) && !(want & (want - 1)))
+                page = want;
+        }
+        g_host_page_shift = (uint32_t)__builtin_ctz(page);
+        g_host_page = page;
     }
     return g_host_page;
 }
@@ -1709,6 +1721,8 @@ static void prot_fault(int sig, siginfo_t *si, void *uc) {
             if (g_fault_log_n < kFaultLog) {
 #if defined(__APPLE__) && defined(__aarch64__)
                 g_fault_pc[g_fault_log_n] = (uintptr_t)((ucontext_t *)uc)->uc_mcontext->__ss.__pc;
+#elif defined(__linux__) && defined(__aarch64__)
+                g_fault_pc[g_fault_log_n] = (uintptr_t)((ucontext_t *)uc)->uc_mcontext.pc;
 #endif
                 g_fault_log[g_fault_log_n++] = page;
             }

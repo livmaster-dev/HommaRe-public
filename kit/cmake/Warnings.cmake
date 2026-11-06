@@ -3,6 +3,12 @@
 set(POP_WARN_HOST -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter)
 set(POP_WARN_STRICT -Wall -Wextra -Wno-unused-parameter)
 set(POP_WARN_WERROR -Wall -Wextra -Werror)
+# libstdc++ before 13 (Debian 12, the linux-arm64 sysroot) calls the deprecated
+# std::get_temporary_buffer inside std::stable_sort, which newer clang blames
+# on the caller; on Linux a deprecation stays a warning.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  list(APPEND POP_WARN_WERROR -Wno-error=deprecated-declarations)
+endif()
 set(POP_WARN_GEN -Wall -Wextra -Wno-unused)
 
 # Optimization is per target, as the scripts had it: -O2 for what players run,

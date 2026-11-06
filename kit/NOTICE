@@ -24,6 +24,13 @@ minimp3 (third_party/minimp3/minimp3.h) by Lion (lieff) is dedicated to the
 public domain under CC0 1.0; see third_party/minimp3/LICENSE. It decodes a
 game's own MP3 music, which is not included.
 
+A subset of musl 1.2.6's libm (third_party/musl-libm: sin, cos, tan, asin,
+acos, atan, atan2, exp, log, log10, log2, log1p, expm1, pow), Copyright ©
+2005-2020 Rich Felker et al., with code from Sun Microsystems' fdlibm, FreeBSD
+and Arm, is included under musl's MIT license; see third_party/musl-libm/LICENSE
+and README.md for what was changed. It gives the guest's transcendental
+functions the same results on every host.
+
 stb_truetype (third_party/stb/stb_truetype.h, v1.26, upstream commit
 6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760) by Sean Barrett is available under
 the MIT License or as public domain; see third_party/stb/LICENSE. It rasterizes

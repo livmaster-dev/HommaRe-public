@@ -39,6 +39,7 @@ namespace {
 std::string g_error;
 std::string g_exe_path;
 uint32_t g_base = 0, g_size = 0, g_entry = 0, g_iat_patched = 0, g_iat_data = 0;
+uint32_t g_stack_reserve = 0;
 std::vector<SectionInfo> g_sections;
 LoaderModule g_main;
 X86 g_ctx;
@@ -443,6 +444,9 @@ uint32_t loader_image_limit() {
 uint32_t loader_entry_point() {
     return g_entry;
 }
+uint32_t loader_stack_reserve() {
+    return g_stack_reserve;
+}
 const std::vector<SectionInfo> &loader_sections() {
     return g_sections;
 }
@@ -547,6 +551,7 @@ bool loader_load(const char *exe_path) {
     g_base = image_base;
     g_size = size_image;
     g_entry = image_base + entry_rva;
+    g_stack_reserve = rd<uint32_t>(file, opt_off + 72);
     g_main.name = RECOMP_EXECUTABLE;
     g_main.path = g_exe_path;
     g_main.base = g_base;
@@ -717,6 +722,8 @@ void loader_init_context(X86 *c) {
     c->fpu_sw = 0;
     c->fpu_tag = 0xffff;
     c->fpu_top = 0;
+    // MXCSR as Windows starts a thread: round to nearest, every exception masked.
+    c->mxcsr = RECOMP_MXCSR_DEFAULT;
     // EFLAGS with only the reserved bit 1 and IF set, so PUSHFD reads 0x202.
     c->eflags_misc = 0x00000202u;
     c->fs_base = TEB_BASE;
@@ -765,6 +772,9 @@ void run_entry(X86 *c) {
     // kernel32.cpp: t_self defaults to 0, so inference would make every host
     // thread claim to be this one.
     sched_set_guest_thread(true);
+    // The guest's rounding mode for the guest code that runs here, and the
+    // host's own once it has ended (x86.h, SSE rounding control).
+    recomp_fp_guest(c);
     // ExitProcess/TerminateProcess/ExitThread-outside-a-thread longjmp here.
     if (setjmp(*process_exit_jmp()) == 0) {
         // DLL_PROCESS_ATTACH for statically imported modules, in load order,
@@ -812,6 +822,7 @@ void run_entry(X86 *c) {
         recomp_run(c, g_entry);
     } else
         LOGW("guest process exited with code %u", process_exit_code());
+    recomp_fp_host();
     sched_set_guest_thread(false);
 }
 

@@ -21,6 +21,9 @@
 // iPadOS pointer stops half a point short of the left edge (drawable x 1), and
 // the last window point lands a pixel or two short of the last drawable row.
 constexpr int kEdgeSlackPx = 3;
+// Where native touch puts the game's cursor between gestures, in client
+// pixels: off any window and any edge (host_gate_touch_event).
+constexpr int32_t kNativeTouchAway = -8192;
 
 namespace {
 
@@ -1024,6 +1027,33 @@ void host_gate_camera_gesture(int phase, int32_t x, int32_t y, double zoom, doub
     }
     recomp_camera_gesture(phase, (float)mapped.gx, (float)mapped.gy, (float)zoom, (float)turn,
                           g_layout.guest_w, g_layout.guest_h);
+}
+
+void host_gate_touch_event(int kind, int phase, int32_t x, int32_t y, int count) {
+    if (!g_mem)
+        return;
+    if (kind != RECOMP_TOUCH_EVENT_POINTER) {
+        // A press or a drag that strays off the picture goes on where it left it.
+        static int32_t last_x = 0, last_y = 0;
+        const auto mapped = host_gate_hit_test(nullptr, x, y);
+        if (mapped.kind == HitResult::HIT_NONE && kind != RECOMP_TOUCH_EVENT_PRESS &&
+            kind != RECOMP_TOUCH_EVENT_DRAG) {
+            LOGV("touch: native gesture %d at %d,%d is off the game picture", kind, x, y);
+            return;
+        }
+        if (mapped.kind != HitResult::HIT_NONE) {
+            last_x = mapped.gx;
+            last_y = mapped.gy;
+        }
+        // No cursor while fingers play: the game's own GetCursorPos lands far
+        // outside its window, where nothing hovers and no edge scrolls.
+        if (kind == RECOMP_TOUCH_EVENT_DOWN)
+            host_set_client_cursor_pos(host_main_window(), kNativeTouchAway, kNativeTouchAway);
+        recomp_touch_event(kind, phase, (float)last_x, (float)last_y, g_layout.guest_w,
+                           g_layout.guest_h, count);
+        return;
+    }
+    recomp_touch_event(kind, phase, 0, 0, g_layout.guest_w, g_layout.guest_h, 0);
 }
 
 bool host_gate_ui_scroll(int32_t x, int32_t y, double dy) {

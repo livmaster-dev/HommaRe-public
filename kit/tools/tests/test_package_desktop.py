@@ -79,6 +79,16 @@ def test_stage_carries_linux_ui_mods_seed_and_launcher(tmp_path):
     assert "StubRecomp/resources/ui-mods/TouchUI.recipe" not in names
 
 
+def test_cross_build_tarball_names_the_target(tmp_path, monkeypatch):
+    exe = tmp_path / "recomp_app"
+    exe.write_bytes(b"\x7fELF")
+    cfg = {"game": {"app_name": "StubRecomp", "name": "Stub Game", "executable": "STUB.EXE"}}
+    monkeypatch.setattr(package_desktop.platform, "machine", lambda: "x86_64")
+    package_desktop.stage(exe, cfg, tmp_path / "out", system="Linux", arch="aarch64")
+    assert (tmp_path / "out/StubRecomp-linux-aarch64.tar.gz").is_file()
+    assert not (tmp_path / "out/StubRecomp-linux-x86_64.tar.gz").exists()
+
+
 @pytest.mark.parametrize("machine,arch", [("x86_64", "x86_64"), ("AMD64", "x86_64"),
                                          ("aarch64", "aarch64"), ("arm64", "aarch64")])
 def test_linux_archive_contents(tmp_path, monkeypatch, machine, arch):

@@ -55,6 +55,11 @@ void homm5_anchor_axis(X86 *c);
  * game puts it. */
 void homm5_counter_make(X86 *c);
 #define FN_008333f0 homm5_counter_make
+/* 00e3b9f0: a window's SetPlacement (offsets set by code: a message box
+ * centred, a dragged icon at the cursor); native/ui_bounds.c places such a
+ * window from the screen's edge rather than the interface bounds'. */
+void homm5_window_place(X86 *c);
+#define FN_00e3b9f0 homm5_window_place
 
 /* 00a1a1e0 (projection), 00a18c90 (screen -> ray), 00a19030 (world -> screen)
  * and 00a19940 (the engine's own wide-screen angle): native/horplus.c gives
@@ -174,3 +179,40 @@ void homm5_tap_click(X86 *c);
 #define FN_0074bf70 homm5_tap_click
 void homm5_tap_grid(X86 *c);
 #define FN_0080bac0 homm5_tap_grid
+
+/* 004432d0: the GameSpy clDataList unbounded string reader. native/net_guard.c
+ * stands in for it and forwards every read, each into a fixed buffer, to the
+ * bounded reader (00443390) with that buffer's size, so a hostile ubi-gs
+ * server or peer cannot overflow a buffer with an over-long field (README
+ * "Playing online safely"). */
+void homm5_gs_str_read(X86 *c);
+#define FN_004432d0 homm5_gs_str_read
+
+/* 00419ae0: the GS SDK's login (name, password, version) and 00b31380:
+ * NUbi::CStateWaitLoginRouterResult::ProcessLoginRouterResult. native/
+ * gs_login.c sends a ubi-gs server a token, never the password. */
+void homm5_gs_login(X86 *c);
+#define FN_00419ae0 homm5_gs_login
+void homm5_gs_login_result(X86 *c);
+#define FN_00b31380 homm5_gs_login_result
+
+/* 0070ded0 (CCursor::GetEdgeScroll): native/touch_native.c answers (0,0)
+ * while native touch is in charge (the launcher's "Touch: native"); a mouse's
+ * edge scroll is the game's own. */
+void homm5_edge_scroll(X86 *c);
+#define FN_0070ded0 homm5_edge_scroll
+
+/* 0070ddb0 (CCursor::Update): while a finger's point is held, native/touch_native.c
+ * keeps the cursor there instead of at GetCursorPos (off the window on a
+ * touch), so the battle's cursor and damage hint are drawn at the point. */
+void homm5_cursor_update(X86 *c);
+#define FN_0070ddb0 homm5_cursor_update
+
+/* 007fcc80 / 007fd500: a two-level card's creator (NUI::CClickingTooltipCreator,
+ * CClickingCombatTooltipCreator) handing out its card's window (slot 0).
+ * native/touch_native.c notes the card a finger showed, so a tap on it shows the
+ * full card and a tap beside it closes it, and keeps it short after the lift. */
+void homm5_card_window(X86 *c);
+#define FN_007fcc80 homm5_card_window
+void homm5_card_window_combat(X86 *c);
+#define FN_007fd500 homm5_card_window_combat

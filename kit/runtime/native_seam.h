@@ -63,6 +63,17 @@ int recomp_writable_path(const char *guest_path, char *out, size_t out_len);
  * then the game directory. Zero when the path cannot be resolved. */
 int recomp_readable_path(const char *guest_path, char *out, size_t out_len);
 
+/* A Ubisoft Game Service title's login (runtime/gs_login.h). When its server
+ * list came from a community server the player chose, the password the game
+ * would send for account `name` is replaced: *out gets the token (or the
+ * challenge's registration or response) to send instead, and 1 comes back.
+ * 0, with nothing written, when no chosen server is in play: the password
+ * goes as the original game sends it. The password is never logged or kept.
+ * Takes tens of milliseconds (scrypt). Safe from any guest thread. */
+int recomp_gs_login_password(const char *name, const char *password, char *out, size_t out_len);
+/* The router's answer to that LOGIN: 1 accepted, 0 refused. */
+void recomp_gs_login_result(int accepted);
+
 /* Vertex fetch (Direct3D 9 on a backend that has it): the vertices of one
  * vertex buffer that the game leaves unwritten are supplied, by vertex number,
  * from four buffers the game fills, through shader source it hands over in
@@ -155,6 +166,9 @@ enum {
                                          clicks at once, no preview first (the game
                                          confirms in its own way, e.g. choose a target,
                                          then the cell to strike it from) */
+    RECOMP_TOUCH_DRAG_SPLIT = 256, /* the game drags something that a Shift held at
+                                      the drop splits (an army's stack): a finger that
+                                      rests during the drag holds Shift */
 };
 void recomp_touch_hover(int state);
 int recomp_touch_context(void);
@@ -167,6 +181,55 @@ enum {
     RECOMP_TOUCH_GESTURE_HOLD = 1,
 };
 void recomp_touch_gesture(int gesture);
+
+/* Optional game adapter: native touch (the launcher's "Touch: native",
+ * host.touch/native). The host recognises a finger's gesture and hands it to
+ * the game with its point; the game works out what lies there and acts, on
+ * its own thread, with no cursor placed for it. Between gestures there is no
+ * cursor at all: GetCursorPos answers a point far outside the window.
+ *
+ * recomp_touch_event(kind, phase, x, y, width, height, count): a gesture at
+ * (x, y), game pixels of a width x height picture. Called under the guest
+ * scheduler baton, in order with the input around it; the adapter applies it
+ * on the game's own thread. Kind RECOMP_TOUCH_EVENT_QUERY only asks: non-zero
+ * when the game takes native touch, zero leaves the hover gestures.
+ *
+ * Kinds: DOWN, a finger touched (the first; never a second finger): from then
+ * on recomp_touch_context answers for this point; TAP, it lifted where it
+ * touched, `count` 2 for the second tap of a double tap; PRESS, it rested
+ * (BEGIN), moved while resting (MOVE), lifted (END); DRAG, it moved off the
+ * point before resting, over something that is neither a camera nor a list:
+ * BEGIN at the point it touched, MOVE, END where it lifted; RIGHT_TAP, two
+ * fingers tapped together, at the second one; POINTER, a mouse, trackpad or
+ * pencil moved the pointer: the game's own cursor again until the next DOWN.
+ * Phase CANCEL ends a press or a drag the system took away. */
+enum {
+    RECOMP_TOUCH_EVENT_QUERY = 0,
+    RECOMP_TOUCH_EVENT_DOWN = 1,
+    RECOMP_TOUCH_EVENT_TAP = 2,
+    RECOMP_TOUCH_EVENT_PRESS = 3,
+    RECOMP_TOUCH_EVENT_DRAG = 4,
+    RECOMP_TOUCH_EVENT_RIGHT_TAP = 5,
+    RECOMP_TOUCH_EVENT_POINTER = 6,
+};
+enum {
+    RECOMP_TOUCH_PHASE_BEGIN = 0,
+    RECOMP_TOUCH_PHASE_MOVE = 1,
+    RECOMP_TOUCH_PHASE_END = 2,
+    RECOMP_TOUCH_PHASE_CANCEL = 3,
+};
+int recomp_touch_event(int kind, int phase, float x, float y, int width, int height, int count);
+
+/* A key for a screen that waits for any key and takes no click (a movie, a
+ * loading screen): native touch presses one there. `scancode` an SDL scancode,
+ * `down` 1 or 0; it reaches the game as the keyboard's would, through the
+ * host's input queue. Safe from any guest thread. */
+void host_touch_key(int scancode, int down);
+
+/* A light haptic tick under the finger (a phone's Taptic Engine; nothing
+ * where there is none): native touch marks with it what a finger's rest
+ * brought up (a card). Safe from any guest thread. */
+void host_touch_haptic(void);
 
 /* Optional game adapters for the camera of a 3D map (game.toml [touch]
  * gestures = "hover"). Called from the host thread; the adapter applies them
@@ -217,6 +280,25 @@ int recomp_ui_scroll(float x, float y, float dy, int width, int height);
  * applies it on the game's own thread. Called from the host thread. */
 int recomp_screen_state(char *buf, int cap, unsigned *serial);
 void recomp_screen_command(const char *command);
+
+/* Optional game adapter: the commands a game offers on the screen showing now,
+ * for an on-screen panel to press (iOS: the control panel beside the camera
+ * buttons) - keys a touch screen has no other way to press. One JSON
+ * document, as recomp_screen_state passes one:
+ *   {"screen": "<the game's name for the screen>", "lang": "en",
+ *    "commands": [{"id", "label", "keys", "kind", "quick", "symbol",
+ *                  "key", "mods"}, ...]}
+ * id names the command's art and keeps its pin; label is the command in the
+ * game's language and keys the keys a keyboard presses for it ("Ctrl+1");
+ * symbol a system symbol to draw where there is no art. kind: "tap" presses
+ * key (an SDL scancode) with mods (scancodes) held; "latch" holds key until
+ * the next click on the game has been let go, or until pressed again;
+ * "next_tap_right" makes the next tap on the game a right click. quick: shown
+ * without opening the panel, 1 on any screen, 2 on a large one, 0 never.
+ * Returns as recomp_screen_state does: the length when the document changed
+ * since *serial, 0 when not, -1 when the screen offers no command. Called
+ * from the host thread every turn; the game resolves the keys itself. */
+int recomp_hotkeys_state(char *buf, int cap, unsigned *serial);
 
 /* Optional game adapter: the app is going to the background (iOS), where it
  * may be closed without ever reaching the game's own exit. A game that saves
