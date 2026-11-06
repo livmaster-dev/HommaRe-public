@@ -1045,10 +1045,13 @@ static void show_command_tip(UIView *anchor, RecompPanelCommand *c) {
     CGFloat d_; // a button's diameter, in points
     BOOL collapsed_;
 }
-// Diameter of a button on screen: about the size of the game's own round map
-// buttons on a 13-inch iPad; on a phone-sized window Apple's 44 pt minimum.
+// Diameter of a button on screen: on a phone-sized window Apple's 44 pt
+// minimum; on a larger one the game's own round buttons' (the document's
+// "button", set by platform_ui_control_panel), else about theirs on a 13-inch
+// iPad.
+static CGFloat g_large_button_pt = 64;
 static CGFloat camera_button_pt(BOOL phone) {
-    return phone ? 44 : 64;
+    return phone ? 44 : g_large_button_pt;
 }
 static NSString *const kCollapsedKey = @"RecompCameraPanelCollapsed";
 static NSArray<NSString *> *const kCameraNames =
@@ -1056,11 +1059,11 @@ static NSArray<NSString *> *const kCameraNames =
 
 // A cell: the button and two short lines of its name under it, in points.
 static CGSize cell_pt(BOOL phone) {
-    const CGFloat d = camera_button_pt(phone);
-    return CGSizeMake(d + (phone ? 16 : 24), d + 3 + (phone ? 24 : 30));
+    const CGFloat d = camera_button_pt(phone), k = phone ? 1 : d / 64;
+    return CGSizeMake(d + (phone ? 16 : 24 * k), d + 3 + (phone ? 24 : 30 * k));
 }
 static CGFloat label_font_pt(BOOL phone) {
-    return phone ? 9.5 : 12;
+    return phone ? 9.5 : MAX(9.5, 12 * camera_button_pt(NO) / 64);
 }
 
 // The frame's margins around its grid, in the art's pixels: where its first
@@ -1427,6 +1430,7 @@ struct PanelState {
     NSString *screen = @"";                   // the document's screen
     NSArray<RecompPanelCommand *> *all = nil; // its commands, the game's order
     NSArray<NSValue *> *busy = nil;           // the game's interface: fractions of the picture
+    CGSize button = CGSizeZero;               // the game's round button: fractions of the picture
     bool shown = false;
     void (*command)(const char *) = nullptr;
     // What the cells and their place were last worked out from: the same
@@ -1494,11 +1498,12 @@ static void press_command(RecompPanelCommand *c) {
 }
 
 static NSArray<RecompPanelCommand *> *parse_commands(const std::string &doc, NSString **screen,
-                                                     NSArray<NSValue *> **busy) {
+                                                     NSArray<NSValue *> **busy, CGSize *button) {
     NSMutableArray<RecompPanelCommand *> *out = [NSMutableArray array];
     NSMutableArray<NSValue *> *rects = [NSMutableArray array];
     *screen = @"";
     *busy = rects;
+    *button = CGSizeZero;
     if (doc.empty())
         return out;
     NSData *data = [NSData dataWithBytes:doc.data() length:doc.size()];
@@ -1518,6 +1523,10 @@ static NSArray<RecompPanelCommand *> *parse_commands(const std::string &doc, NSS
                                                          [r[0] doubleValue], [r[1] doubleValue],
                                                          [r[2] doubleValue] - [r[0] doubleValue],
                                                          [r[3] doubleValue] - [r[1] doubleValue])]];
+    NSArray *bs = json[@"button"];
+    if ([bs isKindOfClass:NSArray.class] && bs.count == 2 && [bs[0] isKindOfClass:NSNumber.class] &&
+        [bs[1] isKindOfClass:NSNumber.class])
+        *button = CGSizeMake([bs[0] doubleValue], [bs[1] doubleValue]);
     NSArray *commands = json[@"commands"];
     if (![commands isKindOfClass:NSArray.class])
         return out;
@@ -1539,9 +1548,9 @@ static NSArray<RecompPanelCommand *> *parse_commands(const std::string &doc, NSS
 
 // Where the panel goes: a grid of `count` cells and a place for it inside the
 // safe area that keeps clear of the game's interface (`busy`, window points),
-// as near as can be to the panel's corner - the top left on a phone (the
-// camera housing's side), the top right on a larger screen. None clear: the
-// one over the least of it.
+// as near as can be to the top left (a phone's camera housing's side; on a
+// larger screen where place_over_corner finds no room). None clear: the one
+// over the least of it.
 static CGRect place_panel(RecompPanelArt *art, bool phone, NSInteger count, CGRect safe,
                           NSArray<NSValue *> *busy, NSInteger *cols_out) {
     CGRect best = CGRectZero;
@@ -1559,7 +1568,7 @@ static CGRect place_panel(RecompPanelArt *art, bool phone, NSInteger count, CGRe
             if (best_score < 1000 && y - safe.origin.y > best_score)
                 break; // a clear place nearer the corner is known
             for (CGFloat i = 0; i + size.width <= safe.size.width; i += step) {
-                const CGFloat x = phone ? safe.origin.x + i : CGRectGetMaxX(safe) - size.width - i;
+                const CGFloat x = safe.origin.x + i;
                 const CGRect r = CGRectMake(x, y, size.width, size.height);
                 CGFloat over = 0;
                 for (NSValue *v in busy) {
@@ -1587,6 +1596,60 @@ static void control_panel(SDL_Window *window, const ControlPanel &want, void (*c
                           void (*command)(const char *));
 
 // Every turn of the host (up to each millisecond): its temporaries go at once.
+// On a larger screen: at the left, right above what the game keeps in the
+// picture's bottom-left corner (the map's minimap, a battle's hero portrait),
+// a grid two buttons wide (as a phone's) growing up from there, as far in from
+// the edge as a battle's portrait stands. CGRectNull where there is no such
+// window or no grid fits above it.
+static CGRect place_over_corner(RecompPanelArt *art, NSInteger count, CGRect safe, CGRect pic,
+                                NSArray<NSValue *> *busy, NSInteger *cols_out) {
+    CGRect anchor = CGRectNull;
+    for (NSValue *v in busy) {
+        const CGRect r = v.CGRectValue;
+        if (CGRectGetMinX(r) > pic.origin.x + pic.size.width * 0.12 ||
+            CGRectGetMaxY(r) < pic.origin.y + pic.size.height * 0.85)
+            continue; // not in the corner
+        if (CGRectIsNull(anchor) ||
+            r.size.width * r.size.height > anchor.size.width * anchor.size.height)
+            anchor = r; // the corner's largest: the minimap, not its small buttons
+    }
+    if (CGRectIsNull(anchor))
+        return CGRectNull;
+    const CGFloat gap = 4;
+    const CGFloat x =
+        MAX(MAX(safe.origin.x, CGRectGetMinX(anchor)), pic.origin.x + pic.size.width * 0.02);
+    const CGFloat bottom = MIN(CGRectGetMinY(anchor) - gap, CGRectGetMaxY(safe));
+    CGRect best = CGRectNull;
+    CGFloat best_score = CGFLOAT_MAX;
+    const NSInteger n = MAX(count, 1);
+    for (NSInteger cols = MIN((NSInteger)2, n); cols <= n; ++cols) {
+        const NSInteger rows = (n + cols - 1) / cols;
+        if (cols > 2 && (rows - 1) * cols >= n)
+            continue; // the same rows as fewer columns give
+        const CGSize size = [RecompControlPanel sizeForArt:art phone:NO cols:cols rows:rows];
+        if (x + size.width > CGRectGetMaxX(safe) || bottom - size.height < safe.origin.y)
+            continue;
+        const CGRect r = CGRectMake(x, bottom - size.height, size.width, size.height);
+        CGFloat over = 0;
+        for (NSValue *v in busy) {
+            const CGRect w = v.CGRectValue;
+            if (w.size.width < pic.size.width * 0.04 || w.size.height < pic.size.height * 0.04)
+                continue; // smaller than a button: a battle's stack counter, which moves
+            const CGRect hit = CGRectIntersection(CGRectInset(w, -gap, -gap), r);
+            if (!CGRectIsNull(hit))
+                over += hit.size.width * hit.size.height;
+        }
+        // Clear beats any overlap; then two columns, else the fewest more.
+        const CGFloat score = over * 1000 + cols;
+        if (score < best_score) {
+            best_score = score;
+            best = r;
+            *cols_out = cols;
+        }
+    }
+    return best;
+}
+
 void platform_ui_control_panel(SDL_Window *window, const ControlPanel &want, void (*camera)(int),
                                void (*command)(const char *)) {
     @autoreleasepool {
@@ -1612,9 +1675,14 @@ static void control_panel(SDL_Window *window, const ControlPanel &want, void (*c
         st.asked.clear();
         NSString *screen = nil;
         NSArray<NSValue *> *busy = nil;
-        st.all = parse_commands(commands, &screen, &busy);
+        CGSize button = CGSizeZero;
+        st.all = parse_commands(commands, &screen, &busy, &button);
         st.screen = screen;
         st.busy = busy;
+        // The game's round button keeps its size while its dial is away (a
+        // dialog over the map): the last one seen stays.
+        if (button.width > 0)
+            st.button = button;
     }
     UIWindow *uiwindow = (__bridge UIWindow *)SDL_GetPointerProperty(
         SDL_GetWindowProperties(window), SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr);
@@ -1647,24 +1715,38 @@ static void control_panel(SDL_Window *window, const ControlPanel &want, void (*c
                                                        f.size.height * pic.size.height)]];
         }
         const NSInteger cells = (want.camera ? 4 : 0) + (NSInteger)shown.count;
+        // On a larger screen the game's interface is its own (not the
+        // phone's rows): the panel's buttons as large as its round ones.
+        if (!want.phone)
+            g_large_button_pt =
+                st.button.width > 0 ? MIN(72.0, MAX(40.0, st.button.width * pic.size.width)) : 64;
         st.cols = 1;
         st.place = CGRectZero;
-        if (st.art && st.visible)
-            st.place = place_panel(st.art, want.phone, cells, safe, busy, &st.cols);
+        if (st.art && st.visible) {
+            const CGRect corner = want.phone
+                                      ? CGRectNull
+                                      : place_over_corner(st.art, cells, safe, pic, busy, &st.cols);
+            st.place = !CGRectIsNull(corner)
+                           ? corner
+                           : place_panel(st.art, want.phone, cells, safe, busy, &st.cols);
+        }
         // What the panel is built for: its cells and their place.
         st.key = want.phone ? "phone" : "large";
         st.key += want.camera ? " camera" : "";
         for (RecompPanelCommand *c in shown)
             st.key += " " + std::string(c.ident.UTF8String);
         char where[64];
-        snprintf(where, sizeof where, " %ld@%.0f,%.0f", (long)st.cols, st.place.origin.x,
-                 st.place.origin.y);
+        snprintf(where, sizeof where, " %ld@%.0f,%.0f d%.0f", (long)st.cols, st.place.origin.x,
+                 st.place.origin.y, want.phone ? 44.0 : g_large_button_pt);
         st.key += where;
         static const bool trace = getenv("RECOMP_TRACE_HOTKEYS") != nullptr;
         if (trace)
-            fprintf(stderr, "[panel] placed: %ld cells, %ld columns at %.0f,%.0f, %lu busy, %s\n",
+            fprintf(stderr,
+                    "[panel] placed: %ld cells, %ld columns at %.0f,%.0f, buttons %.0f pt, "
+                    "%lu busy, %s\n",
                     (long)cells, (long)st.cols, st.place.origin.x, st.place.origin.y,
-                    (unsigned long)busy.count, st.visible ? "shown" : "hidden");
+                    want.phone ? 44.0 : g_large_button_pt, (unsigned long)busy.count,
+                    st.visible ? "shown" : "hidden");
     }
     NSArray<RecompPanelCommand *> *shown = st.shown_commands;
     const bool visible = st.visible;
