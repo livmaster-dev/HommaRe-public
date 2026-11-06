@@ -14,12 +14,14 @@
 #undef inflate
 
 #include <cstdio>
+#include <fcntl.h>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
 #include <string>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 static int g_failures = 0, g_checks = 0;
@@ -187,6 +189,29 @@ void test_names() {
     CHECK(finder::is_setup_name("SETUP_game.EXE") && !finder::is_setup_name("game.exe"));
     CHECK(finder::is_patch_name("patch_game_1_to_2.exe") &&
           !finder::is_patch_name("patch_game.bin"));
+}
+
+// Installers the Android launcher links to the descriptors a picker granted
+// (launcher/linux/android_files.cpp): each link stands for the document
+// under its own name, so the slices are found beside the installer and
+// innoextract is handed the link, not the file only the descriptor reaches.
+void test_descriptor_links() {
+    const std::string dir = fresh("links"), elsewhere = fresh("links-elsewhere");
+    write_file(elsewhere + "/document-17", "x");
+    write_file(elsewhere + "/document-18", "x");
+    const int exe = open((elsewhere + "/document-17").c_str(), O_RDONLY);
+    const int bin = open((elsewhere + "/document-18").c_str(), O_RDONLY);
+    CHECK(exe >= 0 && bin >= 0);
+    CHECK(symlink(("/proc/self/fd/" + std::to_string(exe)).c_str(), (dir + "/setup_l.exe").c_str()) == 0);
+    CHECK(symlink(("/proc/self/fd/" + std::to_string(bin)).c_str(), (dir + "/setup_l-1.bin").c_str()) == 0);
+    CHECK(canonical(dir + "/setup_l.exe") == canonical(dir) + "/setup_l.exe");
+    const finder::Found f = finder::find({dir});
+    CHECK(f.setups == std::vector<std::string>{canonical(dir) + "/setup_l.exe"} && f.problems.empty());
+    // An ordinary link still resolves to what it names.
+    CHECK(symlink((elsewhere + "/document-17").c_str(), (dir + "/plain").c_str()) == 0);
+    CHECK(canonical(dir + "/plain") == canonical(elsewhere + "/document-17"));
+    close(exe);
+    close(bin);
 }
 
 void test_find() {
@@ -561,6 +586,7 @@ int main() {
     } tests[] = {
         {"installer names", test_names},
         {"finding installers", test_find},
+        {"installers linked to descriptors", test_descriptor_links},
         {"listing and inflate", test_listing_and_inflate},
         {"install marker", test_marker},
         {"install, repair, resume", test_install},

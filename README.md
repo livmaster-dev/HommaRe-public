@@ -152,7 +152,8 @@ haven't been tested yet: reports welcome.
 | iPad and iPhone | [Sideload the IPA](../../releases/latest) with Sideloadly, AltStore or SideStore, or build it yourself on a Mac with Xcode. |
 | Linux (x86-64) | [Build it yourself](#building-from-source); it draws with Vulkan. |
 | Linux (64-bit ARM) | [Build it yourself](#building-from-source), on the ARM computer or cross-compiled on an x86-64 PC; Vulkan. For ARM Chromebooks, Snapdragon X laptops, Asahi Linux, Raspberry Pi 5. Builds; not yet tried on the hardware. |
-| Windows, Android | Not planned for now: the original game already runs on Windows. |
+| Android, Chromebook (experimental) | Build the APK yourself with `tools/build_app.py --target android` (the Android SDK, NDK r29 and a JDK 17+ in `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`); install `app-x86_64-debug.apk` (Intel Chromebooks) or `app-arm64-v8a-debug.apk` with `adb install`. It draws with Vulkan. |
+| Windows | Not planned for now: the original game already runs on Windows. |
 
 ### System requirements
 

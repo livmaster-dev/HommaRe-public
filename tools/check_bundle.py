@@ -2,12 +2,14 @@
 """Check that an app carries nothing of the game: no game file, no mod made from one.
 
     tools/check_bundle.py build/HommaRe.app [--game ~/Heroes\\ V/game --game ~/Heroes\\ V/game-toe]
+    tools/check_bundle.py build/android/app/build/outputs/apk/debug/app-x86_64-debug.apk
 
 The app is to be distributable: the player's own GOG copy brings the game,
 the launcher installs it, and the interface mods are made on the device from
 recipes (ui-mods/*.recipe, tools/ui_recipe.py). This walks the bundle (a
 macOS .app or a flat iOS one, the games' modules' resources under games/ too,
-and the entries of any zip inside it) and fails on:
+and the entries of any zip inside it; or an Android APK's entries, the games'
+resources under assets/resources/) and fails on:
 
 - the game's own kinds of files (archives .pak/.h5u/.h5m/.h5c/.h5s, the UI's
   .xdb, textures .dds/.tga, videos .bik/.wmv, the executables and DLLs, ...),
@@ -66,6 +68,24 @@ def walk(app):
                             yield rel + "!" + info.filename, z.read(info)
             except zipfile.BadZipFile:
                 pass
+
+
+def walk_apk(apk):
+    """(entry name, bytes) of every file an APK holds; a zip inside it as entry!inner."""
+    with zipfile.ZipFile(apk) as outer:
+        for info in outer.infolist():
+            if info.is_dir():
+                continue
+            data = outer.read(info)
+            yield info.filename, data
+            if data[:4] == b"PK\x03\x04":
+                try:
+                    with zipfile.ZipFile(io.BytesIO(data)) as z:
+                        for inner in z.infolist():
+                            if not inner.is_dir():
+                                yield info.filename + "!" + inner.filename, z.read(inner)
+                except zipfile.BadZipFile:
+                    pass
 
 
 def repo_hashes():
@@ -149,12 +169,13 @@ def check_recipe(rel, data):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("app", type=Path, help="the .app")
+    p.add_argument("app", type=Path, help="the .app, the Linux package's folder or an Android .apk")
     p.add_argument("--game", type=Path, action="append", default=[],
                    help="a game install to compare every file with (repeatable)")
     args = p.parse_args()
     app = args.app.resolve()
-    if not app.is_dir():
+    apk = app.is_file() and app.suffix == ".apk"
+    if not app.is_dir() and not apk:
         sys.exit("%s: no such app" % app)
 
     installs = []
@@ -165,7 +186,7 @@ def main():
 
     problems, notes = [], []
     files = recipes = 0
-    for rel, data in walk(app):
+    for rel, data in walk_apk(app) if apk else walk(app):
         files += 1
         parts = rel.split("!")[0].split("/")
         name = rel.rsplit("/", 1)[-1].split("!")[-1]

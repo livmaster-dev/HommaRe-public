@@ -152,12 +152,20 @@ if(RECOMP_VIDEO)
       --install-name-dir=@rpath)
   elseif(ANDROID)
     # CMake's compiler is inside the selected NDK prebuilt toolchain. Use its
-    # API-29 wrapper so configure and every FFmpeg probe target Android 10.
+    # API-29 wrapper for the build's ABI so configure and every FFmpeg probe
+    # target Android 10 on that processor: arm64-v8a (aarch64) or x86_64.
     get_filename_component(RECOMP_FFMPEG_TOOLCHAIN_BIN "${CMAKE_C_COMPILER}" DIRECTORY)
     get_filename_component(RECOMP_FFMPEG_SYSROOT "${RECOMP_FFMPEG_TOOLCHAIN_BIN}/../sysroot" ABSOLUTE)
+    if(ANDROID_ABI STREQUAL "x86_64")
+      set(RECOMP_FFMPEG_ARCH x86_64)
+    elseif(ANDROID_ABI STREQUAL "arm64-v8a")
+      set(RECOMP_FFMPEG_ARCH aarch64)
+    else()
+      message(FATAL_ERROR "RECOMP_VIDEO: no FFmpeg build for the Android ABI ${ANDROID_ABI}")
+    endif()
     list(APPEND RECOMP_FFMPEG_CONFIGURE
-      --enable-cross-compile --target-os=android --arch=aarch64
-      --cc=${RECOMP_FFMPEG_TOOLCHAIN_BIN}/aarch64-linux-android29-clang
+      --enable-cross-compile --target-os=android --arch=${RECOMP_FFMPEG_ARCH}
+      --cc=${RECOMP_FFMPEG_TOOLCHAIN_BIN}/${RECOMP_FFMPEG_ARCH}-linux-android29-clang
       --ar=${RECOMP_FFMPEG_TOOLCHAIN_BIN}/llvm-ar
       --nm=${RECOMP_FFMPEG_TOOLCHAIN_BIN}/llvm-nm
       --ranlib=${RECOMP_FFMPEG_TOOLCHAIN_BIN}/llvm-ranlib

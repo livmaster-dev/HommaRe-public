@@ -48,6 +48,18 @@
       "hu": "Natív port Linuxra",
       "pl": "Natywny port na Linuksa",
       "zh-Hans": "适用于 Linux 的原生移植版"
+    },
+    "android": {
+      "en": "Native port for Android",
+      "ru": "Нативный порт для Android",
+      "cs": "Nativní port pro Android",
+      "de": "Nativer Port für Android",
+      "es": "Port nativo para Android",
+      "fr": "Portage natif pour Android",
+      "it": "Port nativo per Android",
+      "hu": "Natív port Androidra",
+      "pl": "Natywny port na Androida",
+      "zh-Hans": "适用于 Android 的原生移植版"
     }
   },
   "legal": {

@@ -1,23 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="@bundle_id@">
+    <!-- Vulkan 1.1 is what the game draws with. Not required: on a device
+         without it (some Chromebooks' ARCVM) the app still installs and its
+         launcher, drawn in software, says why the game cannot start there
+         (host/sdl/main.cpp) rather than the store or the installer refusing. -->
     <uses-feature android:name="android.hardware.vulkan.version"
-        android:version="0x401000" android:required="true" />
+        android:version="0x401000" android:required="false" />
+    <!-- A Chromebook without a touchscreen plays with its touchpad and keyboard. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <!-- The launcher's import keeps running in a foreground service. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Device rumble and button taps (host/sdl/platform_ui_desktop.cpp). -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Network play (the game's own sockets, kit/runtime). Finding games on
+         the local network sends and receives UDP broadcasts and multicast,
+         which Android drops for an app unless it holds a
+         WifiManager.MulticastLock while it listens: CHANGE_WIFI_MULTICAST_STATE
+         lets it take one. ACCESS_NETWORK_STATE answers whether there is a
+         network at all. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <application android:label="@string/app_name"
         android:requestLegacyExternalStorage="false"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
-        android:hardwareAccelerated="true">
+        android:hardwareAccelerated="true"
+        android:resizeableActivity="true">
         <activity android:name="dev.recompkit.RecompActivity"
             android:screenOrientation="fullUser"
             android:launchMode="singleTask"
-            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:resizeableActivity="true"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
             android:exported="true">
+            <!-- A window on a Chromebook's desktop (or Android's desktop
+                 windowing) opens landscape at a size the game's 1024x768
+                 fits, and is resizable from there. -->
+            <layout android:defaultWidth="1280dp" android:defaultHeight="800dp"
+                android:minWidth="800dp" android:minHeight="600dp" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
