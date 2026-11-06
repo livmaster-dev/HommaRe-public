@@ -144,6 +144,10 @@ int os_install_fault_handlers(OsFaultFn fn);
 // For use inside a fault handler: a raw write to the error stream and an
 // immediate process exit, neither of which touches stdio or runs destructors.
 void os_write_stderr_raw(const char *s, size_t n);
+// Ends the process from a fault handler: an immediate exit with `code`; on
+// Android the signal's default action instead (the system's crash report),
+// which returns to let the fault happen again.
+void os_fault_exit(int code);
 void os_exit_immediately(int code);
 
 // ---------------------------------------------------------------------------
