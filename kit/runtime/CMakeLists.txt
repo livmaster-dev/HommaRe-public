@@ -8,18 +8,22 @@ set(POP_RUNTIME_SOURCES
 # zlib1.dll on the host's zlib, and the offline stand-ins (legacy_dlls.cpp).
 list(APPEND POP_RUNTIME_SOURCES legacy_dlls.cpp winsock.cpp)
 # libcurl.dll's one useful request, a GS game's server list, over plain HTTP
-# (curl_http.cpp); the sockets are POSIX's, and a Windows build fails it.
+# (curl_http.cpp); the sockets are POSIX's, and a Windows build fails it. So
+# does the web's: a page has no sockets of its own (Emscripten's would be
+# WebSockets to a proxy the site does not have), as with WinSock there.
 list(APPEND POP_RUNTIME_SOURCES curl_http.cpp)
 # The password a GS game sends to that server: a token, never the password.
 list(APPEND POP_RUNTIME_SOURCES gs_login.cpp)
-if(WIN32)
+if(WIN32 OR EMSCRIPTEN)
   list(APPEND POP_RUNTIME_SOURCES http_get_none.cpp)
 else()
   list(APPEND POP_RUNTIME_SOURCES http_get_posix.cpp)
 endif()
 # The pages the host draws over the game, in the kit's Open Sans.
 list(APPEND POP_RUNTIME_SOURCES gdi32_canvas.cpp)
-find_package(ZLIB REQUIRED)
+if(NOT TARGET ZLIB::ZLIB) # the web's is Emscripten's port (cmake/Dependencies.cmake)
+  find_package(ZLIB REQUIRED)
+endif()
 # An Apple SDK's zlib.h is in the SDK's own usr/include, which the compiler
 # searches anyway. Named again (the Xcode generator passes it as -isystem) it
 # comes before libc++'s headers, which Xcode 27.2's libc++ refuses.

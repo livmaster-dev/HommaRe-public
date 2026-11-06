@@ -1,4 +1,5 @@
-// ogg_source.cpp - Ogg Vorbis from host memory through FFmpeg. See ogg_source.h.
+// ogg_source.cpp - Ogg Vorbis from host memory through FFmpeg, or stb_vorbis
+// in a build without it. See ogg_source.h.
 #include "ogg_source.h"
 #include <string.h>
 #include <algorithm>
@@ -296,33 +297,136 @@ int64_t OggSource::duration_frames() const {
 
 #else // !RECOMP_HAVE_FFMPEG
 
-struct OggSource::State {};
-OggSource::OggSource() = default;
+// Without FFmpeg (the web, an MSVC-ABI build without MSYS2) Vorbis decodes
+// through stb_vorbis (third_party/stb), whose pull API reads the same bytes
+// in place and seeks to an exact sample. Wider layouts are mixed down to
+// stereo by stb_vorbis rather than cut to their first two channels.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#define STB_VORBIS_NO_STDIO
+#define STB_VORBIS_NO_PUSHDATA_API
+#include "../third_party/stb/stb_vorbis.c"
+#pragma clang diagnostic pop
+
+struct OggSource::State {
+    std::vector<uint8_t> bytes;
+    stb_vorbis *vorbis = nullptr;
+    uint32_t rate = 0, channels = 0;
+    int64_t duration = -1;
+    uint64_t position = 0; // frame index of the next sample decode_next returns
+    uint64_t skip_to = 0;  // drop decoded samples before this frame index
+    bool drained = true;
+    std::vector<int16_t> buffer; // one run of decode_next: 4096 frames
+
+    void close() {
+        if (vorbis)
+            stb_vorbis_close(vorbis);
+        vorbis = nullptr;
+    }
+    ~State() {
+        close();
+    }
+};
+
+OggSource::OggSource() : s_(new State) {}
 OggSource::~OggSource() = default;
 OggSource::OggSource(OggSource &&) noexcept = default;
 OggSource &OggSource::operator=(OggSource &&) noexcept = default;
-bool OggSource::open(std::vector<uint8_t>) {
-    return false;
-}
-bool OggSource::decode_next(std::vector<int16_t> &out) {
-    out.clear();
-    return false;
-}
-void OggSource::seek_frames(uint64_t) {}
-uint32_t OggSource::rate() const {
-    return 0;
-}
-uint32_t OggSource::channels() const {
-    return 0;
-}
-bool OggSource::drained() const {
+
+bool OggSource::open(std::vector<uint8_t> bytes) {
+    if (!s_)
+        s_.reset(new State);
+    State &s = *s_;
+    s.close();
+    s.bytes = std::move(bytes);
+    s.duration = -1;
+    s.position = s.skip_to = 0;
+    s.drained = true;
+    int error = 0;
+    if (probe(s.bytes.data(), s.bytes.size()) && s.bytes.size() <= INT32_MAX)
+        s.vorbis = stb_vorbis_open_memory(s.bytes.data(), (int)s.bytes.size(), &error, nullptr);
+    if (!s.vorbis) {
+        s.bytes.clear();
+        return false;
+    }
+    const stb_vorbis_info info = stb_vorbis_get_info(s.vorbis);
+    s.rate = info.sample_rate;
+    s.channels = (uint32_t)std::min(info.channels, 2);
+    if (!s.rate || !s.channels) {
+        s.close();
+        s.bytes.clear();
+        return false;
+    }
+    // The last page's granule position; reading it moves the decoder, so it
+    // starts over afterwards.
+    if (const unsigned int frames = stb_vorbis_stream_length_in_samples(s.vorbis))
+        s.duration = frames;
+    stb_vorbis_seek_start(s.vorbis);
+    s.buffer.resize(4096 * s.channels);
+    s.drained = false;
     return true;
 }
+
+// Samples before skip_to are what a failed seek restarted short of; they are
+// decoded and dropped so the run returned begins at exactly the requested frame.
+bool OggSource::decode_next(std::vector<int16_t> &out) {
+    out.clear();
+    State &s = *s_;
+    if (s.drained || !s.vorbis)
+        return false;
+    for (;;) {
+        // The samples call, not the frame one: it starts where a seek placed
+        // the decoder inside a frame.
+        const int n = stb_vorbis_get_samples_short_interleaved(
+            s.vorbis, (int)s.channels, s.buffer.data(), (int)s.buffer.size());
+        if (n <= 0) {
+            s.drained = true;
+            return false;
+        }
+        size_t from = 0;
+        if (s.position < s.skip_to)
+            from = (size_t)std::min<uint64_t>(s.skip_to - s.position, (uint64_t)n);
+        s.position += (uint64_t)n;
+        if (from < (size_t)n) {
+            out.assign(s.buffer.begin() + (ptrdiff_t)(from * s.channels),
+                       s.buffer.begin() + (ptrdiff_t)n * s.channels);
+            return true;
+        }
+    }
+}
+
+// stb_vorbis_seek finds the page by bisection and decodes forward to the
+// exact frame; when it cannot, decoding starts over and skips up to it.
+void OggSource::seek_frames(uint64_t target) {
+    if (!s_ || !s_->vorbis)
+        return;
+    State &s = *s_;
+    if (s.duration >= 0)
+        target = std::min<uint64_t>(target, (uint64_t)s.duration);
+    s.drained = false;
+    s.skip_to = 0;
+    if (target && target <= UINT32_MAX && stb_vorbis_seek(s.vorbis, (unsigned int)target)) {
+        s.position = target;
+        return;
+    }
+    stb_vorbis_seek_start(s.vorbis);
+    s.position = 0;
+    s.skip_to = target;
+}
+uint32_t OggSource::rate() const {
+    return s_ ? s_->rate : 0;
+}
+uint32_t OggSource::channels() const {
+    return s_ ? s_->channels : 0;
+}
+bool OggSource::drained() const {
+    return !s_ || s_->drained;
+}
 uint64_t OggSource::position_frames() const {
-    return 0;
+    return s_ ? std::max(s_->position, s_->skip_to) : 0;
 }
 int64_t OggSource::duration_frames() const {
-    return -1;
+    return s_ ? s_->duration : -1;
 }
 
 #endif

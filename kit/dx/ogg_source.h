@@ -1,8 +1,8 @@
 // Frame-at-a-time Ogg Vorbis decoder over bytes it owns, through FFmpeg's ogg
 // demuxer and vorbis decoder with custom in-memory I/O. Returns interleaved
 // signed 16-bit PCM, mono or stereo (wider layouts keep their first two
-// channels). It never accesses guest memory. A build without FFmpeg refuses
-// to open anything.
+// channels). It never accesses guest memory. A build without FFmpeg decodes
+// with stb_vorbis instead (third_party/stb).
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
