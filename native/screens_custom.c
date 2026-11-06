@@ -65,6 +65,9 @@
 #define NS_HS_NAME_ACCEPT 0x009f1dc0 /* "edit_accept": the names checked */
 #define NS_VT_MPW 0x00fbaae0         /* NUI::CMPWaitScreen's IScreen (a LAN game's players) */
 #define NS_SUB_MPW 0x1cc
+#define NS_VT_MPL 0x00fbaba0         /* NUI::CMPUbiComLoadScreen's IScreen (a loaded LAN game's players) */
+#define NS_SUB_MPL 0x1e8
+#define NS_MPL_MODEL 0x200           /* the host load logic's model */
 #define NS_MPW_START 0x00962750      /* game messages: thiscall (screen, 0), RET 4 */
 #define NS_MPW_BACK 0x00962720
 #define NS_MPW_SEND 0x00962890       /* "sendmessage": the chat's edit line sent */
@@ -299,18 +302,32 @@ static int g_hs;
 #ifndef NS_MPO_COMBAT
 #define NS_MPO_COMBAT 0x40
 #endif
+/* An expansion's options (research notes lan/mp-create-wait-expansions.md):
+ * no «Закрытая игра» (NS_MPO_LOCKED 0: a non-empty password makes the game
+ * private, so the password is always open), «Одновременные ходы», and its own
+ * words for two boxes. 0 is "the game has no such widget". */
+#ifndef NS_MPO_SIMULTANEOUS
+#define NS_MPO_SIMULTANEOUS 0
+#endif
+#ifndef NS_MPO_QUICK_LABEL
+#define NS_MPO_QUICK_LABEL "Быстрый бой", "Quick combat"
+#endif
+#ifndef NS_MPO_AUTOSAVE_LABEL
+#define NS_MPO_AUTOSAVE_LABEL "Автосохранение", "Autosave"
+#endif
 #ifndef NS_MPC_SPEED_NAME
 #define NS_MPC_SPEED_NAME 0x00b97ca0 /* fastcall ECX speed 0..3: const wstr* */
 #endif
 
 /* The LAN game's settings, as the view's fields (FormField ids). */
-enum { MP_NAME, MP_LOCKED, MP_PASSWORD, MP_GHOST, MP_QUICK, MP_AUTOSAVE };
-static const uint32_t MP_WIDGET[6] = {NS_MPO_NAME, NS_MPO_LOCKED, NS_MPO_PASSWORD,
-                                      NS_MPO_GHOST, NS_MPO_QUICK, NS_MPO_AUTOSAVE};
+enum { MP_NAME, MP_LOCKED, MP_PASSWORD, MP_GHOST, MP_QUICK, MP_AUTOSAVE, MP_SIMULTANEOUS, MP_FIELDS };
+static const uint32_t MP_WIDGET[MP_FIELDS] = {NS_MPO_NAME,  NS_MPO_LOCKED, NS_MPO_PASSWORD,    NS_MPO_GHOST,
+                                              NS_MPO_QUICK, NS_MPO_AUTOSAVE, NS_MPO_SIMULTANEOUS};
 
+/* An options widget; 0 for one the game does not have (offset 0). */
 static uint32_t mp_widget(uint32_t screen, uint32_t off) {
     const uint32_t opts = rd32(screen + NS_MPC_OPTIONS);
-    return ns_ptr(opts) ? rd32(opts + off) : 0;
+    return off && ns_ptr(opts) ? rd32(opts + off) : 0;
 }
 
 /* A hot seat handler: thiscall (screen, the message: none), RET 4. */
@@ -505,7 +522,7 @@ static void create_command(Scratch *s, uint32_t screen, const char *cmd) {
         }
     } else if (strcmp(verb, "set") == 0 && g_hs == 2) {
         const int id = ns_cmd_int(cmd, "id", -1), value = ns_cmd_int(cmd, "value", -1);
-        if (id == MP_LOCKED || id == MP_GHOST || id == MP_QUICK || id == MP_AUTOSAVE) {
+        if (id == MP_LOCKED || id == MP_GHOST || id == MP_QUICK || id == MP_AUTOSAVE || id == MP_SIMULTANEOUS) {
             const uint32_t b = mp_widget(screen, MP_WIDGET[id]), state = value ? 0 : 1; /* 0 is on */
             if (ns_ptr(b))
                 ns_vcall(s, b, 0x0c, &state, 1); /* SetState: runs its commands */
@@ -520,6 +537,9 @@ static void create_command(Scratch *s, uint32_t screen, const char *cmd) {
             hs_handler(s, screen, strcmp(name, "create") == 0 ? NS_MPC_CREATE
                                   : strcmp(name, "load") == 0 ? NS_MPC_LOAD
                                   : strcmp(name, "back") == 0 ? NS_MPC_BACK
+#ifdef NS_MPC_RMG /* the random map generator: the game's own screen over this one */
+                                  : strcmp(name, "rmg") == 0 ? NS_MPC_RMG
+#endif
                                                               : 0);
         else if (g_hs)
             hs_handler(s, screen, strcmp(name, "create") == 0 ? NS_HS_CREATE
@@ -607,20 +627,21 @@ static void mp_options(Json *j, Scratch *s, uint32_t screen) {
 /* A LAN game's own settings, as the view's fields, and whether it is being
  * created (the game's wait box, in its undrawn root, says so). */
 static void mp_fields(Json *j, Scratch *s, uint32_t screen) {
-    static const char *const ru[6] = {"Название игры", "Закрытая игра", "Пароль", "Режим призрака", "Быстрый бой",
-                                      "Автосохранение"};
-    static const char *const en[6] = {"Game name", "Private game", "Password", "Ghost mode", "Quick combat",
-                                      "Autosave"};
+    static const char *const words[MP_FIELDS][2] = {
+        {"Название игры", "Game name"}, {"Закрытая игра", "Private game"},     {"Пароль", "Password"},
+        {"Режим призрака", "Ghost mode"}, {NS_MPO_QUICK_LABEL},                {NS_MPO_AUTOSAVE_LABEL},
+        {"Одновременные ходы", "Simultaneous turns"}};
     const uint32_t locked = mp_widget(screen, NS_MPO_LOCKED);
-    const int is_locked = ns_ptr(locked) && ns_vcall(s, locked, 0x14, NULL, 0) == 0;
+    /* Without the box a password is always open (and makes the game private). */
+    const int is_locked = !NS_MPO_LOCKED || (ns_ptr(locked) && ns_vcall(s, locked, 0x14, NULL, 0) == 0);
     j_lit(j, ",\"fields\":[");
-    for (int id = 0, first = 1; id < 6; ++id) {
+    for (int id = 0, first = 1; id < MP_FIELDS; ++id) {
         const uint32_t w = mp_widget(screen, MP_WIDGET[id]);
         if (!ns_ptr(w))
             continue;
         j_printf(j, "%s{\"id\":%d,", first ? "" : ",", id);
         first = 0;
-        j_kv_str(j, "label", ns_tr(ru[id], en[id]));
+        j_kv_str(j, "label", ns_tr(words[id][0], words[id][1]));
         if (id == MP_NAME || id == MP_PASSWORD) {
             char text[64];
             ns_wstr_utf8(w + 0x3c, text, sizeof text);
@@ -651,12 +672,12 @@ static void create_document(Json *j, Scratch *s, uint32_t screen) {
     char diff[8][64];
     for (int i = 0; i < 4; ++i)
         ns_difficulty_name(s, i, diff[i], sizeof diff[i]);
-    ns_ru = (unsigned char)diff[0][0] >= 0xd0;
+    ns_set_lang(diff[0]);
 
     j_lit(j, "{");
     j_kv_str(j, "screen", g_hs == 2 ? "mp_create" : g_hs ? "hotseat_create" : "custom_create");
     j_lit(j, ",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", g_hs == 2 ? ns_tr("Создание обычной игры", "New Network Game")
                          : g_hs ? ns_label(s, "/UI/HotSeat/Header.txt", "Один компьютер: создание игры", "Hot Seat: New Game")
@@ -775,6 +796,10 @@ static void create_document(Json *j, Scratch *s, uint32_t screen) {
     j_button(j, 1, "create", ns_label(s, g_hs ? "/UI/HotSeat/Menu/create.txt" : "/UI/CustomGameCreate/Create.txt", "Создать", "Create"),
              ns_ptr(chosen));
     j_button(j, 0, "load", ns_label(s, g_hs ? "/UI/HotSeat/Menu/load.txt" : "/UI/CustomGameCreate/Load.txt", "Загрузить", "Load"), 1);
+#ifdef NS_MPC_RMG
+    if (g_hs == 2)
+        j_button(j, 0, "rmg", ns_tr("Создать карту", "Generate a Map"), 1);
+#endif
     j_button(j, 0, "back", ns_label(s, g_hs ? "/UI/HotSeat/Menu/back.txt" : "/UI/CustomGameCreate/Back.txt", "Назад", "Back"), 1);
     j_lit(j, "]}");
 }
@@ -832,7 +857,7 @@ static const char *race_name(Scratch *s, int race) {
     const int f = faction(race);
     if (f >= 0) {
         snprintf(path, sizeof path, "/Text/Game/Towns/Types/%s.txt", file[f]);
-        return text_or(s, path, ns_ru ? ru[f] : en[f]);
+        return text_or(s, path, ns_tr(ru[f], en[f]));
     }
     return text_or(s, ITEM "race_random.txt", ns_tr("Случайная", "Random"));
 }
@@ -855,7 +880,7 @@ static const char *bonus_name(Scratch *s, int bonus) {
     const int b = bonus >= 0 && bonus < 4 ? bonus : 0;
     char path[96];
     snprintf(path, sizeof path, ITEM "bonus%d.txt", b);
-    return text_or(s, path, ns_ru ? ru[b] : en[b]);
+    return text_or(s, path, ns_tr(ru[b], en[b]));
 }
 
 static const char *bonus_icon(int bonus) {
@@ -1032,6 +1057,9 @@ static Want g_wants[WANTS];
 #ifndef NS_MPW_STARTING
 #define NS_MPW_STARTING 0x18c /* CStartGameListener while the game starts */
 #endif
+#ifndef NS_MPW_ML_ACCEPTING
+#define NS_MPW_ML_ACCEPTING 0x108 /* the host logic's "changes taken" byte */
+#endif
 enum {
     MW_HOST = NS_MPW_HOST,
     MW_LOGIC = NS_MPW_LOGIC,
@@ -1041,11 +1069,8 @@ enum {
     /* the logic (host and client) */
     ML_SESSION = 0x10,
     ML_STATUS = 0x18,        /* CMPWaitStatusDemonstrator: its CWaitBox at +0x18 */
-    ML_HOST_ID = 0x34,
-    ML_ROWS = 0x38,          /* vector<IMPWaitItem*>, a row per slot */
     ML_GOT_ID = 0x60,        /* client: byte, its slot heard of */
-    ML_MODEL = 0x74,         /* host only: CPlayersStartInfo */
-    ML_ACCEPTING = 0x108,    /* host only: byte, changes taken */
+    ML_ACCEPTING = NS_MPW_ML_ACCEPTING, /* host only: byte, changes taken */
     ML_CAN_START = 0x18,     /* vtable slot */
     /* a row */
     MR_STATE = 0x28,         /* 0 a person not ready, 1 computer, 2 closed, 3 ready, 4 open */
@@ -1056,6 +1081,23 @@ enum {
     MR_LOCKS = 0xc4,         /* hash map field -> locked: buckets [+4, +8) */
     MR_NAME = 0xf4,          /* wstr */
 };
+
+/* A loaded LAN game's players (NUI::CMPUbiComLoadScreen, a CMPWaitScreen
+ * opened once a LAN save is chosen): the screen is CMPWaitScreen's, its logic
+ * another class (CMultiplayerHostLoadLogic, CMultiplayerClientLoadLogic) that
+ * keeps the rows lower and the save's settings locked on every row; only who
+ * plays changes. Its model's records are not read. */
+static int g_mp_load;
+#ifndef NS_MPL_ROWS
+#define NS_MPL_ROWS 0x34
+#define NS_MPL_HOST_ID 0x30 /* the local player's id; a client's -1 until the host gives one */
+#endif
+#ifndef NS_MPL_MODEL
+#define NS_MPL_MODEL 0 /* a game without the screen never reads it */
+#endif
+#define ML_HOST_ID (g_mp_load ? NS_MPL_HOST_ID : 0x34)
+#define ML_ROWS (g_mp_load ? NS_MPL_ROWS : 0x38) /* vector<IMPWaitItem*>, a row per slot */
+#define ML_MODEL (g_mp_load ? NS_MPL_MODEL : 0x74) /* host only: CPlayersStartInfo */
 
 /* Where the variant keeps its rows (a vector's begin, end) and its model. */
 static uint32_t rows_of(uint32_t screen) {
@@ -1077,6 +1119,8 @@ static uint32_t wait_row(uint32_t screen, int slot) {
 }
 
 static uint32_t wait_record(uint32_t screen, int slot) {
+    if (g_hs == 3 && g_mp_load)
+        return 0;
     const uint32_t model = model_of(screen);
     return ns_ptr(model) ? rd32(model + M_RECORDS) + (uint32_t)slot * M_RECORD_SIZE : 0;
 }
@@ -1248,12 +1292,12 @@ static void wait_document(Json *j, Scratch *s, uint32_t screen) {
     const int locked = ns_ptr(ct) && rd8(ct + CT_LOCKED);
     char diff[64];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
 
     j_lit(j, "{");
     j_kv_str(j, "screen", g_hs ? "hotseat_players" : "custom_players");
     j_lit(j, ",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, g_hs ? "/UI/HotSeatWait/header.txt" : "/UI/CustomGameWait/ScreenHeader.txt", "Настройки игры", "Game Setup"));
     j_lit(j, ",\"players\":[");
@@ -1262,8 +1306,8 @@ static void wait_document(Json *j, Scratch *s, uint32_t screen) {
         const uint32_t s32 = (uint32_t)slot;
         const int colour = (int)(rd32(rec + R_COLOUR) - 1u) & 7;
         char label[64], path[96];
-        snprintf(label, sizeof label, "%s %s", ns_ru ? RU_COLOUR[colour] : EN_COLOUR[colour],
-                 ns_tr("игрок", "player"));
+        snprintf(label, sizeof label, ns_tr("%s игрок", "%s player"),
+                 ns_tr(RU_COLOUR[colour], EN_COLOUR[colour]));
         snprintf(path, sizeof path, ITEM "player_%s.txt", COLOUR_KEY[colour]);
         snprintf(label, sizeof label, "%s", text_or(s, path, label));
         j_printf(j, "%s{\"slot\":%d,", slot ? "," : "", slot);
@@ -1475,7 +1519,9 @@ static int mp_local_slot(Scratch *s, uint32_t screen, int n) {
     const uint32_t logic = rd32(screen + MW_LOGIC);
     if (rd8(screen + MW_HOST)) {
         const uint32_t model = model_of(screen);
-        return ns_ptr(model) ? (int)ns_call(s, NS_MPW_SLOT_OF, model, rd32(logic + ML_HOST_ID), NULL, 0) : -1;
+        const int slot = ns_ptr(model) ? (int)ns_call(s, NS_MPW_SLOT_OF, model, rd32(logic + ML_HOST_ID), NULL, 0) : -1;
+        if (slot >= 0 || !g_mp_load)
+            return slot;
     }
     for (int slot = 0; slot < n; ++slot)
         if (row_lock(wait_row(screen, slot), FIELD_TYPE) == 0)
@@ -1507,14 +1553,28 @@ static void mp_info(Json *j, Scratch *s) {
         ns_call(s, NS_MPW_INFO_CTOR, info, 0, NULL, 0);
         if (ns_vcall(s, mm, NS_MPW_MM_GAME, &info, 1) & 0xff) {
             ns_text_of(s, NS_MAP_NAME, info + NS_LAN_GI_MAP, name, sizeof name);
+#ifdef NS_MAP_GOAL_OUT /* ToE's formatter builds an out string, as map_goal says */
+            {
+                const uint32_t g = ns_alloc(s, 12);
+                wr32(g, 0);
+                ns_call(s, NS_MAP_GOAL, g, info + NS_MPW_GI_GOAL, NULL, 0);
+                ns_wstr_utf8(g, goal, sizeof goal);
+                ns_free(s, rd32(g));
+            }
+#else
             ns_text_of(s, NS_MAP_GOAL, info + NS_MPW_GI_GOAL, goal, sizeof goal);
+#endif
             const uint32_t w = ns_alloc(s, 12);
             wr32(w, 0);
             ns_call(s, NS_MAP_SIZE, w, rd32(info + NS_LAN_GI_SIZE), NULL, 0);
             ns_wstr_utf8(w, size, sizeof size);
             ns_free(s, rd32(w));
-            snprintf(players, sizeof players, "%u/%u", ns_call(s, NS_MPW_PLAYERS_NOW, info, 0, NULL, 0),
-                     rd32(info + NS_LAN_GI_MAX));
+#ifdef NS_MPW_GI_PLAYERS /* no "players in" function: the field the game's own list reads */
+            const uint32_t now = rd32(info + NS_MPW_GI_PLAYERS);
+#else
+            const uint32_t now = ns_call(s, NS_MPW_PLAYERS_NOW, info, 0, NULL, 0);
+#endif
+            snprintf(players, sizeof players, "%u/%u", now, rd32(info + NS_LAN_GI_MAX));
             ns_difficulty_name(s, (int)rd32(info + NS_MPW_GI_DIFFICULTY), dname, sizeof dname);
             const int minutes = (int)rd32(info + NS_MPW_GI_TIME);
             if (minutes > 0)
@@ -1544,10 +1604,17 @@ static const char *mp_busy(Scratch *s, uint32_t screen) {
     const uint32_t status = ns_ptr(logic) ? rd32(logic + ML_STATUS) : 0;
     if (!ns_ptr(status) || !rd32(status + 0x18))
         return NULL;
-    if (rd8(screen + MW_HOST) ? !rd8(logic + ML_ACCEPTING) || rd32(screen + MW_STARTING)
-                              : 0)
+    int starting = rd8(screen + MW_HOST) && rd32(screen + MW_STARTING);
+    if (rd8(screen + MW_HOST) && !g_mp_load)
+        starting |= !rd8(logic + ML_ACCEPTING);
+#ifdef NS_MPL_STARTED
+    if (rd8(screen + MW_HOST) && g_mp_load)
+        starting |= rd8(logic + NS_MPL_STARTED) != 0; /* set once the game starts */
+#endif
+    if (starting)
         return ns_label(s, "/UI/Common/MULTIPLAYER_TEXTS/E_START_GAME_INIT.txt", "Запуск игры", "Starting the game");
-    if (!rd8(screen + MW_HOST) && ns_ptr(rd32(logic + ML_SESSION)) && !rd8(logic + ML_GOT_ID))
+    const int got_id = g_mp_load ? rd32(logic + ML_HOST_ID) != 0xffffffffu : rd8(logic + ML_GOT_ID) != 0;
+    if (!rd8(screen + MW_HOST) && ns_ptr(rd32(logic + ML_SESSION)) && !got_id)
         return ns_label(s, "/UI/Common/MULTIPLAYER_TEXTS/E_GAMEINFO_INIT.txt", "Идет сбор информации об игре...",
                         "Getting the game's information...");
     return ns_label(s, "/UI/Common/MULTIPLAYER_TEXTS/E_COMMON_INIT.txt", "Идет установка...", "Connecting...");
@@ -1562,10 +1629,10 @@ static void mp_wait_document(Json *j, Scratch *s, uint32_t screen) {
     const int local = mp_local_slot(s, screen, n);
     char diff[64];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
 
     j_lit(j, "{\"screen\":\"mp_players\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, "/UI/MPWait/ScreenHeader.txt", "Обычные настройки", "Game Setup"));
     j_lit(j, ",\"players\":[");
@@ -1579,8 +1646,8 @@ static void mp_wait_document(Json *j, Scratch *s, uint32_t screen) {
         if (who[0] && (state == 0 || state == 3)) {
             snprintf(label, sizeof label, "%s", who);
         } else {
-            snprintf(label, sizeof label, "%s %s", ns_ru ? RU_COLOUR[colour] : EN_COLOUR[colour],
-                     ns_tr("игрок", "player"));
+            snprintf(label, sizeof label, ns_tr("%s игрок", "%s player"),
+                     ns_tr(RU_COLOUR[colour], EN_COLOUR[colour]));
             snprintf(path, sizeof path, ITEM "player_%s.txt", COLOUR_KEY[colour]);
             snprintf(label, sizeof label, "%s", text_or(s, path, label));
         }
@@ -1806,9 +1873,14 @@ VARIANT(hs_wait_document, 1, wait_document(j, s, screen), Json *j, Scratch *s, u
 VARIANT(mp_create_command, 2, create_command(s, screen, cmd), Scratch *s, uint32_t screen, const char *cmd)
 VARIANT(mp_create_document, 2, create_document(j, s, screen), Json *j, Scratch *s, uint32_t screen)
 #if defined(NS_VT_MPW)
-VARIANT(mp_wait_cmd, 3, mp_wait_command(s, screen, cmd), Scratch *s, uint32_t screen, const char *cmd)
-VARIANT(mp_wait_step, 3, step_wants(s, screen), Scratch *s, uint32_t screen)
-VARIANT(mp_wait_doc, 3, mp_wait_document(j, s, screen), Json *j, Scratch *s, uint32_t screen)
+VARIANT(mp_wait_cmd, 3, (g_mp_load = 0, mp_wait_command(s, screen, cmd)), Scratch *s, uint32_t screen, const char *cmd)
+VARIANT(mp_wait_step, 3, (g_mp_load = 0, step_wants(s, screen)), Scratch *s, uint32_t screen)
+VARIANT(mp_wait_doc, 3, (g_mp_load = 0, mp_wait_document(j, s, screen)), Json *j, Scratch *s, uint32_t screen)
+#endif
+#if defined(NS_VT_MPW) && defined(NS_VT_MPL)
+VARIANT(mp_load_cmd, 3, (g_mp_load = 1, mp_wait_command(s, screen, cmd)), Scratch *s, uint32_t screen, const char *cmd)
+VARIANT(mp_load_step, 3, (g_mp_load = 1, step_wants(s, screen)), Scratch *s, uint32_t screen)
+VARIANT(mp_load_doc, 3, (g_mp_load = 1, mp_wait_document(j, s, screen)), Json *j, Scratch *s, uint32_t screen)
 #endif
 
 const NsScreen ns_custom_create = {.id = "custom_create", .vtable = NS_VT_CREATE, .sub = NS_SUB_CREATE,
@@ -1835,6 +1907,12 @@ const NsScreen ns_mp_wait = {.id = "mp_players", .vtable = NS_VT_MPW, .sub = NS_
 #else
 const NsScreen ns_mp_wait = {.id = "mp_players"};
 #endif
+#if defined(NS_VT_MPW) && defined(NS_VT_MPL)
+const NsScreen ns_mp_load_wait = {.id = "mp_load_players", .vtable = NS_VT_MPL, .sub = NS_SUB_MPL,
+                                  .command = mp_load_cmd, .step = mp_load_step, .document = mp_load_doc};
+#else
+const NsScreen ns_mp_load_wait = {.id = "mp_load_players"};
+#endif
 
 #else
 
@@ -1845,5 +1923,6 @@ const NsScreen ns_hotseat_create = {.id = "hotseat_create"};
 const NsScreen ns_hotseat_wait = {.id = "hotseat_players"};
 const NsScreen ns_mp_create = {.id = "mp_create"};
 const NsScreen ns_mp_wait = {.id = "mp_players"};
+const NsScreen ns_mp_load_wait = {.id = "mp_load_players"};
 
 #endif

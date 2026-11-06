@@ -25,8 +25,9 @@ Play your own GOG copy on Apple silicon Macs, iPad and iPhone.
 > sponsored by Ubisoft, Nival or GOG.
 >
 > **No game files are included or distributed.** To play, you need your own legally
-> obtained copy of the game from GOG. The launcher installs it from GOG's own offline
-> installers and verifies every file. Please don't ask for, or share, game files.
+> obtained copy of the game from GOG. The launcher downloads it from your GOG.com library
+> or installs it from GOG's own offline installers, and verifies every file. Please don't
+> ask for, or share, game files.
 > See the full [legal notice](#legal-notice).
 
 **Contents:** [What it is](#what-is-hommare) · [What's new](#whats-new) · [Highlights](#highlights) ·
@@ -50,13 +51,17 @@ battery when nothing moves.
 
 ## What's new
 
-**0.1-playable-286** (October 2026) · [all changes](CHANGELOG.md)
+**0.1-playable-421** (October 2026) · [all changes](CHANGELOG.md)
 
-- **Local network games:** *Multiplayer → Local Network* works between Macs, iPads and
-  iPhones on one network.
-- **Native menus on iPhone:** the game's menus drawn as native screens from its own
-  pictures and words; on iPad, choose *Menus → For the screen* in the launcher.
-- **Foldable iPhone:** no more fall back to 1024x768 after a screen lock.
+- **German, French and Polish** GOG releases: install them from GOG.com or their
+  installers, and the native screens speak their language.
+- **Hammers of Fate's local network games** no longer crash.
+- **The original game's arithmetic on every device:** the expansions create games on
+  ubi-gs. Network games need this build on every device.
+- **More native screens:** Load and Save in network and hot-seat games, Save in the
+  expansions, their LAN lobbies and duels.
+- **Touch:** the tap-to-strike battle in Hammers of Fate and Tribes of the East, and a
+  stack splits when you drag it and hold still.
 
 ## Highlights
 
@@ -70,6 +75,9 @@ battery when nothing moves.
   your installed game's own data at run time, so the app ships no game art. It has the
   ten languages of GOG's installers (English, Russian, Czech, German, Spanish, French,
   Italian, Hungarian, Polish and Simplified Chinese) and stands upright on an iPhone.
+- **Downloads from your GOG.com library, on every device.** Sign in to GOG in the
+  launcher and it downloads the games you own, in English, Russian, German, French or
+  Polish, checks every file's SHA-256 and resumes a stopped download. No installer files and no Files app needed.
 - **Installs from your GOG installers, on every device.** Give the launcher GOG's offline
   installer: the `.exe`, the `.bin`, the folder they are in, or several at once; on a Mac
   you can also drop them onto the window. It unpacks only what the game needs, checks
@@ -133,8 +141,8 @@ haven't been tested yet: reports welcome.
 
 > [!NOTE]
 > **Mac:** a ready-made build is in [Releases](../../releases/latest)
-> (`HommaRe-<version>-macOS.dmg`). It holds no game data: you give it your own GOG
-> installers. macOS can't verify its developer, so it asks once on the first start (see
+> (`HommaRe-<version>-macOS.dmg`). It holds no game data: it downloads the game from
+> your GOG.com library or installs it from your own GOG installers. macOS can't verify its developer, so it asks once on the first start (see
 > [Quick start](#quick-start)). **iPad and iPhone:** an unsigned IPA is in the same
 > release (`HommaRe-<version>-iOS.ipa`); sideload it with Sideloadly, AltStore or
 > SideStore, or build the app yourself on a Mac.
@@ -144,6 +152,7 @@ haven't been tested yet: reports welcome.
 | Mac (Apple silicon) | [Download the DMG](../../releases/latest), or [build it yourself](#building-from-source). |
 | iPad and iPhone | [Sideload the IPA](../../releases/latest) with Sideloadly, AltStore or SideStore, or build it yourself on a Mac with Xcode. |
 | Linux (x86-64) | [Build it yourself](#building-from-source); it draws with Vulkan. |
+| Linux (64-bit ARM) | [Build it yourself](#building-from-source), on the ARM computer or cross-compiled on an x86-64 PC; Vulkan. For ARM Chromebooks, Snapdragon X laptops, Asahi Linux, Raspberry Pi 5. Builds; not yet tried on the hardware. |
 | Windows (x86-64) | [Build it yourself](#building-from-source) on Linux or a Mac; it draws with Vulkan. See [Why on Windows](#why-on-windows). |
 | Android | Not planned for now. |
 
@@ -168,7 +177,7 @@ profiles in `%APPDATA%\HommaRe` (`HommaRe-HoF`, `HommaRe-ToE` for the expansions
 - **Everyone:** your own copy of Heroes of Might and Magic V from GOG: *Heroes of Might
   and Magic V* (with Hammers of Fate) and/or *Heroes of Might and Magic V: Tribes of the
   East*. About 4 GB of free space for Heroes V with Hammers of Fate, and 2.2 GB more for
-  Tribes of the East, plus room for the installers while you install.
+  Tribes of the East, plus room for the installers if you install from them.
 - **Mac:** Apple silicon, macOS 14 Sonoma or later. There is no Intel Mac build.
 - **Windows:** 64-bit Windows 10 or 11 and a graphics driver with Vulkan (any current
   NVIDIA, AMD or Intel driver).
@@ -184,17 +193,18 @@ profiles in `%APPDATA%\HommaRe` (`HommaRe-HoF`, `HommaRe-ToE` for the expansions
    macOS can't verify the app's developer, so the first start fails: open *System Settings → Privacy &
    Security*, scroll down and press *Open Anyway* next to HommaRe. Later starts just work.
    (Or [build it yourself](#building-from-source).)
-1. **Download your installers from GOG.** In your GOG library, open *Heroes of Might and
-   Magic V* (and *Tribes of the East*, if you own it) and download the offline backup
-   installers: one `.exe` and one or more `.bin` files for each, and the update
-   (`patch_*.exe`) if GOG offers one.
-2. **Open HommaRe.** A game that isn't installed says *Not installed*. Press *Install from
-   GOG…* and choose the `.exe`, the `.bin` or the folder they are in, or drop them onto
-   the window. A file renamed by the browser is recognised, and the launcher says how to
-   name it.
-3. **Install.** The launcher unpacks the game, checks every file and marks it ready.
-   One GOG installer gives you both the original game and Hammers of Fate. If the game is
-   already installed somewhere, choose *Game folder…* instead.
+1. **Open HommaRe.** A game that isn't installed says *Not installed*. Press *Install from
+   GOG…*.
+2. **Sign in to GOG and download.** Sign in on GOG's own page in the panel that opens,
+   choose the game's language and press *Download* next to each game you own. The
+   launcher downloads it, checks every file and marks it ready. *Heroes of Might and Magic
+   V* gives you both the original game and Hammers of Fate. A stopped download resumes
+   where it stopped.
+3. **Or use your installer files.** If you already have GOG's offline installers (one
+   `.exe` and one or more `.bin` files for each game, and `patch_*.exe` if GOG offers
+   one), press *Use installer files…* in the same panel and choose the `.exe`, the `.bin`
+   or their folder, or drop them onto the window. If the game is already installed
+   somewhere, choose *Game folder…* instead.
 4. **Play.** Pick a game in the launcher and press *Play*. Your profiles, saves and
    settings are kept apart from the game files, so they survive updates and reinstalls.
 
@@ -205,10 +215,13 @@ First install the app: sideload `HommaRe-<version>-iOS.ipa` from
 with your Apple ID; turn on Developer Mode on the device), or
 [build it](#building-from-source) yourself.
 
-1. **Put the GOG installers on the device**: the `.exe` and `.bin` files, in the Files
-   app (on the device or in iCloud Drive), or with Finder from a Mac.
-2. **Open HommaRe**, press *Install from GOG…* and choose them. The launcher unpacks and
-   checks the game inside the app. Afterwards you can delete the installers.
+1. **Open HommaRe**, press *Install from GOG…* and sign in to GOG. Choose the game's
+   language and press *Download* next to each game you own: the launcher downloads it
+   into the app and checks every file (2–4 GB per game, use Wi-Fi).
+2. **Or use your GOG installers**: put the `.exe` and `.bin` files on the device in the
+   Files app (on the device or in iCloud Drive) or with Finder from a Mac, press *Use
+   installer files…* in the same panel and choose them. Afterwards you can delete the
+   installers.
 3. **Already have the game installed?** Copy its folder to the device instead and choose
    it with *Add game files…*.
 
@@ -296,16 +309,17 @@ You install the game from your own GOG copy, and every file is checked.
 
 **Which version do I need?** The GOG releases: *Heroes of Might and Magic V* 2.1 (which
 contains the original game 1.60 and Hammers of Fate 2.1) and *Tribes of the East* 3.1,
-in Russian or English. The launcher checks each game's executable by its SHA-256 and says
-if it doesn't match. GOG's other languages, disc versions and other stores haven't been
-tested.
+in English, Russian, German, French or Polish. The launcher checks each game's executable
+by its SHA-256 and says if it doesn't match. GOG's other languages, disc versions and other
+stores haven't been tested.
 
 **Is this an emulator? Does it use Wine?** No. It's a static recompilation: the game's
 x86 code was translated ahead of time into C and compiled for arm64. A runtime written for
 this port stands in for the parts of Windows the game uses.
 
-**Can I install on the iPad or iPhone without a Mac?** Yes. Put GOG's installer files on
-the device (the Files app or iCloud Drive) and press *Install from GOG…* in the launcher.
+**Can I install on the iPad or iPhone without a Mac?** Yes. Press *Install from GOG…* in
+the launcher and sign in to GOG: it downloads the games you own. Or put GOG's installer
+files on the device (the Files app or iCloud Drive) and choose *Use installer files…*.
 
 **Can I bring my Windows saves and profiles?** Profiles and saves use the game's own
 formats. Copy them into the profile folder (see below); this hasn't been tested much yet.
@@ -338,13 +352,42 @@ Clicking *ubi-gs* asks for that server's address (`host` or `host:port`) and rem
 ones that answered, in `ubi-gs-servers.txt` in the profile folder; until one has, it
 suggests the community server `ubigs.wayofharm.com`. The game gets the server list from
 it, logs in, joins the lobby's channels, and creates and joins games there. The server's
-operator sees the CD key and password you log in with: any CD key works, so don't type
-your real one or a password you use elsewhere.
+operator sees the CD key you log in with: any CD key works, so don't type your real one.
+
+**Which name and password do I use there?** Make up new ones for that server: not your
+Ubisoft (Ubi.com, Ubisoft Connect) login, since the servers are run by the community, and
+not a password you use elsewhere. The game's login protocol carries the password
+practically in the clear, so HommaRe sends a salted hash of it instead (scrypt, salted
+with the server and your name): neither the operator nor anyone watching the network sees
+the password itself, though a weak one can still be guessed from its hash. A server that
+sends a one-time challenge (`LoginNonce` in its `servers.ini`) gets that hash only the
+first time, then only answers to the challenge; `ubi-gs-logins.txt` in the profile folder
+remembers where you registered (no password in it). A server that knows nothing of this
+takes the hash for your password. Accounts made with the original game, which sends the
+password as typed, can't be used from HommaRe.
+
+**Playing online safely.** A ubi-gs server can be run by anyone, and local-network and
+online play puts you in touch with other players' copies. The 2006 client parses what a
+server or peer sends in old C++ that, in places, copied text into fixed stack buffers
+without a length check — a hostile server could send an over-long field and overflow one.
+HommaRe recompiles the game, so it replaces those copies with the game's own bounded
+reader: a field that is too long is cut to fit and the game carries on with the shortened
+text, rather than running off the end of a buffer. This covers every server-controlled
+string field the client reads into a fixed buffer: all 52 places in each game that used
+the unchecked copy — the player-info reply (the known overflow), the room list and member
+list, member-join, the proxy login reply, the module proxy list, the game-start,
+friend-update and ladder messages, and the lobby's other names and ids. A copy from
+anywhere else would be cut at 16 bytes and logged rather than left unchecked. The room
+list's first fields already had a length; the NAT and address replies carry no strings.
+Local-network and direct peer-to-peer play uses a different, binary protocol: its
+datagrams are read into a length-bounded buffer and parsed into fixed-size records, with
+no unbounded copy found. Even so, if you would rather not trust an unknown ubi-gs server
+or peer, stay on a local network or a VPN with people you know.
 
 ## What's next
 
-- GOG's other languages (German, French, Polish and more): their installers are needed to
-  check the files.
+- GOG's other languages (Czech, Spanish, Italian, Hungarian and Chinese): their installers
+  are needed to check the files.
 - iCloud saves sync
 
 There are no dates and no promises: it's ready when it's ready.
@@ -439,6 +482,19 @@ sudo dnf install clang lld innoextract glslc java-21-openjdk-devel nas-devel \
   pipewire-devel libdecor-devel liburing-devel
 ```
 
+On Debian 13, Ubuntu 24.04 or newer, and Raspberry Pi OS or a Chromebook's Linux
+environment based on them (the build is tried with clang 20; Debian 12's clang 14 may be
+too old for the kit's C++20, so there cross-compile as below):
+
+```bash
+sudo apt install clang lld make pkg-config python3-venv innoextract glslc openjdk-21-jdk \
+  libasound2-dev libpulse-dev libaudio-dev libjack-jackd2-dev libsndio-dev libx11-dev \
+  libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+  libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+  libdbus-1-dev libibus-1.0-dev libudev-dev libpipewire-0.3-dev libwayland-dev \
+  libdecor-0-dev liburing-dev mesa-vulkan-drivers
+```
+
 **2. Link your game and analyse it.**
 
 ```bash
@@ -466,6 +522,26 @@ it): the `HommaRe` executable with the expansions in `modules/`, started from th
 performance overlay (F11). Translation takes about 10–15 minutes per game and
 compilation about 25 minutes per game and platform on an M1 Max; later builds are
 incremental. Use `--regenerate` with `kit/tools/build.py` after changing the translator.
+
+**Linux on 64-bit ARM** (ARM Chromebooks, Snapdragon X laptops, Asahi Linux, Raspberry Pi 5)
+builds the same way on the ARM computer itself. An x86-64 Linux PC cross-compiles it with
+its own clang and lld, against a Debian 12 sysroot that a rootless podman (or docker)
+container makes; the container's apt runs under qemu-user (Fedora:
+`qemu-user-static-aarch64`, Debian and Ubuntu: `qemu-user-static`):
+
+```bash
+kit/tools/linux_sysroot.py --arch arm64     # once: kit/build/sysroots/debian12-arm64
+.venv/bin/python tools/build_app.py --target app --arch arm64
+```
+
+That leaves `build/linux-arm64/package/HommaRe` (and `HommaRe-linux-aarch64.tar.gz` beside
+it) for Debian 12, Ubuntu 22.04 or anything newer (glibc 2.35, GCC 12's libstdc++). The translation is plain C and shared
+with the x86-64 build, so nothing is translated twice; the same holds for `analysis/`, so
+the analysis can run on another computer if your Ghidra has no decompiler for ARM Linux.
+The ARM computer needs a Vulkan 1.3 driver, or Vulkan 1.1 with
+`VK_KHR_dynamic_rendering`: Mesa's Honeykrisp (Asahi), Turnip (Adreno), PanVK (Mali) or
+V3DV (Raspberry Pi). Kernels with 16 KiB pages (Asahi, as on the Mac) or 64 KiB pages
+are fine: the app works in the kernel's own page size.
 
 **Windows** is built on Linux or a Mac, from the same translation, with
 [llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases) (clang for Windows; download a

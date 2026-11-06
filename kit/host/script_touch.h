@@ -1,5 +1,6 @@
 // A smoke tap uses the app's gesture mapper, with the host clock and presents.
 #pragma once
+#include <stddef.h>
 #include "input_touch.h"
 
 class HostScriptTouch {

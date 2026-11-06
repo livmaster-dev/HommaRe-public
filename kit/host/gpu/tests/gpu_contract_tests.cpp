@@ -1,13 +1,19 @@
 // gpu_contract_tests.cpp - a backend against the gpu.h contract: bytes
 // round-trip, a clear and a draw land where expected, commands complete in
-// commit order, a compute kernel reads what a texture holds, and a native
+// commit order, wait() returns after their handlers, a completion handler may
+// own what it frees, a compute kernel reads what a texture holds, and a native
 // surface makes a swapchain. Compiled once per backend with
 // POP_GPU_TEST_BACKEND naming it; the factory override selects it.
 #include "../../../platform/os.h"
 #include "../gpu_factory.h"
 
+#include <atomic>
+#include <chrono>
 #include <math.h>
+#include <memory>
 #include <mutex>
+#include <stdlib.h>
+#include <thread>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
@@ -136,6 +142,77 @@ static void test_commit_order() {
     CHECK(ordered);
 }
 
+// wait() returns after the buffer's completion handlers have run, not only its
+// work: the draw and commit-order checks above read what the handlers wrote
+// right after wait(). The Vulkan reaper marked a buffer retired and woke
+// wait() before it ran the handlers, so those checks failed about one run in
+// forty on lavapipe; a handler slower than the wakeup shows it every time.
+// Vulkan only: the ordering is the reaper's; Metal's is waitUntilCompleted's.
+static void test_wait_covers_completion_handlers() {
+    if (strcmp(POP_GPU_TEST_BACKEND, "vulkan") != 0)
+        return;
+    auto d = create_default_device();
+    if (!d)
+        return;
+    // Shared with the handlers: one wait() returned early leaves its handler
+    // running past this round, and past this function.
+    auto handled = std::make_shared<std::atomic<int>>(0);
+    for (int round = 1; round <= 3; ++round) {
+        CommandBuffer cb = d->begin();
+        d->on_complete(cb, [handled](CommandStatus, double) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            ++*handled;
+        });
+        d->commit(cb);
+        d->wait(cb);
+        CHECK(handled->load() == round);
+    }
+}
+
+// A completion handler can hold the last reference to GPU resources: the
+// presenter's handler holds its frame, and a frame dropped while in flight has
+// no other owner. Releasing the handler then destroys textures through the
+// device, so the backend must have let go of its own lock by then. The Vulkan
+// reaper had not; it waited on itself and no command completed again.
+static void test_completion_handler_owns_resources() {
+    auto d = create_default_device();
+    if (!d)
+        return;
+    struct Owner {
+        Device *device = nullptr;
+        Texture texture;
+        std::atomic<bool> *released = nullptr;
+        ~Owner() {
+            device->destroy(texture);
+            released->store(true);
+        }
+    };
+    std::atomic<bool> released{false};
+    auto owner = std::make_shared<Owner>();
+    owner->device = d.get();
+    owner->texture = d->create_texture({4, 4, Format::BGRA8, UsageSampled});
+    owner->released = &released;
+    CommandBuffer cb = d->begin();
+    d->on_complete(cb, [owner](CommandStatus, double) {});
+    owner.reset();
+    d->commit(cb);
+    // Not d->wait(cb): with the lock still held it would wait forever too.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!released.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(released.load());
+    if (!released.load()) {
+        // A device cannot be torn down past a stuck completion thread.
+        fprintf(stderr, "the completion thread deadlocked releasing its handler\n");
+        fflush(stderr);
+        _Exit(1);
+    }
+    CommandBuffer next = d->begin();
+    d->commit(next);
+    d->wait(next);
+    CHECK(d->status(next) == CommandStatus::Completed);
+}
+
 static void test_compute_readback_kernel() {
     auto d = create_default_device();
     if (!d)
@@ -188,6 +265,9 @@ static void test_swapchain_from_surface() {
     CHECK(t && d->describe(t).width == 32 && d->describe(t).height == 16);
     d->release_drawable(s, t);
     CHECK(d->describe(t).width == 0);
+    // As a window host does: the window first, then the swapchain. X11 pins
+    // a swapchain to its window, so resizing only the swapchain kept 32x16.
+    test_resize_native_surface(surface, 64, 32);
     d->resize(s, 64, 32);
     Texture t2 = d->acquire(s);
     CHECK(t2 && d->describe(t2).width == 64);
@@ -195,6 +275,114 @@ static void test_swapchain_from_surface() {
     CHECK(d->refresh_period(s) > 0.0 && d->refresh_period(s) < 0.1);
     CHECK(d->now_seconds() > 0.0);
     d->destroy(s);
+}
+
+// A drawable acquired and then not drawn (the presenter's composite could not
+// be allocated) goes back to the swapchain with release_drawable, however often
+// that happens. The Vulkan backend once only forgot it: the swapchain ran out
+// of images after a few, and the next acquire waited forever. Both of its ways
+// back are covered: VK_EXT_swapchain_maintenance1's release, and presenting
+// the image (RECOMP_VULKAN_RELEASE_IMAGES=0, what a device without it does).
+static void test_released_drawables_return() {
+    for (const char *release : {"1", "0"}) {
+        os_setenv("RECOMP_VULKAN_RELEASE_IMAGES", release);
+        auto d = create_default_device();
+        if (!d)
+            break;
+        void *surface = test_native_surface(32, 16);
+        if (!surface) {
+            printf("no native surface here: drawable release test skipped\n");
+            break;
+        }
+        Swapchain s = d->create_swapchain(surface, 32, 16);
+        CHECK(s);
+        if (!s)
+            break;
+        constexpr int kRounds = 24; // several times any swapchain's image count
+        std::atomic<int> rounds{0};
+        std::atomic<bool> finished{false};
+        std::thread worker([&] {
+            for (int i = 0; i < kRounds; ++i) {
+                Texture t = d->acquire(s);
+                if (!t)
+                    break;
+                d->release_drawable(s, t);
+                ++rounds;
+            }
+            finished = true;
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (!finished && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CHECK(rounds.load() == kRounds);
+        if (!finished) {
+            fprintf(stderr, "acquire never returned after %d released drawables (release %s)\n",
+                    rounds.load(), release);
+            fflush(stderr);
+            _Exit(1);
+        }
+        worker.join();
+        d->destroy(s);
+    }
+    os_unsetenv("RECOMP_VULKAN_RELEASE_IMAGES");
+}
+
+// The presenter makes, resizes and destroys swapchains while other threads
+// (the game's renderer, transfers) keep submitting. The wait for a swapchain's
+// last use must hold the queue as those submits do - vkDeviceWaitIdle did not -
+// without waiting on the device's own lock in the wrong order.
+static void test_swapchain_churn_beside_submits() {
+    auto d = create_default_device();
+    if (!d)
+        return;
+    void *surface = test_native_surface(32, 16);
+    Swapchain probe = surface ? d->create_swapchain(surface, 32, 16) : Swapchain{};
+    if (!probe) {
+        printf("no swapchain on a test surface here: churn test skipped\n");
+        return;
+    }
+    d->destroy(probe);
+    std::atomic<bool> stop{false}, finished{false};
+    std::atomic<int> submits{0}, rounds{0};
+    std::thread submitter([&] {
+        while (!stop) {
+            CommandBuffer cb = d->begin();
+            d->commit(cb);
+            d->wait(cb);
+            ++submits;
+        }
+    });
+    std::thread churn([&] {
+        for (int i = 0; i < 20; ++i) {
+            Swapchain s = d->create_swapchain(surface, 32, 16);
+            if (!s)
+                break;
+            if (Texture t = d->acquire(s))
+                d->release_drawable(s, t);
+            test_resize_native_surface(surface, 48, 24);
+            d->resize(s, 48, 24);
+            if (Texture t = d->acquire(s))
+                d->release_drawable(s, t);
+            test_resize_native_surface(surface, 32, 16);
+            d->destroy(s);
+            ++rounds;
+        }
+        finished = true;
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (!finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (!finished) {
+        fprintf(stderr, "swapchain churn stuck after %d rounds beside %d submits\n", rounds.load(),
+                submits.load());
+        fflush(stderr);
+        _Exit(1);
+    }
+    stop = true;
+    churn.join();
+    submitter.join();
+    CHECK(rounds.load() == 20);
+    CHECK(submits.load() > 0);
 }
 
 int main() {
@@ -207,8 +395,12 @@ int main() {
     test_upload_readback();
     test_clear_and_compositor_draw();
     test_commit_order();
+    test_wait_covers_completion_handlers();
+    test_completion_handler_owns_resources();
     test_compute_readback_kernel();
     test_swapchain_from_surface();
+    test_released_drawables_return();
+    test_swapchain_churn_beside_submits();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     if (!g_failures)
         printf("all gpu %s tests passed\n", POP_GPU_TEST_BACKEND);

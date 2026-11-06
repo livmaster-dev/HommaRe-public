@@ -3289,12 +3289,14 @@ class Translator(object):
         if m == "CWDE":
             return ["c->r[0] = (uint32_t)(int32_t)(int16_t)c->r[0];"]
         if m in ("LDMXCSR", "STMXCSR"):
-            # The SSE control word. This kit models one rounding mode and
-            # masks every exception, which is what a guest sets it to; a store
-            # hands back exactly that.
+            # The SSE control word. Its rounding field is the host's rounding
+            # mode while translated code runs (x86.h, recomp_fp_guest), so a
+            # load takes effect at once; exceptions stay masked and the status
+            # flags are not accumulated, so a store hands back the control
+            # bits as last set.
             if m == "STMXCSR":
-                return [write_op(ops[0], 32, "0x1f80u")]
-            return [";"]
+                return [write_op(ops[0], 32, "c->mxcsr")]
+            return ["recomp_set_mxcsr(c, %s);" % read_op(ops[0], 32)]
 
         # ------------------------------------------------------- arith ----
         if m in ("ADD", "ADC", "SUB", "SBB", "CMP"):
@@ -3550,8 +3552,8 @@ class Translator(object):
             return self.emit_mmx(ins, m)
         # Two singles to two dwords in an MMn register: the conversions behind
         # Heroes V's SSE vertex path (0068f758), which the game takes once CPUID
-        # reports SSE. CVTPS2PI rounds as MXCSR says - always the default
-        # round-to-nearest-even here, LDMXCSR being a trap - and CVTTPS2PI
+        # reports SSE. CVTPS2PI rounds as MXCSR says - the host's mode while
+        # translated code runs (x86.h, recomp_fp_guest) - and CVTTPS2PI
         # truncates; either gives 0x80000000 for a NaN or a value out of range.
         if m in ("CVTPS2PI", "CVTTPS2PI"):
             dst, src = ops[0], ops[1]
@@ -3928,8 +3930,10 @@ class Translator(object):
             # Codecs call a bare `emms; ret` whatever CPUID said.
             return ["c->fpu_tag = 0xffffu;"]
         if m == "STMXCSR":
-            # No translated SSE arithmetic changes MXCSR, so expose its reset value.
-            return ["wr32(%s, 0x1f80u);" % addr_expr(ops[0])]
+            # The control bits as last set (see the LDMXCSR case above).
+            return ["wr32(%s, c->mxcsr);" % addr_expr(ops[0])]
+        if m == "LDMXCSR":
+            return ["recomp_set_mxcsr(c, rd32(%s));" % addr_expr(ops[0])]
         if m in ("FNCLEX", "FCLEX"):
             return ["c->fpu_sw &= (uint16_t)~0x80ffu;"]
 
@@ -4297,48 +4301,51 @@ class Translator(object):
             return ["fxam(c);"]
 
         # transcendental / misc --------------------------------------------
+        # The transcendentals go to recomp_libm_* (third_party/musl-libm), one
+        # implementation on every host: the host C libraries' sin, atan2,
+        # log2... differ in the last bit, which network play cannot afford.
         # Per the SDM, precision control affects only FADD/FSUB/FMUL/FDIV
         # (with their integer and popping forms) and FSQRT.  FRNDINT and the
         # transcendentals must keep the register's full precision, otherwise
         # PC=00 turns an exact 16777217 into 16777216.
         UNARY = {"FABS": "fabs(%s)", "FCHS": "-(%s)",
                  "FSQRT": "fx87(c, sqrt(%s))",
-                 "FSIN": "fx87_exact(c, sin(%s))",
-                 "FCOS": "fx87_exact(c, cos(%s))",
+                 "FSIN": "fx87_exact(c, recomp_libm_sin(%s))",
+                 "FCOS": "fx87_exact(c, recomp_libm_cos(%s))",
                  "FRNDINT": "fx87_exact(c, fround_cw(c, %s))"}
         if m in UNARY:
             return [setst(0, UNARY[m] % st(0))]
         if m == "FPTAN":
             L.append("double v_ = %s;" % st(0))
-            L.append(setst(0, "fx87_exact(c, tan(v_))"))
+            L.append(setst(0, "fx87_exact(c, recomp_libm_tan(v_))"))
             L.append("fpush(c, 1.0);")
             return L
         if m == "FSINCOS":
             L.append("double v_ = %s;" % st(0))
-            L.append(setst(0, "fx87_exact(c, sin(v_))"))
-            L.append("fpush(c, fx87_exact(c, cos(v_)));")
+            L.append(setst(0, "fx87_exact(c, recomp_libm_sin(v_))"))
+            L.append("fpush(c, fx87_exact(c, recomp_libm_cos(v_)));")
             return L
         if m == "FSCALE":
             return [setst(0, "fx87_exact(c, fscale(%s, %s))" % (st(0), st(1)))]
         if m == "FPATAN":
-            L.append(setst(1, "fx87_exact(c, atan2(%s, %s))" % (st(1), st(0))))
+            L.append(setst(1, "fx87_exact(c, recomp_libm_atan2(%s, %s))" % (st(1), st(0))))
             L.append("fdrop(c);")
             return L
         if m == "FYL2X":
-            L.append(setst(1, "fx87_exact(c, %s * log2(%s))" % (st(1), st(0))))
+            L.append(setst(1, "fx87_exact(c, %s * recomp_libm_log2(%s))" % (st(1), st(0))))
             L.append("fdrop(c);")
             return L
         if m == "FYL2XP1":
             # log2(x+1) loses every significant bit for small x; log1p keeps
             # them.  With ST(0) = 2^-54 and ST(1) = 1 the naive form returns 0.
-            L.append(setst(1, "fx87_exact(c, %s * log1p(%s) / M_LN2)"
+            L.append(setst(1, "fx87_exact(c, %s * recomp_libm_log1p(%s) / M_LN2)"
                            % (st(1), st(0))))
             L.append("fdrop(c);")
             return L
         if m == "F2XM1":
             # Likewise 2^x - 1: expm1(x * ln 2) is the same value without the
             # cancellation.
-            return [setst(0, "fx87_exact(c, expm1(%s * M_LN2))" % st(0))]
+            return [setst(0, "fx87_exact(c, recomp_libm_expm1(%s * M_LN2))" % st(0))]
         if m in ("FPREM", "FPREM1"):
             return [setst(0, "fprem_common(c, %s, %s, %d)"
                           % (st(0), st(1), 1 if m == "FPREM1" else 0))]

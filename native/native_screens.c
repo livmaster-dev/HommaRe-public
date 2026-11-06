@@ -467,12 +467,27 @@ const char *ns_label(Scratch *s, const char *path, const char *ru, const char *e
     return t[0] ? t : ns_tr(ru, en);
 }
 
+/* A Latin-1 or Latin Extended-A letter's capital (é, ł, ż, œ), else itself. */
+static unsigned latin_capital(unsigned c) {
+    if (c >= 0xe0 && c <= 0xfe && c != 0xf7)
+        return c - 0x20;
+    if ((c >= 0x139 && c <= 0x148) || (c >= 0x179 && c <= 0x17e)) /* capital first, odd */
+        return c & 1 ? c : c - 1;
+    if ((c >= 0x100 && c <= 0x137) || (c >= 0x14a && c <= 0x177)) /* capital first, even */
+        return c & 1 ? c - 1 : c;
+    return c;
+}
+
 /* `text`'s first letter as a capital (Latin or Cyrillic), in place. */
 char *ns_capital(char *text) {
     unsigned char *u = (unsigned char *)text;
     if (u[0] >= 'a' && u[0] <= 'z')
         u[0] = (unsigned char)(u[0] - 32);
-    else if (u[0] == 0xd0 && u[1] >= 0xb0 && u[1] <= 0xbf) /* а..п */
+    else if (u[0] >= 0xc3 && u[0] <= 0xc5 && u[1] >= 0x80 && u[1] <= 0xbf) { /* à..ž */
+        const unsigned c = latin_capital(((u[0] & 0x1fu) << 6) | (u[1] & 0x3fu));
+        u[0] = (unsigned char)(0xc0 | (c >> 6));
+        u[1] = (unsigned char)(0x80 | (c & 0x3f));
+    } else if (u[0] == 0xd0 && u[1] >= 0xb0 && u[1] <= 0xbf) /* а..п */
         u[1] = (unsigned char)(u[1] - 0x20);
     else if (u[0] == 0xd1 && u[1] >= 0x80 && u[1] <= 0x8f) { /* р..я */
         u[0] = 0xd0;
@@ -572,16 +587,6 @@ void ns_caption(Scratch *s, uint32_t iwindow, char *out, size_t cap) {
     ns_free(s, rd32(w));
 }
 
-/* ------------------------------------------------------------ language -- */
-
-/* The views' own words, in the game's language: Russian when the game's
- * texts are (its difficulty names tell), else English. */
-int ns_ru;
-
-const char *ns_tr(const char *ru, const char *en) {
-    return ns_ru ? ru : en;
-}
-
 void j_kv_str(Json *j, const char *key, const char *value) {
     j_str(j, key);
     j_lit(j, ":");
@@ -617,14 +622,19 @@ void j_button(Json *j, int first, const char *name, const char *label, int enabl
 
 extern const NsScreen ns_custom_create, ns_custom_wait, ns_hotseat_create, ns_hotseat_wait,
     ns_main_menu, ns_profile_name, ns_load_game, ns_hall_of_fame, ns_options, ns_duel, ns_duel3,
-    ns_esc_menu, ns_lan_name, ns_lan_lobby, ns_lan_duel_lobby, ns_mp_create, ns_lan_duel_create, ns_mp_wait, ns_save_game;
+    ns_esc_menu, ns_lan_name, ns_lan_lobby, ns_lan_duel_lobby, ns_mp_create, ns_lan_duel_create, ns_mp_wait, ns_save_game,
+    ns_ubi_login, ns_ubi_cdkey, ns_ubi_channels, ns_lan_load, ns_hotseat_load, ns_mp_load_wait,
+    ns_lan_save, ns_hotseat_save;
 /* Every game links them all; a screen without addresses in a game has a zero
  * vtable and is never matched. */
 static const NsScreen *const SCREENS[] = {&ns_custom_create, &ns_custom_wait, &ns_hotseat_create,
                                           &ns_hotseat_wait, &ns_main_menu, &ns_profile_name,
                                           &ns_load_game, &ns_hall_of_fame, &ns_options, &ns_duel,
                                           &ns_duel3, &ns_esc_menu, &ns_lan_name, &ns_lan_lobby,
-                                          &ns_lan_duel_lobby, &ns_mp_create, &ns_lan_duel_create, &ns_mp_wait, &ns_save_game};
+                                          &ns_lan_duel_lobby, &ns_mp_create, &ns_lan_duel_create, &ns_mp_wait, &ns_save_game,
+                                          &ns_ubi_login, &ns_ubi_cdkey, &ns_ubi_channels, &ns_lan_load,
+                                          &ns_hotseat_load, &ns_mp_load_wait, &ns_lan_save,
+                                          &ns_hotseat_save};
 enum { SCREEN_COUNT = sizeof SCREENS / sizeof SCREENS[0] };
 
 /* The table's row for IScreen* p, and the full screen object into *screen,

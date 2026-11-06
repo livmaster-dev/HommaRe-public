@@ -155,6 +155,9 @@ function(pop_link_gen target)
   foreach(aux_target ${POP_GEN_AUX_TARGETS})
     target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${aux_target}>")
   endforeach()
+  # FSIN, FPATAN... call the bundled libm (runtime/CMakeLists.txt); after the
+  # archives that use it, for linkers that read archives once in order.
+  target_link_libraries(${target} PRIVATE recomp_libm)
   target_include_directories(${target} PRIVATE ${POP_GEN_DIR})
   if(RECOMP_PGO STREQUAL "generate")
     target_link_options(${target} PRIVATE -fprofile-instr-generate)

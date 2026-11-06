@@ -96,6 +96,35 @@ def black_borders():
     return files
 
 
+# A screen's backdrop as a window of its own, centred: where Tribes of the
+# East's patch 3.1 took a root screen's background off the root (which stays
+# at the top left) and hung it on a centred 1024 x 768 child, so the picture
+# moves with the windows a2p1 re-anchored to the centre (the network game's
+# create screen, whose parchment carries its panels' frames).
+def backdrop_window(shared_leaf):
+    """The backdrop's window: centred, its size from `shared_leaf`."""
+    return _crlf(['<?xml version="1.0" encoding="UTF-8"?>', "<WindowSimple>",
+                  "\t<ClassTypeID>285700801</ClassTypeID>",
+                  '\t<Shared href="%s#xpointer(/WindowSimpleShared)"/>' % shared_leaf,
+                  "\t<Name/>", '\t<TooltipFileRef href=""/>', "\t<Visible>true</Visible>",
+                  "\t<Priority>0</Priority>", "\t<GameMessageReactions/>"]
+                 + _placement(0, 0, "ERA_CENTER", True, "ERA_CENTER", True, (0, 0), False, False)
+                 + ["\t<Enabled>true</Enabled>", "\t<TextString/>", "\t<relatedTexts/>",
+                    "\t<relatedTextures/>", "\t<Flags>", "\t\t<SuperActive>false</SuperActive>",
+                    "\t</Flags>", "</WindowSimple>"])
+
+
+def backdrop_shared(background):
+    """The backdrop's shared description: a 1024 x 768 window painted with
+    `background` (an href to the screen's own background texture)."""
+    return _crlf(['<?xml version="1.0" encoding="UTF-8"?>', "<WindowSimpleShared>",
+                  "\t<Crap>false</Crap>", "\t<Children/>", '\t<Background href="%s"/>' % background,
+                  "\t<Foreground/>", "\t<Flags>", "\t\t<Transparent>false</Transparent>", "\t</Flags>"]
+                 + _placement(0, 0, "EPA_LOW_END", False, "EPA_LOW_END", False, (1024, 768), False, False)
+                 + ["\t<ActiveArea/>", "\t<IgnoreDblClick>false</IgnoreDblClick>", "\t<ActiveMask/>",
+                    "</WindowSimpleShared>"])
+
+
 def types_fields():
     """The root screen's two fields (WindowScreen chunks 5 and 6), as items of
     its <Fields>, tab-indented for that place in types.xml, LF-terminated

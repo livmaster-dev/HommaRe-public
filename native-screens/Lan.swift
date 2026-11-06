@@ -79,12 +79,20 @@ struct ChatPanel: View {
 /// The game at work (joining, creating): its words over everything, no touch through.
 struct BusyOverlay: View {
     let text: String
+    /// The game's wait box's Cancel, when it has one.
+    var cancel: String? = nil
+    var onCancel: () -> Void = {}
     var body: some View {
         ZStack {
             Color.black.opacity(0.45).ignoresSafeArea()
             VStack(spacing: 12) {
                 ProgressView().tint(Theme.gold).controlSize(.large)
                 Text(text).font(Theme.heading(22)).foregroundStyle(Theme.gold)
+                if let cancel {
+                    Button(cancel, action: onCancel)
+                        .buttonStyle(PlateButtonStyle())
+                        .frame(width: 180)
+                }
             }
             .padding(24)
             .panel()
@@ -112,6 +120,11 @@ struct LanLobbyScreen: Decodable {
     let name: String?
     /// What the game is busy with (joining a game), when it is.
     let busy: String?
+    /// ubi.com: the player picked in the list (for their profile), -1 none;
+    /// absent where players are not picked (LAN).
+    let player_selected: Int?
+    /// What an empty games list says, when not the LAN search's words.
+    let empty: String?
     let buttons: [ScreenButton]
 
     struct Game: Decodable, Hashable {
@@ -168,7 +181,7 @@ struct LanLobbyView: View {
                     if screen.games.isEmpty {
                         VStack(spacing: 8) {
                             ProgressView().tint(Theme.gold)
-                            Text(store.tr("Ищем игры в этой сети…", "Looking for games on this network…"))
+                            Text(screen.empty ?? store.tr("Ищем игры в этой сети…", "Looking for games on this network…"))
                                 .font(Theme.body(15))
                                 .foregroundStyle(Theme.textDim)
                         }
@@ -245,11 +258,8 @@ struct LanLobbyView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(Array(screen.players.enumerated()), id: \.offset) { _, p in
-                            Label(p, systemImage: "person.fill")
-                                .font(Theme.body(15))
-                                .foregroundStyle(Theme.text)
-                                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                        ForEach(Array(screen.players.enumerated()), id: \.offset) { i, p in
+                            playerRow(p, index: i)
                         }
                     }
                     .padding(8)
@@ -261,6 +271,26 @@ struct LanLobbyView: View {
         .padding(8)
         .frame(maxHeight: .infinity)
         .panel()
+    }
+
+    /// A player; picked with a tap where the lobby picks players (ubi.com).
+    @ViewBuilder private func playerRow(_ name: String, index: Int) -> some View {
+        let row = Label(name, systemImage: "person.fill")
+            .font(Theme.body(15))
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        if let picked = screen.player_selected {
+            row
+                .foregroundStyle(index == picked ? Theme.gold : Theme.text)
+                .padding(.horizontal, 6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(index == picked ? Theme.rowSelected : .clear))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard index != picked else { return }
+                    store.send("select_player", ["index": index])
+                }
+        } else {
+            row.foregroundStyle(Theme.text)
+        }
     }
 
     /// The game's buttons: join first (gold), the rest as plates.
@@ -291,6 +321,11 @@ struct LanLobbyView: View {
 struct FormScreen: Decodable {
     let title: String
     let fields: [FormField]
+    /// A line under the fields (the ubi-gs login's advice).
+    let note: String?
+    /// What the game is busy with (logging in), and its wait box's Cancel.
+    let busy: String?
+    let busy_cancel: String?
     let buttons: [ScreenButton]
 }
 
@@ -304,6 +339,8 @@ struct FormField: Decodable, Hashable, Identifiable {
     let on: Bool?
     let index: Int?
     let values: [String]?
+    /// A text field's characters, when the game's edit line takes only these.
+    let allowed: String?
 }
 
 extension FormScreen: ScreenDocument {
@@ -320,6 +357,14 @@ struct FormView: View {
             ScrollView {
                 VStack(spacing: 6) {
                     ForEach(screen.fields) { f in FormFieldRow(field: f) }
+                    if let note = screen.note {
+                        Text(note)
+                            .font(Theme.body(13))
+                            .foregroundStyle(Theme.textDim)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 2)
+                    }
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
@@ -343,6 +388,110 @@ struct FormView: View {
         .panel()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 8)
+        .overlay {
+            if let busy = screen.busy {
+                BusyOverlay(text: busy, cancel: screen.busy_cancel) {
+                    store.send("press", ["name": "busy_cancel"])
+                }
+            }
+        }
+    }
+}
+
+// MARK: - table
+
+/// A list to pick a row from (the ubi-gs channels), its buttons below.
+struct TableScreen: Decodable {
+    let title: String
+    let columns: [String]
+    let rows: [[String]]
+    let selected: Int
+    let busy: String?
+    let busy_cancel: String?
+    let buttons: [ScreenButton]
+}
+
+extension TableScreen: ScreenDocument {
+    func view() -> some View { TableView(screen: self) }
+}
+
+struct TableView: View {
+    let screen: TableScreen
+    @EnvironmentObject var store: ScreenStore
+    @State private var pending: Int?
+
+    private var selected: Int { pending ?? screen.selected }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(screen.title).font(Theme.heading(24)).foregroundStyle(Theme.gold)
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    if screen.rows.isEmpty {
+                        ProgressView().tint(Theme.gold).frame(maxWidth: .infinity, minHeight: 100)
+                    }
+                    ForEach(Array(screen.rows.enumerated()), id: \.offset) { i, row in
+                        tableRow(row, selected: i == selected)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard i != selected else { return }
+                                pending = i
+                                store.send("select", ["index": i])
+                            }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            HStack(spacing: 10) {
+                ForEach(screen.buttons.filter { $0.name != "join" }, id: \.name) { b in
+                    Button { store.send("press", ["name": b.name]) } label: {
+                        Text(b.label).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PlateButtonStyle())
+                    .disabled(!b.enabled)
+                }
+                if let join = screen.buttons[named: "join"] {
+                    Button(join.label) { store.send("press", ["name": "join"]) }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(!join.enabled || selected < 0)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 520)
+        .panel()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 8)
+        .onChange(of: screen.selected) { pending = nil }
+        .overlay {
+            if let busy = screen.busy {
+                BusyOverlay(text: busy, cancel: screen.busy_cancel) {
+                    store.send("press", ["name": "busy_cancel"])
+                }
+            }
+        }
+    }
+
+    /// A row: its first cell large, the others small beneath, labelled.
+    private func tableRow(_ row: [String], selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(row.first ?? "")
+                .font(Theme.heading(19))
+                .foregroundStyle(selected ? Theme.gold : Theme.text)
+                .lineLimit(1)
+            Text(row.dropFirst().enumerated().compactMap { i, v in
+                v.isEmpty ? nil : "\(screen.columns[safe: i + 1] ?? ""): \(v)"
+            }.joined(separator: "  ·  "))
+                .font(Theme.body(13))
+                .foregroundStyle(Theme.textDim)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Theme.rowSelected : Theme.row))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Theme.gold : .clear, lineWidth: 1.5))
     }
 }
 
@@ -385,7 +534,13 @@ struct FormFieldRow: View {
             default:
                 VStack(alignment: .leading, spacing: 3) {
                     Text(field.label).font(Theme.body(13)).foregroundStyle(Theme.textDim)
-                    let binding = Binding(get: { draft ?? field.text ?? "" }, set: { draft = $0 })
+                    let binding = Binding(get: { draft ?? field.text ?? "" }, set: { typed in
+                        if let allowed = field.allowed {
+                            draft = String(typed.filter { allowed.contains($0) })
+                        } else {
+                            draft = typed
+                        }
+                    })
                     Group {
                         if field.kind == "secret" {
                             SecureField("", text: binding)

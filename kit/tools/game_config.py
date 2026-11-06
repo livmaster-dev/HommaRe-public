@@ -275,6 +275,16 @@ def load(game_dir):
             for f, kv in edits.items()) or any(
             c in s for f, kv in edits.items() for s in [f, *kv, *kv.values()] for c in "|;\n"):
         raise ValueError('%s: [ios] cfg_defaults must map file paths to {key = "value"} tables' % source)
+    # cfg_seeds: a config file an install may lack, made from another before
+    # cfg_defaults are set (the English Heroes V has no user_a1.cfg, which
+    # Hammers of Fate reads, the same file as its user.cfg in the Russian one):
+    # { "profiles/default_profile/user_a1.cfg" = "profiles/default_profile/user.cfg" }.
+    seeds = ios.setdefault("cfg_seeds", {})
+    if not isinstance(seeds, dict) or not all(
+            isinstance(f, str) and isinstance(s, str) and f and s and
+            ".." not in f.split("/") and ".." not in s.split("/") for f, s in seeds.items()) or any(
+            c in s for f, src in seeds.items() for s in (f, src) for c in "|;\n"):
+        raise ValueError('%s: [ios] cfg_seeds must map file paths to the file each is made from' % source)
     # [texts]: words of the game's own texts the port changes ("Exit to Windows"
     # on a Mac, a sound's volume in its .xdb), rebuilt from the player's install
     # into a pak the game loads over its own (host/text_overrides.cpp).

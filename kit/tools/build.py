@@ -51,6 +51,39 @@ def default_preset(system=None):
     return {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}[system or platform.system()]
 
 
+# --arch: Linux for another processor, cross-compiled with the host's clang
+# against a sysroot (cmake/toolchains/linux-aarch64.cmake). Each has its
+# presets, its folder under the build root (CMakeLists.txt POP_BUILD_DIR) and
+# the name its tarball carries. The translation is shared: it is plain C.
+LINUX_ARCHES = {"arm64": {"preset": "linux-arm64", "machines": {"aarch64", "arm64"}, "tarball": "aarch64"}}
+ARCH_ALIASES = {"aarch64": "arm64"}
+
+
+def cross_arch(arch, machine=None):
+    """The --arch to cross-compile for, or None when it is this machine's own."""
+    if not arch:
+        return None
+    arch = ARCH_ALIASES.get(arch, arch)
+    if (machine or platform.machine()).lower() in LINUX_ARCHES[arch]["machines"]:
+        return None
+    return arch
+
+
+def linux_sysroot(arch, given=None):
+    """The sysroot a cross build compiles against: --sysroot, $RECOMP_LINUX_SYSROOT, or the
+    one tools/linux_sysroot.py leaves in the kit's build/sysroots."""
+    path = given or os.environ.get("RECOMP_LINUX_SYSROOT") or ROOT / "build/sysroots" / ("debian12-" + arch)
+    return Path(path).resolve()
+
+
+def cross_preset_arch(preset):
+    """The --arch a desktop preset cross-compiles for (linux-arm64-stub: arm64), else None."""
+    for arch, info in LINUX_ARCHES.items():
+        if preset == info["preset"] or preset.startswith(info["preset"] + "-"):
+            return arch
+    return None
+
+
 def preset_name(preset, config, stub=False, target=None):
     """Debug, stub, mobile and web builds use separate presets and binary directories."""
     if target in OWN_PRESET:
@@ -422,6 +455,12 @@ def parse_args(argv, system=None):
                              "a .profdata path optimizes with that profile; empty (default) is a plain build")
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 8))
     parser.add_argument("--preset", default=default_preset(system), help="CMake configure preset")
+    parser.add_argument("--arch", choices=sorted(set(LINUX_ARCHES) | set(ARCH_ALIASES)), default=None,
+                        help="Linux: cross-compile for this processor (linux-<arch> preset, outputs in "
+                             "<build root>/linux-<arch>); on that processor itself, the plain build")
+    parser.add_argument("--sysroot", type=Path, default=None,
+                        help="--arch: the target's sysroot (default $RECOMP_LINUX_SYSROOT, else "
+                             "kit/build/sysroots/debian12-<arch> from tools/linux_sysroot.py)")
     parser.add_argument("--config", choices=("Release", "Debug"), default="Release")
     parser.add_argument("--game-dir", type=Path, default=ROOT / "games/stub",
                         help="Absolute directory holding the game.toml this build is for (default: the kit's stub game)")
@@ -468,6 +507,17 @@ def parse_args(argv, system=None):
         parser.error("--target web needs the Emscripten SDK's environment (source emsdk_env.sh)")
     if args.jobs < 1:
         parser.error("--jobs must be at least 1")
+    args.cross = None
+    if args.arch:
+        if (system or platform.system()) != "Linux" or args.target in OWN_PRESET:
+            parser.error("--arch cross-compiles the Linux desktop targets, on Linux")
+        args.cross = cross_arch(args.arch)
+        if args.cross:
+            args.preset = LINUX_ARCHES[args.cross]["preset"]
+            args.sysroot = linux_sysroot(args.cross, args.sysroot)
+            if not (args.sysroot / "usr/include").is_dir():
+                parser.error("No %s sysroot at %s: make one with tools/linux_sysroot.py --arch %s, "
+                             "or pass --sysroot" % (args.cross, args.sysroot, args.cross))
     args.build_root = build_root_for(args.game_dir)
     return args, parser
 
@@ -490,6 +540,8 @@ def main():
     module_targets = ["recomp_game"] if args.game_modules and args.target in ("app", "ios", "ios-sim") else []
     pgo = args.pgo if args.pgo in ("", "generate") else str(Path(args.pgo).resolve())
     defines.append("-DRECOMP_PGO=" + pgo)
+    if args.cross:
+        defines.append("-DRECOMP_LINUX_SYSROOT=" + args.sysroot.as_posix())
     try:
         # The lock lives at <build root>/recomp/.lock: BuildLock joins build/recomp/.lock onto its argument.
         with buildlock.BuildLock(args.build_root.parent, "tools/build.py"):
@@ -554,15 +606,20 @@ def main():
                                                    game_cfg=cfg if args.push_game else None,
                                                    build_root=args.build_root)
                 system = "Windows" if preset.startswith("windows-cross") else platform.system()
+                arch = cross_preset_arch(preset)
                 if args.target == "app" and not args.stub and system in {"Linux", "Windows"}:
                     # The desktop Ninja presets write OUTPUT_NAME into POP_OUT.
                     desktop_root = args.build_root / "windows" if preset.startswith("windows-cross") else args.build_root
+                    if arch:
+                        desktop_root = args.build_root / ("linux-" + arch)
                     suffix = ".exe" if system == "Windows" else ""
                     binary = desktop_root / "recomp" / (cfg["game"]["app_name"] + suffix)
                     if not binary.is_file():
                         parser.exit(1, "No desktop app binary at %s after the build\n" % binary)
+                    named = {"arch": LINUX_ARCHES[arch]["tarball"]} if arch else {}
                     packaged = package_desktop.stage(binary, cfg, desktop_root / "package",
-                                                     system=system, build_dir=build_dir, game_dir=args.game_dir)
+                                                     system=system, build_dir=build_dir, game_dir=args.game_dir,
+                                                     **named)
                     print("Packaged %s" % packaged)
     except subprocess.CalledProcessError as error:
         parser.exit(error.returncode or 1, "Build failed; see the compiler output above.\n")

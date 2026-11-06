@@ -5,7 +5,8 @@
 // GetDeviceState reports the host's current state. GetDeviceData replays the
 // buffered events the shim derives by diffing successive host states, which is
 // what a real buffered device delivers and what a guest that asks for relative
-// mouse motion needs.
+// mouse motion needs. A guest that sets DIPROPAXISMODE_ABS gets the mouse's
+// axes as positions instead, in both, as Windows reports them.
 #include "com.h"
 #include "dinput_joystick.h"
 #include "dx.h"
@@ -60,6 +61,7 @@ const uint32_t DIPROP_BUFFERSIZE = 1;
 const uint32_t DIPROP_AXISMODE = 2;
 const uint32_t DIPROP_GRANULARITY = 3;
 const uint32_t DIPROP_RANGE = 4;
+const uint32_t DIPROPAXISMODE_ABS = 0, DIPROPAXISMODE_REL = 1;
 
 // The byte offsets a mouse event reports in dwOfs, matching DIMOUSESTATE.
 const uint32_t DIMOFS_X = 0;
@@ -148,6 +150,24 @@ int32_t event_data_signed(uint32_t e) {
     return ((int32_t)(e << 8)) >> 8;
 }
 
+// The mouse axis a queued event moves (0 x, 1 y, 2 the wheel), -1 for a button.
+int event_axis(const ComObj *d, uint32_t e) {
+    const uint32_t ofs = event_ofs(e);
+    return d->dev_type == DIDEVTYPE_MOUSE && ofs <= DIMOFS_Z && ofs % 4 == 0 ? (int)(ofs / 4) : -1;
+}
+
+// Takes the first n queued events off the buffer, read or not. The position
+// the axes report moves on by their motion either way: after an overflow or a
+// flush the next event in absolute mode still says where the mouse is.
+void forget_events(ComObj *d, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        const int axis = event_axis(d, d->events[i]);
+        if (axis >= 0)
+            d->sent[axis] += (uint32_t)event_data_signed(d->events[i]);
+    }
+    d->events.erase(d->events.begin(), d->events.begin() + (ptrdiff_t)n);
+}
+
 // One read of the host state serves every device.
 //
 // host_input_state CONSUMES the mouse deltas: the host clears them once read,
@@ -210,6 +230,11 @@ void poll_device(ComObj *d) {
 
     host_input_pointer_correction(&dx, &dy);
 
+    // The position absolute mode reports: unsigned, so it wraps as Windows'
+    // does rather than overflowing.
+    d->pos[0] += (uint32_t)dx;
+    d->pos[1] += (uint32_t)dy;
+    d->pos[2] += (uint32_t)dz;
     if (dx && d->buffer_size)
         d->events.push_back(pack_event(DIMOFS_X, dx));
     if (dy && d->buffer_size)
@@ -235,8 +260,7 @@ void poll_device(ComObj *d) {
     // GetDeviceData has to report DI_BUFFEROVERFLOW; capping here keeps the
     // vector bounded when the guest never drains it.
     if (d->buffer_size && d->events.size() > d->buffer_size) {
-        size_t drop = d->events.size() - d->buffer_size;
-        d->events.erase(d->events.begin(), d->events.begin() + (ptrdiff_t)drop);
+        forget_events(d, d->events.size() - d->buffer_size);
         log_once("dinput.overflow", "dinput: the %u-event buffer overflowed; oldest events dropped",
                  d->buffer_size);
     }
@@ -320,7 +344,7 @@ void Device_GetProperty(X86 *c) {
         return;
     }
     if (prop == DIPROP_AXISMODE) {
-        wr32(ph + DIPROPDWORD_OFF_dwData, d->axis_mode_absolute);
+        wr32(ph + DIPROPDWORD_OFF_dwData, d->axis_absolute ? DIPROPAXISMODE_ABS : DIPROPAXISMODE_REL);
         com_ret(c, DI_OK);
         return;
     }
@@ -356,13 +380,17 @@ void Device_SetProperty(X86 *c) {
         if (n > 4096)
             n = 4096;
         d->buffer_size = n;
-        d->events.clear();
+        forget_events(d, d->events.size());
         LOGV("dinput: buffer size %u on device type %u", n, d->dev_type);
         com_ret(c, DI_OK);
         return;
     }
     if (prop == DIPROP_AXISMODE) {
-        d->axis_mode_absolute = rd32(ph + DIPROPDWORD_OFF_dwData);
+        // Heroes V sets DIPROPAXISMODE_ABS on the mouse and takes each event's
+        // dwData less the one before it as the step (006b8710). Relative
+        // values there turned a run of wheel notches into no zoom at all and
+        // a notch after a double one into a step back.
+        d->axis_absolute = rd32(ph + DIPROPDWORD_OFF_dwData) == DIPROPAXISMODE_ABS;
         com_ret(c, DI_OK);
         return;
     }
@@ -391,7 +419,7 @@ void Device_Acquire(X86 *c) {
     d->acquired = true;
     // Acquiring resets the event stream, so the first read after acquisition
     // reports the state now rather than a backlog from before.
-    d->events.clear();
+    forget_events(d, d->events.size());
     memset(d->last_keys, 0, sizeof d->last_keys);
     memset(d->last_buttons, 0, sizeof d->last_buttons);
     if (is_joystick(d))
@@ -410,7 +438,7 @@ void Device_Unacquire(X86 *c) {
         return;
     }
     d->acquired = false;
-    d->events.clear();
+    forget_events(d, d->events.size());
     com_ret(c, DI_OK);
 }
 
@@ -453,11 +481,16 @@ void Device_GetDeviceState(X86 *c) {
                  size, (uint32_t)DIMOUSESTATE_SIZE, (uint32_t)DIMOUSESTATE2_SIZE);
     }
     gm_zero(out, size);
-    // The deltas poll_device just consumed are this frame's motion.
+    // The deltas poll_device just consumed are this frame's motion; in
+    // absolute mode the axes report where all the motion so far took them.
     if (size >= 12) {
-        wr32(out + DIMS_OFF_lX, (uint32_t)d->last_x);
-        wr32(out + DIMS_OFF_lY, (uint32_t)d->last_y);
-        wr32(out + DIMS_OFF_lZ, (uint32_t)d->last_z);
+        wr32(out + DIMS_OFF_lX, d->axis_absolute ? d->pos[0] : (uint32_t)d->last_x);
+        wr32(out + DIMS_OFF_lY, d->axis_absolute ? d->pos[1] : (uint32_t)d->last_y);
+        wr32(out + DIMS_OFF_lZ, d->axis_absolute ? d->pos[2] : (uint32_t)d->last_z);
+        static const bool trace_wheel = recomp_env("TRACE_WHEEL") != nullptr;
+        if (trace_wheel && d->last_z)
+            fprintf(stderr, "[wheel] dinput GetDeviceState lZ %+d%s\n", d->last_z,
+                    d->axis_absolute ? " (absolute mode)" : "");
     }
     uint32_t nbuttons = size >= DIMOUSESTATE2_SIZE ? 8u : 4u;
     for (uint32_t b = 0; b < nbuttons && DIMS_OFF_rgbButtons + b < size; ++b)
@@ -520,6 +553,9 @@ void Device_GetDeviceData(X86 *c) {
             return;
         }
         uint32_t now = host_millis();
+        // Where each axis stands after the event at hand: absolute mode's dwData.
+        uint32_t at[3];
+        memcpy(at, d->sent, sizeof at);
         for (uint32_t i = 0; i < n; ++i) {
             uint32_t e = d->events[i];
             uint32_t a = out + i * objsize;
@@ -532,9 +568,21 @@ void Device_GetDeviceData(X86 *c) {
             uint32_t data = (ofs == DIMOFS_X || ofs == DIMOFS_Y || ofs == DIMOFS_Z)
                                 ? (uint32_t)event_data_signed(e)
                                 : event_data(e);
+            const int axis = event_axis(d, e);
+            if (axis >= 0) {
+                at[axis] += data;
+                if (d->axis_absolute)
+                    data = at[axis];
+            }
             wr32(a + DIDOD_OFF_dwData, data);
             wr32(a + DIDOD_OFF_dwTimeStamp, now);
             wr32(a + DIDOD_OFF_dwSequence, ++d->sequence);
+            static const bool trace_wheel = recomp_env("TRACE_WHEEL") != nullptr;
+            if (trace_wheel && axis == 2 && d->axis_absolute)
+                fprintf(stderr, "[wheel] dinput GetDeviceData z %+d, position %d\n",
+                        event_data_signed(e), (int32_t)data);
+            else if (trace_wheel && axis == 2)
+                fprintf(stderr, "[wheel] dinput GetDeviceData z %+d\n", (int32_t)data);
             static const bool trace = recomp_env("TRACE_POINTER") != nullptr;
             if (trace && ofs >= DIMS_OFF_rgbButtons)
                 fprintf(stderr, "[dinput-button] ofs %u data %08x seq %u\n", ofs, data,
@@ -548,7 +596,7 @@ void Device_GetDeviceData(X86 *c) {
     }
     wr32(inout, n);
     if (!peek && n)
-        d->events.erase(d->events.begin(), d->events.begin() + (ptrdiff_t)n);
+        forget_events(d, n); // read now, and the axes' reported position with them
     com_ret(c, DI_OK);
 }
 
@@ -1083,6 +1131,17 @@ extern "C" void dinput_discard_mouse_motion(uint32_t device) {
     // A keyboard poll may already have drained the host's motion into this
     // shared accumulator; a mouse Poll may also have queued it on the device.
     g_host_in.acc_dx = g_host_in.acc_dy = 0;
+    // Nor does absolute mode's position keep the motion: what a buffered
+    // device still queues, what an unbuffered one holds for GetDeviceState.
+    if (!mouse->buffer_size) {
+        mouse->pos[0] -= (uint32_t)mouse->last_x;
+        mouse->pos[1] -= (uint32_t)mouse->last_y;
+    }
+    for (uint32_t event : mouse->events) {
+        const int axis = event_axis(mouse, event);
+        if (axis == 0 || axis == 1)
+            mouse->pos[axis] -= (uint32_t)event_data_signed(event);
+    }
     mouse->last_x = mouse->last_y = 0;
     auto &events = mouse->events;
     events.erase(std::remove_if(events.begin(), events.end(),

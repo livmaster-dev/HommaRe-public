@@ -5763,6 +5763,119 @@ file	UI/MPCreate.(WindowScreen).xdb	35d79cf9b3155ebf37f9ceaa6c4d5c45577f5ed55705
 @	57	0
 *	<HorAlign>ALIGN_SCREEN</HorAlign>
 *	<VerAlign>ALIGN_SCREEN</VerAlign>
+file	UI/MPCreate.(WindowScreenShared).xdb	e50c05e8c8294e3b7245340d3b8271be29c4cc5b91d98ec3b89feb37abc84219
+@	9	0
+*		<Item href="/UI/MPCreate/Backdrop-Wide.(WindowSimple).xdb#xpointer(/WindowSimple)"/>
+@	10	1
+*	<Background/>
+new	UI/MPCreate/Backdrop-Wide.(WindowSimple).xdb
+*<?xml version="1.0" encoding="UTF-8"?>
+*<WindowSimple>
+*	<ClassTypeID>285700801</ClassTypeID>
+*	<Shared href="Backdrop-Wide.(WindowSimpleShared).xdb#xpointer(/WindowSimpleShared)"/>
+*	<Name/>
+*	<TooltipFileRef href=""/>
+*	<Visible>true</Visible>
+*	<Priority>0</Priority>
+*	<GameMessageReactions/>
+*	<Placement>
+*		<Position>
+*			<First>
+*				<x>0</x>
+*				<y>0</y>
+*			</First>
+*			<Second>false</Second>
+*		</Position>
+*		<VerAllign>
+*			<First>ERA_CENTER</First>
+*			<Second>true</Second>
+*		</VerAllign>
+*		<HorAllign>
+*			<First>ERA_CENTER</First>
+*			<Second>true</Second>
+*		</HorAllign>
+*		<Size>
+*			<First>
+*				<x>0</x>
+*				<y>0</y>
+*			</First>
+*			<Second>false</Second>
+*		</Size>
+*		<LowerMargin>
+*			<First>
+*				<x>0</x>
+*				<y>0</y>
+*			</First>
+*			<Second>false</Second>
+*		</LowerMargin>
+*		<UpperMargin>
+*			<First>
+*				<x>0</x>
+*				<y>0</y>
+*			</First>
+*			<Second>false</Second>
+*		</UpperMargin>
+*	</Placement>
+*	<Enabled>true</Enabled>
+*	<TextString/>
+*	<relatedTexts/>
+*	<relatedTextures/>
+*	<Flags>
+*		<SuperActive>false</SuperActive>
+*	</Flags>
+*</WindowSimple>
+new	UI/MPCreate/Backdrop-Wide.(WindowSimpleShared).xdb
+*<?xml version="1.0" encoding="UTF-8"?>
+*<WindowSimpleShared>
+*	<Crap>false</Crap>
+*	<Children/>
+*	<Background href="/UI/MPCreate/Back.(BackgroundSimpleTexture).xdb#xpointer(/BackgroundSimpleTexture)"/>
+*	<Foreground/>
+*	<Flags>
+*		<Transparent>false</Transparent>
+*	</Flags>
+*	<Placement>
+*		<Position>
+*			<First>
+*				<x>0</x>
+*				<y>0</y>
+*			</First>
+*			<Second>false</Second>
+*		</Position>
+*		<VerAllign>
+*			<First>EPA_LOW_END</First>
+*			<Second>false</Second>
+*		</VerAllign>
+*		<HorAllign>
+*			<First>EPA_LOW_END</First>
+*			<Second>false</Second>
+*		</HorAllign>
+*		<Size>
+*			<First>
+*				<x>1024</x>
+*				<y>768</y>
+*			</First>
+*			<Second>false</Second>
+*		</Size>
+*		<LowerMargin>
+*			<First>
+*				<x>0</x>
+*				<y>0</y>
+*			</First>
+*			<Second>false</Second>
+*		</LowerMargin>
+*		<UpperMargin>
+*			<First>
+*				<x>0</x>
+*				<y>0</y>
+*			</First>
+*			<Second>false</Second>
+*		</UpperMargin>
+*	</Placement>
+*	<ActiveArea/>
+*	<IgnoreDblClick>false</IgnoreDblClick>
+*	<ActiveMask/>
+*</WindowSimpleShared>
 file	UI/MPCreate/Header.(WindowTextView).xdb	3c42e5f5f1a2ad782f250ef72287aa5cac8f0752fea7fef27bd27cc0fa4093c1
 @	9	37
 +	<Placement>

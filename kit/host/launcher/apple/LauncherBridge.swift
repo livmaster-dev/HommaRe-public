@@ -138,7 +138,14 @@ public func recompNativeLauncherBegin(_ window: UnsafeMutableRawPointer?, _ conf
         // RECOMP_LAUNCHER_DUMP_EVERY seconds (default 5) while the launcher is up.
         // RECOMP_LAUNCHER_GAMES_DIR=<dir> stands in for the app's Games folder
         // and is then the only place the launcher looks (LauncherModel).
+        // RECOMP_LAUNCHER_GOG_PLAN=<installer id>[:<language>] logs what a
+        // download from GOG.com would bring (public data, no sign-in), and
+        // RECOMP_LAUNCHER_GOG=1 opens the GOG.com panel.
         let env = ProcessInfo.processInfo.environment
+        if let spec = env["RECOMP_LAUNCHER_GOG_PLAN"], !spec.isEmpty {
+            for one in spec.split(separator: ",") { model.logGogPlan(String(one)) }
+        }
+        if env["RECOMP_LAUNCHER_GOG"] == "1" { model.showGog() }
         let dump = env["RECOMP_LAUNCHER_DUMP"] ?? ""
         let autoplay = (env["RECOMP_LAUNCHER_AUTOPLAY"] ?? "0") != "0"
         let installSetup = env["RECOMP_LAUNCHER_INSTALL"] ?? ""

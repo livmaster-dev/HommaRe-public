@@ -19,6 +19,7 @@
 // cannot be bounded and the guest thread must keep yielding meanwhile; a
 // request the player abandons is left to finish (or time out) on its own.
 #include "curl_http.h"
+#include "gs_login.h"
 #include "http_get.h"
 
 #include "guest.h"
@@ -185,6 +186,8 @@ struct Attempt {
 // The gsconnect request: ask, try, ask again with the reason until a server
 // answers or the player gives up.
 uint32_t gsconnect_request(X86 *c, const Easy &e, const std::string &target) {
+    // A login token only for the server this request reaches (gs_login.h).
+    gs_login::clear();
     const CurlServerChooser *chooser = g_chooser;
     if (!chooser) {
         LOGW("libcurl: %s is a GS server list, and nothing here can ask which server to use",
@@ -256,7 +259,15 @@ uint32_t gsconnect_request(X86 *c, const Easy &e, const std::string &target) {
             continue;
         }
         LOGW("libcurl: %s answered with %zu bytes", name.c_str(), r.body.size());
+        // The server's identity and its login nonce, from the same servers.ini
+        // the game reads (it looks its own keys up and passes over these).
+        const gs_login::ServersIni ini = gs_login::parse_servers_ini(r.body);
+        gs_login::set_server(ini.server_id.empty() ? gs_login::address_id(server.host, server.port)
+                                                   : ini.server_id,
+                             ini.nonce);
         const uint32_t code = deliver(c, e, r.body);
+        if (code != CURLE_OK)
+            gs_login::clear();
         chooser->end();
         if (code == CURLE_OK && chooser->used)
             chooser->used(name.c_str());

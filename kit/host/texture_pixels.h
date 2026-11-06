@@ -1,5 +1,6 @@
 #pragma once
 #include "../dx/host_api.h"
+#include <stddef.h>
 #include <cstdint>
 #include <vector>
 

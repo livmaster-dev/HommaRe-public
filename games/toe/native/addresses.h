@@ -64,6 +64,7 @@
 #define HOMM5_RET_ANCHOR_X 0x00e35733
 #define HOMM5_RET_ANCHOR_Y 0x00e3577d /* and for y (the dragged icon, native/ui_bounds.c; the phone rows, native/phone_layout.c) */
 #define HOMM5_FN_COUNTER_MAKE fn_00739b00 /* a battle's stack counter made (the base game's 008333f0) */
+#define HOMM5_FN_SET_PLACEMENT fn_00e35920 /* a window's SetPlacement (the base game's 00e3b9f0) */
 
 /* The phone's interface (native/phone_hud.c), from the base game's through
  * byte-identical functions, RTTI and the classes' sub-object offsets
@@ -287,6 +288,33 @@ void fn_00557470(X86 *c);
 #define NS_LOAD_CLOSE      0x00644510 /* V 14 votes, identical body */
 #define NS_LOAD_TYPE       0x00629930 /* V hash */
 #define NS_LOAD_SIZE       0x00629e30 /* V hash */
+/* A LAN game's and a hot seat's load screens (CLoadScreen<SLanSaveHeaderInfo>,
+ * CLoadScreen<SHotSeatHeaderInfo>), also at +0x2b4 with the same fields; their
+ * headers are longer (research notes lan-load-toe-map.md). */
+#define NS_VT_LOAD_LAN     0x00f58578
+#define NS_LOAD_LAN_CLICK  0x00649180
+#define NS_LOAD_LAN_LOAD   0x0062e5a0
+#define NS_LOAD_LAN_CONFIRMED 0x00643d00
+#define NS_L_LAN_ROW       0x298
+#define NS_VT_LOAD_HS      0x00f57534
+#define NS_LOAD_HS_CLICK   0x006490a0
+#define NS_LOAD_HS_LOAD    0x0062ecd0
+#define NS_LOAD_HS_CONFIRMED 0x0062ee60
+#define NS_L_HS_ROW        0x94
+/* The in-game Save screens, CSaveScreen<SHeaderInfo>, <SLanSaveHeaderInfo> and
+ * <SHotSeatHeaderInfo>: 4 bytes longer than the base game's (a LAN save
+ * callback at +0x2b0), so their IScreen is at +0x2c8; the name field and the
+ * NS_L_* fields are the load screen's, the row click and delete the load
+ * screen's of the kind (research notes save-screens-toe-map.md). */
+#define NS_VT_SAVE         0x00f5720c
+#define NS_SUB_SAVE        0x2c8
+#define NS_SAVE_SAVE       0x0062dfc0
+#define NS_VT_SAVE_LAN     0x00f58640
+#define NS_SAVE_LAN_SAVE   0x00644b20
+#define NS_VT_SAVE_HS      0x00f5778c
+#define NS_SAVE_HS_SAVE    0x0062f570
+#define NS_SAVE_CAN        0x00629ef0 /* fastcall ECX [screen+0x198]: AL may save now */
+#define NS_S_GAME          0x198
 #define NS_DIFF_OF_SAVE    0x00abe080 /* V hash */
 #define NS_DIFF_ENTRY      0x00abe040 /* V hash */
 
@@ -361,3 +389,207 @@ void fn_00557470(X86 *c);
     snprintf(out, cap, "/UI/H5A2/PWL/Pwl_%s.(Texture).dds", (key)[0] && (key)[1] ? (key) + 2 : (key))
 #define NS_GAME_VERSION "3.1"
 #define NS_PAK_DIRS "data" /* the paks it mounts, for the native views' pictures */
+
+/* GameSpy clDataList string readers and the fixed buffers of all 52 calls of
+ * the unbounded one (native/net_guard.c). The unbounded reader is the base
+ * game's 004432d0, the bounded one 00443390; PLAYERINFO's seven fields
+ * (0042a710, the base game's 0042a5e0) go into 12/16/36/36/68/132/132. The
+ * sites are in the base game's order (net_guard.c names each), the sizes the
+ * same. */
+#define HOMM5_GS_STR_ORIG fn_00443400
+#define HOMM5_GS_STR_BOUNDED fn_004434c0
+#define HOMM5_GS_STR_SITES \
+    {0x0042a7d8u, 12}, {0x0042a7ecu, 16}, {0x0042a800u, 36}, {0x0042a814u, 36}, {0x0042a828u, 68}, \
+        {0x0042a83cu, 132}, {0x0042a850u, 132}, {0x00424b6cu, 36}, {0x00424bafu, 132}, \
+        {0x00424bcau, 132}, {0x00425150u, 36}, {0x0042518fu, 132}, {0x004251a6u, 132}, \
+        {0x0043f668u, 16}, {0x0043f67eu, 132}, \
+        {0x0042742au, 36}, {0x004274a4u, 36}, {0x0042752fu, 132}, {0x00423a2eu, 132}, \
+        {0x00423a66u, 132}, {0x004224aau, 132}, {0x00428e9fu, 132}, {0x00430624u, 36}, \
+        {0x004260fau, 16}, {0x004235d6u, 16}, {0x00425ba0u, 36}, {0x004262b7u, 16}, \
+        {0x0041fdf1u, 36}, {0x0041fe07u, 36}, {0x0041fe1du, 128}, {0x0041fe33u, 128}, \
+        {0x004220adu, 129}, {0x0042220du, 129}, {0x0042272cu, 36}, {0x0042276du, 36}, \
+        {0x004229c9u, 16}, {0x004229ddu, 129}, {0x004229edu, 129}, {0x00422b0fu, 16}, \
+        {0x00422c9fu, 16}, {0x00423d1fu, 16}, {0x00423e7fu, 16}, {0x00425eb8u, 16}, \
+        {0x00425ee8u, 16}, {0x004278bau, 36}, {0x00427f77u, 33}, {0x00428150u, 36}, \
+        {0x00429839u, 16}, {0x00429872u, 132}, {0x0042994fu, 16}, {0x00429963u, 36}, \
+        {0x0042998au, 1024},
+
+/* The GS login (native/gs_login.c): the SDK's login entry, reached from
+ * ProcessLogin (00e0e0d0) through the thunk 00419530, and
+ * ProcessLoginRouterResult. */
+#define HOMM5_FN_GS_LOGIN fn_00419c20
+#define HOMM5_FN_GS_LOGIN_RESULT fn_00e0e500
+
+/* ---- ubi.com screens (native/screens_ubi.c): Tribes of the East 3.1 ----
+ * research notes lan/ubi-screens-expansions.md. Inner offsets = base (no NS_UBI_UL_* etc. needed). */
+#define NS_UBI_VT_LOGIN         0x00f759b0  /* base 00fc2cb0; V RTTI CMPRegisterScreen IScreen */
+#define NS_UBI_SUB_LOGIN        0x1dc       /* base 0x1e0; V (alloc 0x1e4 in 0087df60) */
+#define NS_UBI_LOGIN_OK         0x0087c9e0  /* base 00947010; V reg "ok" in ctor 0087bd00, RET 4 */
+#define NS_UBI_LOGIN_CANCEL     0x0087cdb0  /* base 009473e0; V reg "cancel"/"esc_pressed" → 0087bb90 */
+#define NS_UBI_VT_EDIT_BOX      0x00f7ba44  /* base 00fc83e8; V (= NS_VT_EDIT_BOX) */
+#define NS_UBI_SUB_EDIT_BOX     0x1bc       /* base 0x1b8; V (= NS_SUB_EDIT_BOX) */
+#define NS_UBI_BOX_CALLBACK     0x00f75948  /* base 00fc2c48; V RTTI ISimpleEditBoxCallBack @0x17c; box built with ECX = screen+0x17c (0087c9a3) */
+#define NS_UBI_BOX_OK           0x008e8840  /* base 009a7b80; V hash (lan-screens-toe.md) */
+#define NS_UBI_BOX_CANCEL       0x008e8790  /* base 009a7ad0; V hash */
+#define NS_UBI_VT_CHANNELS      0x00f68f4c  /* base 00fb70f0; V RTTI CMPChangeChannelScreen IScreen */
+#define NS_UBI_SUB_CHANNELS     0x1e0       /* same; V (alloc 0x1e8 in 0079a6b0) */
+#define NS_UBI_CHANNELS_JOIN    0x00798e80  /* base 0088e7a0; V reg "join" in ctor 007982f0, RET 4 */
+#define NS_UBI_CHANNELS_CANCEL  0x00798e20  /* base 0088e740; V reg "cancel", RET 4 */
+#define NS_UBI_VT_WAIT_BOX      0x00f5fed4  /* base 00fadd04; V RTTI CWaitBox */
+#define NS_UBI_RTTI_IWINDOW     0x010aaf54  /* base 010e9ab0; V (IListControl vt+0x24 00e45720) */
+#define NS_UBI_RTTI_LIST_ITEM   0x010ad650  /* base 010ed854; V */
+#define NS_UBI_RTTI_OBJECT      0x010a79f8  /* base 010e67a0; V (join 00798f48) */
+#define NS_UBI_RTTI_CHANNEL     0x010aed80  /* base 010ed774; V TD CChannelData (join 00798f43) */
+#define NS_UBI_DYNAMIC_CAST     0x0094ab92  /* base 009fe372; V */
+/* inner offsets: all equal base. V: login 0x1a8 / password 0x1ac / logging 0x1b0 / wait 0x1b4 / init 0x1b8 /
+ * form 0x1bc (OK 0087c9e0, init 0087c190, init-start 0087ba00); box callback 0x17c / edit 0x180; channel list
+ * 0x194 / ButtonJoin 0x1c0 / wait 0x1c4 (init 007985f0, join 00798e80); CChannelData 0x0c/0x18/0x24 (00799250);
+ * wait box 0xf8 / 0x108 (006d3163, 006d6dd0); EDIT_TEXT 0x3c (0056c2b0); list 0x20/0x24/0x28 (00e45700/20/40). */
+
+/* ---- lobbies in LAN and ubi.com mode + name box (native/screens_lan.c) ---- */
+#define NS_LAN_VT_LOBBY         0x00f75334  /* base 00fc2180; V RTTI */
+#define NS_LAN_SUB_LOBBY        0x214       /* base 0x200; V */
+#define NS_LAN_VT_DUEL_LOBBY    0x00f75544  /* base 00fc237c; V */
+#define NS_LAN_SUB_DUEL_LOBBY   0x20c       /* base 0x1f8; V */
+#define NS_LAN_LOBBY_REACTION   0x00875200  /* base 0093b320; V re-checked: ECX = screen+0x174, RET 0xc, → 008d7650 */
+#define NS_LAN_DUEL_LOBBY_REACTION 0x00876cc0 /* base 0093cda0; V re-checked */
+#define NS_LAN_SELECTED         0x008dd120  /* base 0099a1a0; V hash */
+#define NS_LAN_PLAYERS_NOW      0x008de890  /* base 0099b7f0; V re-checked: +0x180 < 1 → +0x84, else +0x184+0x188+0x18c */
+#define NS_LAN_RTTI_IWINDOW     0x010aaf54  /* base 010e9ab0; V */
+#define NS_LAN_RTTI_LIST_ITEM   0x010ad650  /* base 010ed854; V */
+#define NS_LAN_RTTI_OBJECT      0x010a79f8  /* base 010e67a0; V */
+#define NS_LAN_RTTI_GAME_DATA   0x010b25ac  /* base 010f0b6c; V */
+#define NS_LAN_RTTI_PLAYER_DATA 0x010b3200  /* base 010f17d0; V */
+#define NS_LAN_BOX_CALLBACK_STD 0x00f752dc  /* base 00fc2134; V */
+#define NS_LAN_BOX_CALLBACK_DUEL 0x00f754f0 /* base 00fc2334; V */
+#define NS_LAN_BOX_OK           0x008e8840  /* base 009a7b80; V */
+#define NS_LAN_BOX_CANCEL       0x008e8790  /* base 009a7ad0; V */
+#define NS_LAN_SPEED_NAME       0x00abe110  /* base 00b97ca0; V (= NS_DUEL_SPEED_NAME) */
+#define NS_LAN_DYNAMIC_CAST     0x0094ab92  /* base 009fe372; V */
+#define NS_LAN_TEXT             0x00956620  /* base 00a09de0; V (= NS_TEXT) */
+#define NS_LAN_MAP_NAME         0x00914d70  /* base 009d9400; V (lan-screens-toe.md) fastcall ECX = info+0xcc */
+#define NS_LAN_MAP_SIZE         0x00629e30  /* base 00729b30; V (= NS_MAP_SIZE) */
+#define NS_LAN_SERVICES         0x004e1690  /* base 005e8050; V re-checked */
+#define NS_LAN_MATCHMAKER_ID    0x8c348b00  /* same; V */
+#define NS_LAN_CONTAINER_MODE   0x20        /* same; V re-checked (lobby init 008d8814) */
+/* lobby fields (CLobbyScreenBase: +8 from the chat model on) */
+#define NS_LAN_L_REACTIONS      0x174       /* same; V re-checked */
+#define NS_LAN_L_CHAT           0x1a4       /* base 0x19c; V */
+#define NS_LAN_L_PLAYERS        0x1ac       /* base 0x1a4; V re-checked */
+#define NS_LAN_L_PROFILE        0x1b0       /* base 0x1a8; V re-checked (store 008d8a2d) */
+#define NS_LAN_L_EDIT           0x1b4       /* base 0x1ac; V re-checked */
+#define NS_LAN_L_LEAVING        0x1b8       /* base 0x1b0; V re-checked (channel vt+0x4c 008d7d30) */
+#define NS_LAN_L_JOINING        0x1bc       /* base 0x1b4; V re-checked */
+#define NS_LAN_L_JOIN           0x1c0       /* base 0x1b8; V re-checked */
+#define NS_LAN_L_GAMES          0x1dc       /* base 0x1d4; V re-checked */
+#define NS_LAN_GI_SPEED         0x178       /* base 0x10c; V (lan-screens-toe.md §2) */
+/* same as base: PLAYERS_LIST 0x38, GV_LIST 0x08, GV_RUNNING 0x24, GV_OBSERVABLE 0x25, LIST_ROWS 0x20, LIST_SELECT 0x28,
+ * ITEM_DATA 0x04, GAME_INFO 0x0c; GI_OPEN 0x18, GI_NAME 0x1c, GI_LOCKED 0x34 (= password non-empty), GI_MAX 0x6c,
+ * GI_SIZE 0x70, GI_SAVED 0x90, GI_MAP 0xcc, GI_ARENA 0xf8; CHAT_* 0x0c/0x18/0x0c; PLAYER_NAME 0x0c; EDIT_TEXT 0x3c;
+ * BOX_CB 0x17c, BOX_EDIT 0x180, BOX_ID 0x188. V (lan-screens-toe.md "Checked and equal"). */
+/* the duel's create dialog (CMPDMCreateScreen; lan-screens-toe.md §1, §5, §2) */
+#define NS_LAN_VT_DUEL_CREATE   0x00f7b504  /* base 00fc7cec; V RTTI */
+#define NS_LAN_SUB_DUEL_CREATE  0x1b4       /* base 0x1b0; V */
+#define NS_LAN_DUEL_CREATE_OK   0x008dfa00  /* base 0099c900; V reg `create` */
+#define NS_LAN_DUEL_CREATE_CANCEL 0x008df860 /* base 0099c760; V reg `cancel` */
+#define NS_LAN_DC_SPEED         0x198       /* base 0x194 (a new dword at +0x194); V init 008ded40 */
+/* name 0x17c, password 0x180, lockedgame 0x184, triple_heroes 0x18c: same; V */
+
+/* ---- network game: create (ns_mp_create) and players (ns_mp_wait), Tribes of the East 3.1 ----
+ * Screen fields = base; the options block differs. */
+#define NS_VT_MPC              0x00f7b174  /* base 00fc797c; V RTTI CMPCreateScreen IScreen */
+#define NS_SUB_MPC             0x1a4       /* base 0x1a0; V (alloc 0x1ac) */
+#define NS_MPC_MAPSELECTED     0x008daf30  /* base 00997fe0; V re-checked (reg in 008db000, RET 4) */
+#define NS_MPC_CREATE          0x008daa60  /* base 00997b30; V re-checked */
+#define NS_MPC_LOAD            0x008daea0  /* base 00997f50; V re-checked (LAN load / ubi.com load by mode) */
+#define NS_MPC_BACK            0x008daa30  /* base 00997b00; V re-checked */
+#define NS_MPC_RMG             0x008daf60  /* new; V `rmg_screen`: [screen+0x18c] = 1, push CCreateRMGScreen (0091f6b0), RET 4 */
+/* NS_MPC_MAPS 0x17c / NS_MPC_OPTIONS 0x184 / NS_MPC_CREATING 0x188: same as base; V re-checked */
+/* CMPCreateOptions (init 00918c80, re-checked) */
+#define NS_MPO_LOCKED          0           /* base 0x18 `lockedgame`: NONE (§3) */
+#define NS_MPO_GHOST           0x18        /* base 0x1c; V */
+#define NS_MPO_QUICK           0x1c        /* base 0x20; V `quick_combat` «Быстрая схватка» → info+0x36 */
+#define NS_MPO_AUTOSAVE        0x20        /* base 0x24; V `realtime` «Автосохранение» */
+#define NS_MPO_SIMULTANEOUS    0x3c        /* new; V `simultaneus` «Одновременные ходы» → info+0x16c */
+#define NS_MPO_TIME            0x24        /* base 0x28; V */
+#define NS_MPO_DIFFICULTY      0x28        /* base 0x2c; V */
+#define NS_MPO_ANIMATION       0x34        /* base 0x38; V */
+/* NS_MPO_NAME 0x10, NS_MPO_PASSWORD 0x14 (always enabled), NS_MPO_COMBAT 0x40: same; V */
+#define NS_MPC_SPEED_NAME      0x00abe110  /* base 00b97ca0; V (= NS_DUEL_SPEED_NAME) */
+
+#define NS_VT_MPW              0x00f6c91c  /* base 00fbaae0; V RTTI CMPWaitScreen IScreen */
+/* A loaded LAN game's players (NUI::CMPUbiComLoadScreen, a CMPWaitScreen):
+ * the load logic keeps its model at +0x26c and sets +0x314 once the game
+ * starts (research notes lan-load-toe-map.md). */
+#define NS_VT_MPL              0x00f6c9dc
+#define NS_SUB_MPL             0x1e8
+#define NS_MPL_MODEL           0x26c
+#define NS_MPL_STARTED         0x314
+#define NS_SUB_MPW             0x1cc       /* same; V */
+#define NS_MPW_START           0x00899080  /* base 00962750; V re-checked ([+0x18c], [+0x1b4]; RET 4) */
+#define NS_MPW_BACK            0x00899050  /* base 00962720; V re-checked */
+#define NS_MPW_SEND            0x008991c0  /* base 00962890; V re-checked ([+0x1ac]) */
+#define NS_MPW_SLOT_OF         0x00b8cdd0  /* base 00c98d20; V hash */
+#define NS_MPW_SERVICES        0x004e1690  /* base 005e8050; V */
+#define NS_MPW_MATCHMAKER_ID   0x8c348b00  /* same; V */
+#define NS_MPW_MM_GAME         0x44        /* same; V */
+#define NS_MPW_INFO_CTOR       0x0061c770  /* base 0071bfa0; V */
+#define NS_MPW_INFO_DTOR       0x0061dba0  /* base 0071d020; V */
+#define NS_MPW_INFO_SIZE       0x194       /* base 0x128; V */
+#define NS_MPW_PLAYERS_NOW     0x008de890  /* base 0099b7f0; V (+0x180 max, +0x184..+0x18c counts) */
+/* screen fields HOST 0x1b0, LOGIC 0x1b4, CHAT 0x1a8, EDIT 0x1ac, STARTING 0x18c, logic ACCEPTING 0x108,
+ * GI_* above 0x100 untouched by the code, rows and logic: all same as base; V (start/back/send/host start
+ * 008f3ff8 re-checked; rest lan-screens-toe.md). */
+/* NS_MAP_GOAL is the out-string form here (NS_MAP_GOAL_OUT 1 already defined): see §3. */
+#define NS_MPO_QUICK_LABEL     "Быстрая схватка", "Quick combat"   /* ToE's own words; V */
+
+/* The battle's "strike from a cell" mode (native/tap_attack.c): the base
+ * game's functions matched in this exe (research notes tap-attack-toe-map.md,
+ * 2026-10-31). The combat screen's fields sit lower and the ICombat and
+ * ICombatBase vtables are in another order; the key bindings did not move. */
+#define HOMM5_TAP_SCREEN_VTABLE 0x00f591b8 /* NUI::CCombatArenaScreen, the full object */
+#define HOMM5_TAP_FN_ACTION fn_0064e770    /* the action for what is under the cursor */
+#define HOMM5_TAP_FN_CLICK fn_0064c360     /* win_left_button_up */
+#define HOMM5_TAP_FN_PICK fn_0064e160      /* what is under the cursor, into P, RET 8 */
+#define HOMM5_TAP_CURSOR_X 0x0110c464      /* NUI::CCursor's position */
+#define HOMM5_TAP_CURSOR_Y 0x0110c468
+#define HOMM5_TAP_FN_GRID fn_0070d860      /* the grid cells' states */
+#define HOMM5_TAP_SET_CELL 0x0070e140
+#define HOMM5_TAP_ATTACK_CELLS 0x00b88ff0
+#define HOMM5_TAP_MOVE_ATTACK 0x00bcd3a0
+#define HOMM5_TAP_MOVE_ATTACK_VTABLE 0x00fbf004
+#define HOMM5_TAP_RELEASE 0x004e42e0
+#define HOMM5_TAP_FREE 0x004dd510
+#define HOMM5_TAP_SCR_COMBAT 0x2a0
+#define HOMM5_TAP_SCR_ACTIVE 0x2ac
+#define HOMM5_TAP_SCR_PHASE 0x2e0
+#define HOMM5_TAP_SCR_S 0x2ec
+#define HOMM5_TAP_SCR_P 0x2f4
+#define HOMM5_TAP_SCR_GRID 0x3c4
+#define HOMM5_TAP_SCR_SHIFT 0x4c
+#define HOMM5_TAP_SCR_CTRL 0x54
+#define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x6c
+#define HOMM5_TAP_UNIT_CELL 0x40
+#define HOMM5_TAP_UNIT_SIZE 0x44
+
+/* native/touch_native.c (native touch), mapped from the base game with
+ * games/map_addresses.py; the screen and window layouts it reads match. */
+#define HOMM5_NT_QUEUE 0x004ec700          /* the WndProc's event queue (base 005f3140) */
+#define HOMM5_NT_QUEUE_LIST 0x010f4184     /* its list (base 01133ed4) */
+#define HOMM5_NT_CWS_ISCREEN_VT 0x00fef734 /* CWindowScreen's IScreen part */
+#define HOMM5_NT_VT_MOVIE 0x00f76d08       /* NUI::CVideoScreen */
+#define HOMM5_NT_VT_LOADING 0x00f5c7d8     /* NUI::CPWLScreenInterface */
+#define HOMM5_NT_FN_EDGE_SCROLL fn_0060de80 /* CCursor::GetEdgeScroll (vtable +0x20) */
+#define HOMM5_NT_FN_CURSOR_UPDATE fn_0060dd60 /* CCursor::Update (vtable +0x1C), RET 4 */
+#define HOMM5_VT_CARD 0x00ff55c4           /* CCommonGatheringWindow: an object's card */
+#define HOMM5_NT_ISCREEN_HIDE_TIP 0x6c  /* IScreen: hide the tooltip (as in the base game) */
+#define HOMM5_NT_FN_CARD_WINDOW fn_007078f0        /* CClickingTooltipCreator: the card's window (vt 00f62bf0 slot 0; base 007fcc80) */
+#define HOMM5_NT_FN_CARD_WINDOW_COMBAT fn_007082c0 /* CClickingCombatTooltipCreator's (vt 00f62c3c slot 0; base 007fd500) */
+#define HOMM5_NT_FN_CARD_WINDOW_ATB fn_00708200    /* CClickingATBTooltipCreator's, the turn order bar's (vt 00f62c88 slot 0; ToE only) */
+
+/* The touch panel's commands (native/hotkeys.c): the active key sections'
+ * vector, kept by 005b59b0 (the base game's 006bb7e0), and the profile's
+ * files, named for the expansion. */
+#define HOMM5_BIND_SECTIONS 0x0110b680
+#define HOMM5_INPUT_CFG "input_a2.cfg"
+#define HOMM5_GLOBAL_CFG "global_a2.cfg"

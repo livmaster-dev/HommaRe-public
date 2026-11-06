@@ -71,6 +71,18 @@ if(EMSCRIPTEN)
   set(CMAKE_CXX_EXTENSIONS ON)
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# The same arithmetic on every host, which network play depends on: each peer
+# computes the game from the commands they exchange, so a result one build
+# rounds differently from another is a desync. Clang's default,
+# -ffp-contract=on, fuses a * b + c within an expression into one FMA (a
+# single rounding) wherever the target has one - every arm64 host, and x86_64
+# only with -mfma - so the arm64 builds of the native code and of the
+# runtime's float helpers rounded differently from the x86_64 ones. Off, each
+# operation rounds as the C says, as the x86 guest's own FMUL and FADD do.
+# Plain char is signed on x86, Apple's arm64 and wasm32 and unsigned in the
+# Linux and Android aarch64 ABIs; the kit and the native code are written for
+# a signed one.
+add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-ffp-contract=off;-fsigned-char>")
 if(WIN32)
   # Windows' headers, MinGW's and Microsoft's, keep M_PI behind this; glibc's
   # and Apple's declare it by default.
@@ -129,6 +141,20 @@ elseif(WIN32 AND CMAKE_CROSSCOMPILING AND POP_TRANSLATE STREQUAL "STUB")
   set(POP_BUILD_DIR ${POP_BUILD_ROOT}/windows-stub)
 elseif(WIN32 AND CMAKE_CROSSCOMPILING)
   set(POP_BUILD_DIR ${POP_BUILD_ROOT}/windows)
+# Linux for another processor (the linux-arm64 preset): build/linux-arm64, the
+# folder tools/build.py --arch names. A build on the ARM machine itself is
+# not a cross build and uses build/, as on x86-64.
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CROSSCOMPILING)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    set(pop_cross_arch arm64)
+  else()
+    set(pop_cross_arch ${CMAKE_SYSTEM_PROCESSOR})
+  endif()
+  if(POP_TRANSLATE STREQUAL "STUB")
+    set(POP_BUILD_DIR ${POP_BUILD_ROOT}/linux-${pop_cross_arch}-stub)
+  else()
+    set(POP_BUILD_DIR ${POP_BUILD_ROOT}/linux-${pop_cross_arch})
+  endif()
 elseif(POP_TRANSLATE STREQUAL "STUB")
   set(POP_BUILD_DIR ${POP_BUILD_ROOT}/stub)
 elseif(IOS AND CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")

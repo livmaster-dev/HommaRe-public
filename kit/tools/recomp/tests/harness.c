@@ -400,7 +400,39 @@ uint32_t harness_header_selftest(void) {
     CHECK(fto_float(&c, 1.0000001) == 1.0f);
     x87_set_cw(&c, 0x0b7f);
     CHECK(fto_float(&c, 1.0000001) > 1.0f);
+    /* ... whatever the host's own mode, which follows MXCSR and not the x87
+     * control word: 0.05 is 0x3d4ccccd to nearest, 0x3d4ccccc truncated. */
+    fesetround(FE_TOWARDZERO);
     x87_set_cw(&c, 0x037f);
+    CHECK(fto_float(&c, 0.05) == 0x1.99999ap-5f);
+    CHECK(fto_float(&c, -0.05) == -0x1.99999ap-5f);
+    CHECK(fto_float(&c, 0x1.fffffff8p+127) == (float)INFINITY); /* past the tie */
+    fesetround(FE_TONEAREST);
+    x87_set_cw(&c, 0x0f7f);
+    CHECK(fto_float(&c, 0.05) == 0x1.999998p-5f);
+    CHECK(fto_float(&c, -0.05) == -0x1.999998p-5f);
+    CHECK(fto_float(&c, 0x1.fffffff8p+127) == 0x1.fffffep+127f);
+    x87_set_cw(&c, 0x037f);
+
+    /* MXCSR's rounding field is the host's mode while translated code runs,
+     * and host code runs to nearest (x86.h, SSE rounding control). */
+    c.mxcsr = RECOMP_MXCSR_DEFAULT;
+    recomp_set_mxcsr(&c, 0x7f80u); /* toward zero */
+    CHECK(c.mxcsr == 0x7f80u && recomp_host_rc() == 3u);
+    {
+        volatile float a = 0.1f, b = 3.0f;
+        CHECK(a * b == 0x1.333332p-2f); /* 0.3f rounded to nearest is ...334 */
+    }
+    recomp_fp_host();
+    CHECK(recomp_host_rc() == 0u);
+    recomp_fp_guest(&c);
+    CHECK(recomp_host_rc() == 3u);
+    recomp_set_mxcsr(&c, 0x3f80u); /* down */
+    CHECK(recomp_host_rc() == 1u);
+    recomp_set_mxcsr(&c, 0x5f80u); /* up */
+    CHECK(recomp_host_rc() == 2u);
+    recomp_set_mxcsr(&c, RECOMP_MXCSR_DEFAULT);
+    CHECK(recomp_host_rc() == 0u);
     /* FUCOM is quiet for a quiet NaN; FCOM is not */
     c.fpu_sw = 0;
     fucom(&c, (double)NAN, 1.0);

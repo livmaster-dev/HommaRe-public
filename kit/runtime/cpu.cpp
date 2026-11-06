@@ -498,6 +498,8 @@ jmp_buf *recomp_setjmp_prepare(X86 *c) {
 }
 
 void recomp_setjmp_return(X86 *c, int value) {
+    // Back in translated code, which a longjmp may have reached from a shim.
+    recomp_fp_guest(c);
     uint32_t ret = rd32(c->r[R_ESP]);
     c->r[R_ESP] += 4; // cdecl: emulate RET, the caller pops the argument
     c->eip = ret;
@@ -535,7 +537,9 @@ void recomp_longjmp(X86 *c) {
     recomp_profile_truncate(rec->profile_depth);
     recomp_seh_callback_leave(c, rec->callback_depth + 1);
     recomp_callback_truncate(rec->callback_depth);
+    const uint32_t mxcsr = c->mxcsr;
     *c = rec->saved; // guest registers as they were at the _setjmp
+    c->mxcsr = mxcsr; // which Windows' longjmp leaves alone, as it does the x87's
     g_setjmp_ctx = c;
     LOGV("_longjmp(%08x, %d): restoring ESP=%08x", buf, value, c->r[R_ESP]);
     longjmp(rec->env, value);

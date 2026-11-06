@@ -35,6 +35,7 @@ struct Edit {
 struct File {
     std::string name, sha256, source;
     bool whole = false;
+    bool base64 = false;    // whole, its text the bytes in base64 (a picture the port drew)
     bool turn_left = false; // the source, a picture, turned a quarter to the left
     std::string text;
     std::vector<Edit> edits;
@@ -94,6 +95,38 @@ std::vector<std::string> split_lines(const std::string &s) {
     return out;
 }
 
+// A new64 file's lines, base64 with their line ends, as bytes.
+bool from_base64(const std::string &text, std::string &out) {
+    std::string bytes;
+    uint32_t acc = 0;
+    int bits = 0;
+    for (const char ch : text) {
+        int v;
+        if (ch >= 'A' && ch <= 'Z')
+            v = ch - 'A';
+        else if (ch >= 'a' && ch <= 'z')
+            v = ch - 'a' + 26;
+        else if (ch >= '0' && ch <= '9')
+            v = ch - '0' + 52;
+        else if (ch == '+')
+            v = 62;
+        else if (ch == '/')
+            v = 63;
+        else if (ch == '=' || ch == '\n' || ch == '\r')
+            continue;
+        else
+            return false;
+        acc = acc << 6 | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            bytes.push_back((char)(acc >> bits & 0xffu));
+        }
+    }
+    out = std::move(bytes);
+    return true;
+}
+
 bool parse(const fs::path &path, Recipe &r) {
     std::string text;
     if (!read_all(path, text))
@@ -122,7 +155,7 @@ bool parse(const fs::path &path, Recipe &r) {
         const std::vector<std::string> v = fields(line);
         const std::string &key = v[0];
         if (key == "recipe") {
-            if (v.size() < 2 || (v[1] != "1" && v[1] != "2"))
+            if (v.size() < 2 || (v[1] != "1" && v[1] != "2" && v[1] != "3"))
                 return false; // a format this build does not know
         } else if (key == "name" && v.size() > 1) {
             r.name = v[1];
@@ -140,12 +173,14 @@ bool parse(const fs::path &path, Recipe &r) {
             f.sha256 = v[2];
             f.source = v.size() > 3 ? v[3] : v[1];
             r.files.push_back(std::move(f));
-        } else if (key == "new" && v.size() > 1) {
+        } else if ((key == "new" || key == "new64") && v.size() > 1) {
             File f;
             f.name = v[1];
             f.whole = true;
+            f.base64 = key == "new64";
             r.files.push_back(std::move(f));
-        } else if (key == "turn" && v.size() > 1 && v[1] == "left" && !r.files.empty() && !r.files.back().whole) {
+        } else if (key == "turn" && v.size() > 1 && v[1] == "left" && !r.files.empty() &&
+                   !r.files.back().whole) {
             r.files.back().turn_left = true;
         } else if (key == "@" && v.size() > 2 && !r.files.empty() && !r.files.back().whole) {
             Edit e;
@@ -156,6 +191,9 @@ bool parse(const fs::path &path, Recipe &r) {
             return false;
         }
     }
+    for (File &f : r.files)
+        if (f.base64 && !from_base64(f.text, f.text))
+            return false;
     return !r.name.empty() && !r.out.empty() && !r.layers.empty();
 }
 
@@ -397,17 +435,22 @@ std::string fingerprint(const Recipe &r, const fs::path &root, const std::string
     return key + "over " + over + "\n";
 }
 
-// "phone/x" -> ("x", true).
-std::pair<std::string, bool> profile_path(const std::string &out) {
+// Who a mod is for, from its out path's prefix.
+enum class For { All, Phone, NativeTouch };
+
+// "phone/x" -> ("x", Phone), "touch/x" -> ("x", NativeTouch).
+std::pair<std::string, For> profile_path(const std::string &out) {
     if (out.compare(0, 6, "phone/") == 0)
-        return {out.substr(6), true};
-    return {out, false};
+        return {out.substr(6), For::Phone};
+    if (out.compare(0, 6, "touch/") == 0)
+        return {out.substr(6), For::NativeTouch};
+    return {out, For::All};
 }
 
 } // namespace
 
-void host_ui_mods(const std::string &game_root, const std::string &profile_dir, const std::string &recipe_dir,
-                  bool phone) {
+void host_ui_mods(const std::string &game_root, const std::string &profile_dir,
+                  const std::string &recipe_dir, bool phone, bool native_touch) {
     std::error_code ec;
     if (game_root.empty() || profile_dir.empty() || recipe_dir.empty() || !fs::is_directory(recipe_dir, ec))
         return;
@@ -429,12 +472,13 @@ void host_ui_mods(const std::string &game_root, const std::string &profile_dir, 
     std::map<std::string, std::string> keys; // out -> fingerprint, for the recipes over it
     std::map<std::string, Files> made;       // out -> files, when built this start
     for (const Recipe &r : recipes) {
-        const auto [rel, phone_only] = profile_path(r.out);
+        const auto [rel, only] = profile_path(r.out);
         const fs::path out = profile / rel;
         const fs::path stamp = profile / ".ui-mods" / (r.name + ".stamp");
-        if (phone_only && !phone) {
+        if ((only == For::Phone && !phone) || (only == For::NativeTouch && !native_touch)) {
             if (fs::remove(out, ec))
-                fprintf(stderr, "[host] ui mods: %s taken out (phone interface off)\n", rel.c_str());
+                fprintf(stderr, "[host] ui mods: %s taken out (%s off)\n", rel.c_str(),
+                        only == For::Phone ? "phone interface" : "native touch");
             fs::remove(stamp, ec);
             continue;
         }

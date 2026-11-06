@@ -233,6 +233,8 @@ set(POP_LAUNCHER_SOURCES $<TARGET_OBJECTS:launcher_core> $<TARGET_OBJECTS:recomp
 if(APPLE AND RECOMP_NATIVE_LAUNCHER)
   add_library(launcher_native STATIC ${HOST}/launcher/apple/LauncherBridge.swift
                                      ${HOST}/launcher/apple/LauncherCatalog.swift
+                                     ${HOST}/launcher/apple/LauncherGog.swift
+                                     ${HOST}/launcher/apple/LauncherGogView.swift
                                      ${HOST}/launcher/apple/LauncherInstaller.swift
                                      ${HOST}/launcher/apple/LauncherModel.swift
                                      ${HOST}/launcher/apple/LauncherSkin.swift
@@ -351,6 +353,9 @@ if((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32) AND RECOMP_NATIVE_LAUNCHER)
 endif()
 if(IOS)
   set(POP_PLATFORM_UI ${HOST}/sdl/platform_ui_ios.mm)
+  # Under ARC by name: the Xcode generator drops the language-conditioned
+  # POP_OBJC_ARC, and the views keep objects the file does not retain itself.
+  set_source_files_properties(${HOST}/sdl/platform_ui_ios.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   list(APPEND FW_METAL "-framework UIKit" "-framework UniformTypeIdentifiers" "-framework CoreHaptics")
 elseif(ANDROID)
   set(POP_PLATFORM_UI ${HOST}/sdl/platform_ui_desktop.cpp ${HOST}/launcher/launcher_platform_android.cpp)
@@ -404,8 +409,9 @@ if(TARGET recomp_gen)
             ${HOST}/input_trackpad.cpp ${POP_AUDIO_SOURCES})
   # The game's own screens drawn natively over it on iOS (sdl/platform_ui.h
   # platform_ui_native_screen): SwiftUI sources in the game repository's
-  # native-screens/, one module, RecompScreens, linked into the app and the
-  # game's module. Swift is there whenever the native launcher is.
+  # native-screens/, one module, RecompScreens, linked into the app alone (a
+  # game's module calls the app's copy). Swift is there whenever the native
+  # launcher is.
   file(GLOB pop_screen_sources ${RECOMP_GAME_DIR}/native-screens/*.swift)
   if(IOS AND TARGET launcher_native AND pop_screen_sources)
     add_library(native_screens STATIC ${pop_screen_sources})
@@ -548,7 +554,11 @@ if(TARGET recomp_gen)
       LIBS ${POP_CORE_LIBS}
       FRAMEWORKS ${FW_METAL})
     pop_link_sdl(recomp_game)
-    pop_link_native_screens(recomp_game)
+    # The module uses the app's RecompScreens (sdl/platform_ui_ios.mm): a
+    # second copy would register its Objective-C classes twice in the process.
+    if(TARGET native_screens)
+      target_compile_definitions(recomp_game PRIVATE RECOMP_NATIVE_SCREENS=1)
+    endif()
     if(APPLE AND NOT IOS)
       # The static SDL brought AppKit in for metal_surface.mm; the shared one does not.
       target_link_libraries(recomp_game PRIVATE "-framework AppKit")

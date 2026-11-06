@@ -96,13 +96,13 @@ static void hof_command(Scratch *s, uint32_t screen, const char *cmd) {
 static void hof_document(Json *j, Scratch *s, uint32_t screen) {
     char diff[64], a[128], b2[128], text[300];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_ru = (unsigned char)diff[0] >= 0xd0;
+    ns_set_lang(diff);
     uint32_t b;
     const int n = entries(screen, &b);
     int entry = (int)rd32(screen + HF_ENTRY);
     entry = entry < 0 || entry >= n ? -1 : entry;
     j_lit(j, "{\"screen\":\"hall_of_fame\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, "/UI/MainMenu2/HallOfFame/Header.txt", "Зал славы", "Hall of Fame"));
     j_lit(j, ",\"books\":[");

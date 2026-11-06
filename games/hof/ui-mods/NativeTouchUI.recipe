@@ -1,0 +1,45 @@
+# Made by tools/native_touch_ui_mod.py --game hof; applied by kit/host/ui_mods.cpp.
+recipe	3
+name	NativeTouchUI-hof
+out	touch/data/zz-native-touch-ui.pak
+date	2031-01-01 00:00:00
+layer	data/data.pak
+layer	data/p0-data.pak
+layer	data/p1-data.pak
+layer	data/p2-data.pak
+layer	data/p3c-data.pak
+layer	dataa1/a1-data.pak
+layer	dataa1/a1p1-data.pak
+new64	Textures/Interface/Tooltips/Hero/TouchMoreIcon.dds
++RERTIHwAAAAHEAAAFAAAAA8AAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
++AAAAAAAAAAAAAAAAAAAAAAAAACAAAABBAAAAAAAAACAAAAAAAP8AAP8AAP8AAAAAAAD/ABAAAAAA
++AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDNLxhgxUP8iNEv8O0FI/xYuTPwdNFH/IDJM
++fwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAqMUYkGDBN/zg9Sf/RgDT+9ZMu/6hsOfwdM1D/
++HjJLywAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAzOUYoDixO/qhmPP//kC7+/IUy//+QLvxh
++TUj/DStNywAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAtOkcnEi5N/rlkO//6fjT+9Xk2//x/
++M/x2UEX/CytNywAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAtNEcnEC9O/rxfQf//czP+/200
++//90M/x1Tkz/CytMywAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAmM0woGDBL/l1RWf+PVUn+
++jVBF/49aT/xASVv/GC9KzQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoPFcmGCtF/meDnP+Q
++tc7+iKzG/5S30f9DWnL/DiE7+RksR+MYLUfiHjRO1h8wS0oAAAAAAAAAAAAAAAAqPFUqGC1I/naN
++o/6qwdX+objN/6rB1v9rgpn/PFJr/ztRav82TGX/HjRQ/x4yTNMAAAAAGi9KMCI2UYcdMkzEEydC
++/3OLov2lv9T/nbbM/6C5z/+as8n/nLXL/42mu/2Jo7f9MUZf/RgtR9odMU40HzNO8xwyTv8lOlX/
++NUpj/4Sds/+iu9H/n7jO/6S90/9sgpj/jKW7/2Z8kv+Cm7H+Mkhh/xgsRtwgNE6WGzBM/z9VbviE
++nLL9mbLI/4CYrv9xh53/o73T/6O90/9tg5n/jaa8/2d9k/+DnLL9MEdg/xgsRr0cMEiaJDpV/nyV
++qvyMprv/j6i+/6K80v9sg5n/jqa8/6nC2P9qgJb/jaa8/2R6kP+FnrT8M0tl/xYqRKgeMkydHzRP
++/WyFm/uTrcL/lq/F/5ixxv9nfZP/lq7E/6O80v+QqL7/lK3D/4Wds/+Iobf8M0lj/xcqRKweM058
++HjRQ/yc7Vfxfdo3/hJ2z/3+WrP+Bma7/pb/V/563zf+guc//mLHH/5KrwP+Jorj8M0lj/xcrRKsi
++M0QPHjNNth80T/8QIz7/QFVu/6K70f+huc//n7jO/6C5z/+ctcv/l7DG/5Cpvv+Jorj8M0lj/xcr
++RKsAAAAAAAAAACI4VS0WKkTKR153/6C5zv2ctMr/oLnP/6C5z/+dtsz/l7DG/4+ovv+Jorj8NEpk
++/xcrRKsAAAAAAAAAAAAAAAAXKkS6N05o/6C6z/yet8z/nrfN/563zf+btMr/la7E/5KrwP+Gn7X8
++KT5Z/hotR6wAAAAAAAAAAAAAAAAfM028GzBL/mJ5kfqmwNX+qcLX/qnC1/6lv9T+oLnO/pWuw/5N
++Y3v6Gi9L/yAzTacAAAAAAAAAAAAAAAAfMU5YIDVR/xovSv88Umz/UGeA/05lfv9NZH3/TWN8/zVK
++ZP8aL0r/HzNO+x4yTUIAAAAAAAAAAAAAAAAAAAAAHTFMZyA1UM4WKkTYEiZA2RImQdoTJkHaEyZB
++2RgsRtghNVDIHDJLUQAAAAA=
+file	Textures/Interface/Tooltips/Hero/TouchMoreIcon.xdb	d72164827b0e2133d3d3a492b4ba43a64e34f3756a55df97c033b6cbd051ec0f	Textures/Interface/Tooltips/Hero/MoreIcon.xdb
+@	1	3
+*<Texture ObjectRecordID="7731005">
+*	<SrcName href="/UI/Misc/TouchMoreIcon.tga"/>
+*	<DestName href="TouchMoreIcon.dds"/>
+file	UI/Tooltips/CommonAdvObjTooltip/MoreIcon.(BackgroundSimpleTexture).xdb	1b6d387356bc99fb9a3b56c2713d7be649cc1bd31fe708493ae7311a982b3057
+@	3	1
+*	<Texture href="/Textures/Interface/Tooltips/Hero/TouchMoreIcon.xdb#xpointer(/Texture)"/>

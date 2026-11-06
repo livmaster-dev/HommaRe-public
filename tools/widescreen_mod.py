@@ -331,6 +331,58 @@ def unshadow(written, base, top):
     return stuck
 
 
+BACKDROP = "Backdrop-Wide"
+
+
+def shared_name(files, screen):
+    """The name of the shared description `screen` (a root's file) points at."""
+    m = re.search(rb'<Shared href="([^"#]+)#', files.get(screen, b""))
+    if not m:
+        return None
+    href = m.group(1).decode()
+    return href[1:] if href.startswith("/") else screen.rsplit("/", 1)[0] + "/" + href
+
+
+def move_backdrops(written, base, toe_new):
+    """{name: bytes} of the backdrop windows added: for each root screen whose
+    background Tribes of the East moved off the root onto a centred child
+    (its root's <Background/> empty, a Back window among its children) while
+    the base copy still paints it on the root, the root's background goes to
+    a centred window of the port's own (ui_mod_parts.backdrop_window), so it
+    stays under the panels a2p1 re-anchored to the centre. Edits the root's
+    shared description in `written`."""
+    added = {}
+    for screen in sorted(toe_new):
+        if not screen.endswith(".(WindowScreen).xdb") or screen not in base:
+            continue
+        toe_shared, own_shared = shared_name(toe_new, screen), shared_name(base, screen)
+        if not toe_shared or not own_shared or toe_shared not in toe_new or own_shared not in base:
+            continue
+        t = toe_new[toe_shared]
+        if not re.search(rb"<Background/>", t) or not re.search(rb'<Item href="[^"]*/Back\.\(WindowSimple\)\.xdb#', t):
+            continue
+        src = written.get(own_shared, base[own_shared])
+        m = re.search(rb'<Background href="([^"#]+)(#[^"]*)"/>', src)
+        if not m:
+            continue
+        folder = screen[:-len(".(WindowScreen).xdb")]  # UI/MPCreate
+        texture = m.group(1).decode()
+        if not texture.startswith("/"):
+            texture = "/" + own_shared.rsplit("/", 1)[0] + "/" + texture
+        window = "%s/%s.(WindowSimple).xdb" % (folder, BACKDROP)
+        shared = "%s/%s.(WindowSimpleShared).xdb" % (folder, BACKDROP)
+        added[window] = ui_mod_parts.backdrop_window("%s.(WindowSimpleShared).xdb" % BACKDROP)
+        added[shared] = ui_mod_parts.backdrop_shared(texture + m.group(2).decode())
+        # The root keeps no picture; the backdrop hangs last, as a2p1's Back does.
+        src = src[:m.start()] + b"<Background/>" + src[m.end():]
+        item = b'\t\t<Item href="%s#xpointer(/WindowSimple)"/>' % ("/" + window).encode()
+        nl = b"\r\n" if b"\r\n" in src else b"\n"
+        end = src.index(b"</Children>")
+        start = src.rfind(nl, 0, end) + len(nl)
+        written[own_shared] = src[:start] + item + nl + src[start:]
+    return added
+
+
 def stretch_root(data):
     """A root screen's description with its own placement stretched across
     its parent (EPA_MARGIN, no margins): Hammers of Fate has no root
@@ -367,7 +419,8 @@ def write_recipe(args, written, base):
         if source in base:
             sources[name] = (source, base[source])
         elif name.startswith((BORDER_DIR, "UI/Common/WideBorder/")) or (
-                name.startswith(DIALOGUE + "/") and name.endswith("-Wide.(BackgroundTiledTexture).xdb")):
+                name.startswith(DIALOGUE + "/") and name.endswith("-Wide.(BackgroundTiledTexture).xdb")) or (
+                "/%s.(" % BACKDROP in name):
             authored.add(name)
     nl_parts = ui_mod_parts.types_fields() + ui_mod_parts.types_enum()
     allowed = set(ui_recipe.split_lines(nl_parts)) | set(ui_recipe.split_lines(nl_parts.replace(b"\n", b"\r\n")))
@@ -557,6 +610,10 @@ def main():
         written[name] = merged
         report["partial" if left else "applied"][name] = entry
 
+    if args.game in ("base", "hof"):
+        for name, data in move_backdrops(written, base, toe_new).items():
+            written[name] = data
+            report["applied"][name] = "the root's background on a centred window"
     if args.game == "base":
         written["types.xml"] = patch_types(base["types.xml"])
     elif args.game == "hof":

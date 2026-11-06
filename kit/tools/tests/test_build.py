@@ -216,6 +216,47 @@ def test_app_target_allowed_on_linux():
     assert args.preset == "linux"
 
 
+@pytest.mark.parametrize("arch", ["arm64", "aarch64"])
+def test_arch_cross_compiles_linux_for_arm64(tmp_path, monkeypatch, arch):
+    (tmp_path / "usr/include").mkdir(parents=True)
+    monkeypatch.setattr(build.platform, "machine", lambda: "x86_64")
+    game = ["--game-dir", str(build.ROOT / "games/stub")]
+    for extra, preset in [([], "linux-arm64"), (["--stub"], "linux-arm64-stub"),
+                          (["--config", "Debug"], "linux-arm64-debug")]:
+        args, _ = build.parse_args(["--target", "app", "--arch", arch, "--sysroot", str(tmp_path)] + extra + game,
+                                   system="Linux")
+        assert (args.cross, args.sysroot) == ("arm64", tmp_path.resolve())
+        assert build.preset_name(args.preset, args.config, stub=args.stub, target=args.target) == preset
+        assert build.cross_preset_arch(preset) == "arm64"
+    assert build.cross_preset_arch("linux") is None and build.cross_preset_arch("linux-stub") is None
+    assert build.LINUX_ARCHES["arm64"]["tarball"] == "aarch64"
+
+
+def test_arch_of_this_machine_is_the_plain_build(monkeypatch):
+    monkeypatch.setattr(build.platform, "machine", lambda: "aarch64")
+    args, _ = build.parse_args(["--target", "app", "--arch", "arm64", "--game-dir", str(build.ROOT / "games/stub")],
+                               system="Linux")
+    assert args.cross is None and args.preset == "linux"
+
+
+def test_arch_needs_a_sysroot(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(build.platform, "machine", lambda: "x86_64")
+    monkeypatch.setenv("RECOMP_LINUX_SYSROOT", str(tmp_path / "missing"))
+    with pytest.raises(SystemExit) as error:
+        build.parse_args(["--arch", "arm64", "--game-dir", str(build.ROOT / "games/stub")], system="Linux")
+    assert error.value.code == 2
+    assert "linux_sysroot.py --arch arm64" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("system, target", [("Darwin", "app"), ("Linux", "android")])
+def test_arch_is_for_linux_desktop_targets(system, target, capsys):
+    with pytest.raises(SystemExit) as error:
+        build.parse_args(["--target", target, "--arch", "arm64", "--game-dir", str(build.ROOT / "games/stub")],
+                         system=system)
+    assert error.value.code == 2
+    assert "--arch cross-compiles the Linux desktop targets" in capsys.readouterr().err
+
+
 def test_ios_target_still_needs_macos(capsys):
     with pytest.raises(SystemExit) as error:
         build.parse_args(

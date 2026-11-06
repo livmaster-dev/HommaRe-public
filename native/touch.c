@@ -105,27 +105,40 @@ void recomp_touch_hover(int state) {
  * iPad app is closed from the app switcher instead. Going to the background,
  * the host asks for a save; the game's own thread does it in its next frame
  * (the hover getter runs every frame), and the host waits for that. */
-static volatile int g_save_wanted, g_save_done;
+/* A request is a number; the game's thread answers the latest one it saw.
+ * Requests that pile up while one save is under way (a scene's and the app's
+ * notification, a module's and its launcher's) are answered by one save, and
+ * no request resets the answer another one is waiting for. */
+static volatile uint32_t g_save_asked, g_save_answered;
 void homm5_save_settings(X86 *c); /* native/save.cpp */
 
 void recomp_app_background(void) {
     int waited = 0;
-    g_save_done = 0;
-    __atomic_store_n(&g_save_wanted, 1, __ATOMIC_RELEASE);
-    while (!__atomic_load_n(&g_save_done, __ATOMIC_ACQUIRE) && waited < 3000) {
+    const uint32_t ask = __atomic_add_fetch(&g_save_asked, 1u, __ATOMIC_ACQ_REL);
+    while ((int32_t)(__atomic_load_n(&g_save_answered, __ATOMIC_ACQUIRE) - ask) < 0 && waited < 3000) {
         os_sleep_us(10000);
         waited += 10;
     }
     fprintf(stderr, "[homm5] settings %s before going to the background\n",
-            g_save_done ? "saved" : "not saved (the game did not reach a frame)");
+            (int32_t)(__atomic_load_n(&g_save_answered, __ATOMIC_ACQUIRE) - ask) >= 0
+                ? "saved"
+                : "not saved (the game did not reach a frame)");
 }
 
+static void nt_frame(X86 *c);           /* native/touch_native.c, below */
+static int homm5_native_hover(void);
+void homm5_hotkeys_frame(X86 *c); /* native/hotkeys.c: the panel's buttons and language */
+
 void homm5_hover_timeout(X86 *c) {
-    if (__atomic_exchange_n(&g_save_wanted, 0, __ATOMIC_ACQ_REL)) {
+    nt_frame(c);
+    homm5_hotkeys_frame(c);
+    const uint32_t asked = __atomic_load_n(&g_save_asked, __ATOMIC_ACQUIRE);
+    if (asked != __atomic_load_n(&g_save_answered, __ATOMIC_ACQUIRE)) {
         homm5_save_settings(c);
-        __atomic_store_n(&g_save_done, 1, __ATOMIC_RELEASE);
+        __atomic_store_n(&g_save_answered, asked, __ATOMIC_RELEASE);
     }
-    const int state = g_hover;
+    const int native = homm5_native_hover();
+    const int state = native >= 0 ? native : g_hover;
     int32_t ms;
     if (state == 0)
         ms = 0;
@@ -162,6 +175,122 @@ static uint32_t top_screen(void) {
 static uint32_t screen_modal(uint32_t screen, uint32_t sub) {
     const uint32_t windows = peek32(screen - sub + SCREEN_WINDOWS);
     return windows > 0xf8u ? peek32(windows - 0xf8u + WINDOWS_MODAL) : 0;
+}
+
+/* What the cursor drags (NUI::CCursor +0x4c, beside the cursor's id at +0x48
+ * in all three games): a counted object whose +4 is negative once the drag is
+ * over (CCursor's "is dragging" at 0070e1f0 in the base game). Zero when
+ * nothing is dragged. */
+static uint32_t dragged_object(void) {
+    const uint32_t obj = peek32(CURSOR_ID + 4u);
+    return obj && (int32_t)peek32(obj + 4u) >= 0 ? obj : 0;
+}
+
+/* For native/phone_hud.c: whether `win` (a CWindow) is the icon of what the
+ * cursor drags (an artifact's, a stack's, a hero's), laid out at the cursor.
+ * The drag object's +0xc points into the window, at its draw part (+0x110
+ * for a stack's CWindowSimple), not at its start. */
+int homm5_is_drag_icon(uint32_t win) {
+    const uint32_t obj = dragged_object();
+    const uint32_t icon = obj ? peek32(obj + 12u) : 0;
+    return win && icon >= win && icon - win < 0x200u;
+}
+
+/* An object's class name from its MSVC RTTI (vtable[-1] -> the complete object
+ * locator, +0xc -> the type descriptor, its name at +8: ".?AVCName@NUI@@"),
+ * or "" when the words do not lead to one. */
+static void rtti_name(uint32_t obj, char *name, size_t size) {
+    name[0] = 0;
+    const uint32_t vt = peek32(obj);
+    const uint32_t col = vt ? peek32(vt - 4u) : 0;
+    const uint32_t td = col ? peek32(col + 12u) : 0;
+    if (!td || td + 8u + size > (uint32_t)GUEST_SIZE)
+        return;
+    memcpy(name, g_mem + td + 8u, size - 1);
+    name[size - 1] = 0;
+    if (name[0] != '.' || name[1] != '?')
+        name[0] = 0;
+}
+
+/* The client of a drag (what the game drags: NUI::CTownScreenDragNDropClient-
+ * Heroes, ...Creatures and the like), found through the screen's drag-and-drop
+ * state: a NUI::CDragNDropBase the screen holds, whose +0x1c is the active
+ * NUI::CDragNDropHelper; that helper's +0x20 is the drag object the cursor
+ * holds and its +8 the client (measured in Tribes of the East's town screen,
+ * the base at screen-0x370). The base is looked for around the top screen's
+ * IScreen subobject, so no screen's layout is needed. Zero when not found. */
+static uint32_t drag_client(uint32_t obj) {
+    const uint32_t screen = top_screen();
+    char name[64];
+    for (int32_t off = -0x1000; screen && off < 0x1000; off += 4) {
+        const uint32_t base = peek32(screen + (uint32_t)off);
+        if (base < 0x1000u || base > (uint32_t)GUEST_SIZE - 0x40u)
+            continue;
+        rtti_name(base, name, sizeof name);
+        if (strcmp(name, ".?AVCDragNDropBase@NUI@@") != 0)
+            continue;
+        const uint32_t helper = peek32(base + 0x1cu);
+        if (helper && peek32(helper + 0x20u) == obj)
+            return peek32(helper + 8u);
+    }
+    return 0;
+}
+
+/* Whether the drag is one a held Shift splits on the drop: an army's stack, in
+ * a town, a hero's screen, a meeting or a garrison (the game opens its
+ * SplitStack window: the drop reads the screen's "shift" binding, e.g. the
+ * hero screen's at 008512bc in the base game). Every drag's object is a
+ * NUI::CDragNDropHelperShared; its icon window (+0xc) tells an artifact's (the
+ * inventory's DragIcon, a CWindowMSButton) from a stack's or a hero's (the
+ * plain UI/Common/Creatures/DragIcon, a CWindowSimple: UI/HeroScreen3 and
+ * UI/TownScreen hold them), and a town's hero, which nothing splits, is told
+ * by its client's class. Decided once per drag. */
+static int drag_splits(void) {
+    static uint32_t known_obj;
+    static int known;
+    const uint32_t obj = dragged_object();
+    const uint32_t icon = obj ? peek32(obj + 12u) : 0;
+    if (!icon) {
+        known_obj = 0; /* decided again next drag: the screen may be another by then */
+        return 0;
+    }
+    if (obj != known_obj) {
+        char icon_name[96], client_name[96];
+        rtti_name(icon, icon_name, sizeof icon_name);
+        const uint32_t client = drag_client(obj);
+        client_name[0] = 0;
+        if (client)
+            rtti_name(client, client_name, sizeof client_name);
+        known_obj = obj;
+        known = strstr(icon_name, "?AVCWindowSimple@@") && !strstr(client_name, "Heroes");
+        if (getenv("RECOMP_TRACE_TOUCH"))
+            fprintf(stderr, "[touch] dragging %s %s: %s\n", icon_name[0] ? icon_name : "(no RTTI)",
+                    client_name[0] ? client_name : "(client unknown)",
+                    known ? "a split may follow" : "no split");
+    }
+    return known;
+}
+
+/* The root window of the map's or a battle's screen when it is on top (in
+ * native/phone_layout.c's terms: its children at +0xa4), or zero: the
+ * screen's CWindowScreen is 0xf8 before the pointer it keeps. For
+ * native/hotkeys.c, which looks for the game's own buttons there. */
+uint32_t homm5_top_root(void) {
+    const uint32_t screen = top_screen();
+    const uint32_t vt = screen ? peek32(screen) : 0;
+    const uint32_t sub = vt == VT_ADVENTURE ? SUB_ADVENTURE : vt == VT_COMBAT ? SUB_COMBAT : 0;
+    const uint32_t windows = sub ? peek32(screen - sub + SCREEN_WINDOWS) : 0;
+    return windows > 0xf8u ? windows - 0xf8u : 0;
+}
+
+/* What the top screen is: 1 the adventure map, 2 a battle, 0 anything else
+ * (a town, a menu, a loading screen). For native/hotkeys.c: a screen's key
+ * section stays on under a town's, and a map's camera may have drawn its
+ * last frame a moment ago. */
+int homm5_top_screen_kind(void) {
+    const uint32_t screen = top_screen();
+    const uint32_t vt = screen ? peek32(screen) : 0;
+    return vt == VT_ADVENTURE ? 1 : vt == VT_COMBAT ? 2 : 0;
 }
 
 int homm5_ui_under_cursor(void); /* native/phone_hud.c */
@@ -222,6 +351,8 @@ int recomp_touch_context(void) {
     /* A text field or a list under the cursor (native/phone_hud.c): the
      * keyboard, a drag that scrolls. */
     flags |= homm5_ui_under_cursor();
+    if (drag_splits())
+        flags |= 256; /* RECOMP_TOUCH_DRAG_SPLIT */
     return flags;
 }
 
@@ -293,3 +424,7 @@ int recomp_pointer_place(int32_t x, int32_t y, int32_t width, int32_t height) {
     homm5_tap_pointer_placed(fx, fy); /* a battle parks it between turns */
     return 1;
 }
+
+uint32_t homm5_guest_call_regs(X86 *c, uint32_t fn, uint32_t ecx, uint32_t edx,
+                               const uint32_t *args, int nargs, uint32_t stack_top);
+#include "touch_native.c"

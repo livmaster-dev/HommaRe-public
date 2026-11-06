@@ -202,6 +202,15 @@ struct CreateScreenView: View {
                     .disabled(!load.enabled)
                     .frame(maxWidth: 150)
             }
+            // The expansions' random map generator (the game's own screen).
+            if let rmg = screen.buttons[named: "rmg"] {
+                Button(rmg.label) { store.send("press", ["name": "rmg"]) }
+                    .buttonStyle(PlateButtonStyle())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .disabled(!rmg.enabled)
+                    .frame(maxWidth: 150)
+            }
             if let create = screen.buttons[named: "create"] {
                 Button(create.label) { store.send("press", ["name": "create"]) }
                     .buttonStyle(PrimaryButtonStyle())

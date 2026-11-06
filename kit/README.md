@@ -250,6 +250,15 @@ and `tools/assemble_games.py --platform windows` puts the other games'
 manifest that makes UTF-8 its code page (`platform/windows/app.manifest`), and
 the native launcher runs the `innoextract.exe` the build places beside the app.
 
+Linux on 64-bit ARM builds natively with the `linux` preset, or cross-compiles
+on x86-64 Linux with the host's clang and lld (`cmake/toolchains/linux-aarch64.cmake`).
+`tools/linux_sysroot.py --arch arm64` makes a Debian 12 sysroot in a rootless
+podman or docker container (its apt runs under qemu-user's binfmt_misc entry),
+and `tools/build.py --arch arm64` builds against it with the `linux-arm64`
+presets, into `build/linux-arm64/` (`build/linux-arm64-stub/` for the stub);
+the translation in `build/recomp/gen` is shared. With qemu-user installed, the
+tests run through it: `tools/test.py --preset linux-arm64-stub --native`.
+
 ## Check a change
 
 ```sh

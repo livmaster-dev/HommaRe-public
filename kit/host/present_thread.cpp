@@ -92,6 +92,24 @@ static void (*g_sched_probe)(uint64_t out[8]) = nullptr;
 namespace {
 // The refresh rate of the offscreen presenter's synthetic display link.
 constexpr double kOffscreenHz = 120.0;
+// When a frame whose GPU work has not completed is lost (see tick and
+// lost_after): kLostGpuSeconds after its commit returned, on a device whose commits
+// return at once (Metal, a Vulkan GPU), where the GPU runs the work after commit.
+// A device that presents synchronously (lavapipe) returns from commit only once
+// it has run the frame, so a loaded one takes seconds per commit, and then a frame
+// may take up to kStuckGpuSeconds to complete (lavapipe on a loaded CPU took up to
+// 19 s while the game was loading) - unless a frame committed after it has already
+// completed, which an in-order queue never does for a frame that is only slow.
+// The device counts as synchronous while at least kSlowCommitsNeeded of its last
+// kCommitHistory commits took kSlowCommitSeconds or more: several, so one commit
+// stretched by something else (the process suspended mid-commit while hidden) does
+// not keep a stuck frame waiting 30 s. kSlowCommitSeconds is well above what a
+// present blocks for on an asynchronous queue (a few refreshes at most).
+constexpr double kLostGpuSeconds = 2.0;
+constexpr double kStuckGpuSeconds = 30.0;
+constexpr double kSlowCommitSeconds = 0.25;
+constexpr size_t kCommitHistory = 8;
+constexpr unsigned kSlowCommitsNeeded = 2;
 using Clock = std::chrono::steady_clock;
 template <class T> struct AtomicShared {
     std::shared_ptr<T> value;
@@ -516,6 +534,10 @@ struct Service : std::enable_shared_from_this<Service> {
         f->gpu = true;
         f->success = f->success && success;
         f->gpu_ts = ts;
+        // Not yet stamped when the handler runs before commit returns (Metal can):
+        // commit_present counts it then.
+        if (f->command_commit_ts >= 0)
+            completed_commit_ts = std::max(completed_commit_ts, f->command_commit_ts);
         // Slow GPU work is not a lost display callback. Give the ready
         // drawable two more refreshes without releasing its target early.
         f->acknowledgement_deadline = std::max(f->acknowledgement_deadline, ts + 2 * frame_period);
@@ -583,19 +605,48 @@ struct Service : std::enable_shared_from_this<Service> {
                                 }
                             });
         }
+        double commit_start;
         {
             std::lock_guard lock(mutex);
             f->command_id = cb.id;
-            f->command_commit_ts = now();
+            commit_start = now();
         }
         device->commit(cb);
+        {
+            // Stamped once commit returns: the GPU has the work from here on (see tick).
+            std::lock_guard lock(mutex);
+            f->command_commit_ts = now();
+            note_commit(f->command_commit_ts - commit_start);
+            if (f->gpu) // its completion handler ran inside commit
+                completed_commit_ts = std::max(completed_commit_ts, f->command_commit_ts);
+        }
+    }
+    // The last kCommitHistory commits' durations, to tell a device that presents
+    // synchronously from one that does not (see kLostGpuSeconds).
+    std::array<double, kCommitHistory> commit_seconds{};
+    size_t commits_noted = 0;
+    void note_commit(double seconds) { // mutex held
+        commit_seconds[commits_noted++ % kCommitHistory] = seconds;
+    }
+    bool commits_slow() const { // mutex held
+        unsigned slow = 0;
+        for (size_t i = 0; i < std::min(commits_noted, kCommitHistory); ++i)
+            slow += commit_seconds[i] >= kSlowCommitSeconds;
+        return slow >= kSlowCommitsNeeded;
+    }
+    // How long after its commit a frame whose GPU work has not completed is lost.
+    double lost_after(const Frame &f) const { // mutex held
+        if (completed_commit_ts > f.command_commit_ts || !commits_slow())
+            return kLostGpuSeconds;
+        return kStuckGpuSeconds;
     }
     uint64_t sched_prev[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     bool sched_primed = false;
     uint64_t cpu_prev = 0;
     std::thread::id cpu_thread{};
     void seal(uint64_t id, HostScreenClass cls, bool had_draws, bool prefix_pending = false) {
-        std::lock_guard lock(mutex);
+        std::unique_lock lock(mutex);
+        await_writer(lock); // never seal pixels still being staged
         if (stop || !writing)
             return;
         auto f = std::move(writing);
@@ -704,7 +755,12 @@ struct Service : std::enable_shared_from_this<Service> {
         return device->create_texture(
             {w, h, format, gpu::UsageSampled | gpu::UsageRenderTarget | gpu::UsageCpu, 1});
     }
+    // Test hook: the next N composites fail as an out-of-memory device would.
+    std::atomic<unsigned> fail_composites{0};
     std::shared_ptr<Composite> composite(int w, int h, gpu::Format format) {
+        for (unsigned n = fail_composites.load(); n;)
+            if (fail_composites.compare_exchange_weak(n, n - 1))
+                return nullptr;
         gpu::Texture t = texture(w, h, format);
         if (!t)
             return nullptr;
@@ -716,12 +772,33 @@ struct Service : std::enable_shared_from_this<Service> {
         c->format = format;
         return c;
     }
+    // GPU allocation for the writer happens outside the mutex: under load an
+    // allocation can wait for the device (its transfer lock is held across
+    // one-shot GPU waits), and holding the mutex meanwhile stopped the worker
+    // and every completion callback with it. A writer doing so counts itself in
+    // `writer_unlocked`; it owns what it fills - a reserved target slot, or the
+    // writing frame's target, which only this frame references until it is
+    // sealed - and seal, other writers and stop wait for it on `completed`.
+    unsigned writer_unlocked = 0;
+    void await_writer(std::unique_lock<std::mutex> &lock) { // mutex held
+        completed.wait(lock, [&] { return stop || writer_unlocked == 0; });
+    }
+    void writer_unlock(std::unique_lock<std::mutex> &lock) {
+        ++writer_unlocked;
+        lock.unlock();
+    }
+    void writer_relock(std::unique_lock<std::mutex> &lock) {
+        lock.lock();
+        --writer_unlocked;
+        completed.notify_all();
+    }
     // Apply backpressure before the first write. Dropping an unrendered frame
     // loses persistent surface updates (dirty HUD rectangles, cursor erasure),
     // even if later whole-scene frames can still be displayed. Completed frames
     // may be discarded by the mailbox after their surface contents are retained.
     HostSceneTarget acquire(int gw, int gh, int rw, int rh) {
         std::unique_lock lock(mutex);
+        await_writer(lock);
         if (stop || gw <= 0 || gh <= 0)
             return {};
         if (writing)
@@ -779,6 +856,7 @@ struct Service : std::enable_shared_from_this<Service> {
         auto target = targets[slot];
         if (!target)
             target = std::make_shared<Target>();
+        targets[slot] = target; // reserved: in use while this holds it
         target->device = fake ? nullptr : device;
         const gpu::TextureDesc overlay_desc = !fake && target->scene.overlay
                                                   ? device->describe(target->scene.overlay)
@@ -792,6 +870,7 @@ struct Service : std::enable_shared_from_this<Service> {
                     --fail_allocations;
                 gpu::Texture world, overlay;
                 if (!fake && !failed) {
+                    writer_unlock(lock);
                     world = texture(w, h, gpu::Format::BGRA8);
                     overlay = texture(gw, gh, gpu::Format::BGRA8);
                     failed = !world || !overlay;
@@ -800,6 +879,11 @@ struct Service : std::enable_shared_from_this<Service> {
                             device->destroy(world);
                         if (overlay)
                             device->destroy(overlay);
+                    }
+                    writer_relock(lock);
+                    if (stop) { // the presenter stopped meanwhile: the target goes with it
+                        target->scene = {world, overlay, w, h};
+                        return {};
                     }
                 }
                 if (!failed) {
@@ -838,25 +922,31 @@ struct Service : std::enable_shared_from_this<Service> {
     }
 
     std::atomic<bool> recreate_chain{false}; // a frame was lost on the GPU (see tick)
+    double completed_commit_ts = -1;         // the latest commit among completed frames
     int chain_w = 0, chain_h = 0;            // the swapchain's size, to recreate it
+    // The worker is the only writer of `chain`; the pacer reads it under the mutex.
+    void set_chain(gpu::Swapchain c) {
+        std::lock_guard lock(mutex);
+        chain = c;
+    }
     void tick(double ts) {
         if (!std::isfinite(ts) || ts < 0)
             return;
         if (recreate_chain.exchange(false) && device && surface && chain && !fake) {
             device->destroy(chain);
-            chain = device->create_swapchain(surface, chain_w, chain_h);
+            set_chain(device->create_swapchain(surface, chain_w, chain_h));
         }
         if (auto m = message.exchange(nullptr)) {
             if (m->install) {
                 if (device && chain) {
                     device->destroy(chain);
-                    chain = {};
+                    set_chain({});
                 }
                 surface = m->surface;
                 chain_w = m->w;
                 chain_h = m->h;
                 if (device && surface && !fake)
-                    chain = device->create_swapchain(surface, m->w, m->h);
+                    set_chain(device->create_swapchain(surface, m->w, m->h));
                 std::lock_guard lock(mutex);
                 if (!flights.empty()) {
                     // A drawable on the detached layer may never present. Cancel
@@ -897,13 +987,21 @@ struct Service : std::enable_shared_from_this<Service> {
                 bool lost = false;
                 for (auto &pending : flights) {
                     completion_fallback(pending, ts);
-                    // A frame whose GPU work has not ended after 2 s is lost (seen after the
-                    // full-screen window was hidden and shown again, NFS Carbon 2026-10-10:
-                    // it held its slot forever, the slots filled, and the window stayed black
-                    // while the game ran). Recover as for a new layer, below.
-                    if (!pending->gpu && ts - pending->submitted_ts >= 2.0)
+                    // A frame whose GPU work never ends is lost (seen after the full-screen
+                    // window was hidden and shown again, NFS Carbon 2026-10-10: it held its
+                    // slot forever, the slots filled, and the window stayed black while the
+                    // game ran). Recover as for a new layer, below. The age runs from the
+                    // commit's return, not from submission: that also counted the worker's
+                    // composing and committing, and a driver that presents synchronously
+                    // (lavapipe) returns from commit only once the GPU has run the frame, so
+                    // a slow frame read as lost before its completion handler could run. A
+                    // frame still being committed has no age yet. How long it may take
+                    // depends on whether the device presents synchronously (lost_after).
+                    const bool committed = pending->command_commit_ts >= 0;
+                    const double gpu_age = committed ? ts - pending->command_commit_ts : 0.0;
+                    if (!pending->gpu && committed && gpu_age >= lost_after(*pending))
                         lost = true;
-                    if (!pending->gpu && ts - pending->submitted_ts >= 1.0) {
+                    if (!pending->gpu && gpu_age >= 1.0) {
                         if (!(logged_faults & 16))
                             fprintf(stderr,
                                     "presenter: GPU timeout evidence frame=%llu cb=%llu "
@@ -911,8 +1009,7 @@ struct Service : std::enable_shared_from_this<Service> {
                                     (unsigned long long)pending->frame_id,
                                     (unsigned long long)pending->command_id, int(pending->cls),
                                     int(pending->repeat), (ts - pending->submitted_ts) * 1000.0,
-                                    pending->command_id ? (ts - pending->command_commit_ts) * 1000.0
-                                                        : -1.0);
+                                    committed ? gpu_age * 1000.0 : -1.0);
                         fault(16, "GPU completion timed out; retaining target until completion");
                     }
                 }
@@ -1056,8 +1153,12 @@ struct Service : std::enable_shared_from_this<Service> {
                 reuse_composition ? cached : composite(w, h, out_format);
             gpu::CommandBuffer cb = device->begin();
             if (!cb || !out) {
+                // Hand back what this frame took: the drawable to its swapchain,
+                // and the begun command buffer, empty, so the device retires it.
                 if (drawable)
                     device->release_drawable(chain, drawable);
+                if (cb)
+                    device->commit(cb);
                 if (f) {
                     std::lock_guard lock(mutex);
                     flights.erase(std::find(flights.begin(), flights.end(), f));
@@ -1316,6 +1417,10 @@ void host_present_start(void *native_surface, int w, int h) {
     s->surface = native_surface;
     s->drawable_w = w;
     s->drawable_h = h;
+    // A lost frame recreates the swapchain at this size until a resize changes it;
+    // unset, the recreated one took whatever extent the surface reported.
+    s->chain_w = w;
+    s->chain_h = h;
     s->chain =
         native_surface ? s->device->create_swapchain(native_surface, w, h) : gpu::Swapchain{};
     fprintf(stderr, "presenter: %dx%d drawable, at most %zu display submissions in flight\n",
@@ -1440,7 +1545,8 @@ extern "C" void host_present_stop() {
         s->sweep();
         s->completed.wait(lock, [&] {
             s->sweep();
-            return s->flights.empty() && s->retiring.empty() && s->pending_commands == 0;
+            return s->flights.empty() && s->retiring.empty() && s->pending_commands == 0 &&
+                   s->writer_unlocked == 0;
         });
         s->writing.reset();
         s->history_lease.reset();
@@ -1525,30 +1631,33 @@ extern "C" void host_present_stage_rgba(const uint8_t *rgba, int w, int h) {
     if (!s || !rgba || w <= 0 || h <= 0)
         return;
     s->acquire(w, h, 0, 0);
-    std::lock_guard lock(s->mutex);
+    std::unique_lock lock(s->mutex);
+    s->await_writer(lock);
     if (s->stop || !s->writing || !s->writing->target)
         return;
     s->guest_w = w;
     s->guest_h = h;
     s->writing->diagnostic = {};
     s->writing->staged_pixels = true;
-    auto &t = *s->writing->target;
-    if (s->fake)
+    const auto target = s->writing->target;
+    auto &t = *target;
+    if (s->fake) {
         t.test_pixels.assign(rgba, rgba + size_t(w) * h * 4);
-    else {
-        t.device = s->device;
-        if (!t.pixels || t.pixels_w != w || t.pixels_h != h ||
-            t.pixels_format != gpu::Format::RGBA8) {
-            if (t.pixels)
-                s->device->destroy(t.pixels);
-            t.pixels = s->texture(w, h);
-            t.pixels_format = gpu::Format::RGBA8;
-            t.pixels_w = w;
-            t.pixels_h = h;
-        }
-        if (t.pixels)
-            s->device->upload(t.pixels, {0, 0, w, h}, rgba, w * 4);
+        return;
     }
+    t.device = s->device;
+    s->writer_unlock(lock); // allocation and upload: see Service::writer_unlocked
+    if (!t.pixels || t.pixels_w != w || t.pixels_h != h || t.pixels_format != gpu::Format::RGBA8) {
+        if (t.pixels)
+            s->device->destroy(t.pixels);
+        t.pixels = s->texture(w, h);
+        t.pixels_format = gpu::Format::RGBA8;
+        t.pixels_w = w;
+        t.pixels_h = h;
+    }
+    if (t.pixels)
+        s->device->upload(t.pixels, {0, 0, w, h}, rgba, w * 4);
+    s->writer_relock(lock);
 }
 // Whether a real device is presenting, so a guest-side GPU path has a queue to
 // put its work on and a frame to stage it into.
@@ -1568,18 +1677,24 @@ bool host_present_stage_texture(gpu::Texture src, int w, int h, int guest_w, int
     // backbuffers are not sampled as RGBA, including when a frame slot is reused.
     const auto format = s->device->describe(src).format;
     s->acquire(guest_w, guest_h, 0, 0);
-    std::lock_guard lock(s->mutex);
+    std::unique_lock lock(s->mutex);
+    s->await_writer(lock);
     if (s->stop || !s->writing || !s->writing->target)
         return false;
-    auto &t = *s->writing->target;
+    const auto target = s->writing->target;
+    auto &t = *target;
     t.device = s->device;
     if (!t.pixels || t.pixels_w != w || t.pixels_h != h || t.pixels_format != format) {
+        s->writer_unlock(lock); // allocation: see Service::writer_unlocked
         if (t.pixels)
             s->device->destroy(t.pixels);
         t.pixels = s->texture(w, h, format);
         t.pixels_format = format;
         t.pixels_w = w;
         t.pixels_h = h;
+        s->writer_relock(lock);
+        if (s->stop || !s->writing || s->writing->target != target)
+            return false;
     }
     if (!t.pixels)
         return false;
@@ -1945,6 +2060,14 @@ uint8_t host_present_test_last_pixel() {
     std::lock_guard lock(s->mutex);
     return s->last_pixel;
 }
+void host_present_test_fail_composites(unsigned n) {
+    if (auto s = active.load())
+        s->fail_composites = n;
+}
+unsigned host_present_test_composite_failures_left() {
+    auto s = active.load();
+    return s ? s->fail_composites.load() : 0;
+}
 void host_present_test_fail_allocations(unsigned n) {
     auto s = active.load();
     std::lock_guard lock(s->mutex);
@@ -2066,6 +2189,13 @@ void host_present_test_commit_swapchain(gpu::Swapchain chain) {
     gpu::Texture drawable = s->device->acquire(chain);
     gpu::CommandBuffer cb = s->device->begin();
     s->commit_present(f, drawable, cb);
+}
+void host_present_test_set_clock(double ts) {
+    auto s = active.load();
+    if (!s || !s->fake)
+        return;
+    std::lock_guard lock(s->mutex);
+    s->fake_now = ts;
 }
 extern "C" int32_t host_display_anchor(uint64_t id, int8_t h, int8_t v, int clear) {
     if (clear)

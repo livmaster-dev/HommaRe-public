@@ -555,7 +555,6 @@ struct SkinDetails: View {
 
     @ViewBuilder private var primary: some View {
         let style = SkinButtonStyle(skin: skin, kind: .large)
-        #if os(macOS) || RECOMP_INNOEXTRACT_LIB
         if PrimaryButton.installs(entry) {
             install(style)
         } else if entry.isInterrupted {
@@ -565,20 +564,11 @@ struct SkinDetails: View {
         } else {
             play(style)
         }
-        #else
-        if PrimaryButton.installs(entry) { install(style) } else { play(style) }
-        #endif
     }
 
     /// The game is not here (or not whole): Install is the main button.
     private func install(_ style: SkinButtonStyle) -> some View {
-        Button(L10n.installFromGog) {
-            #if os(macOS)
-            model.pickInstaller()
-            #else
-            importerShown = true
-            #endif
-        }
+        Button(L10n.installFromGog) { model.showGog() }
         .buttonStyle(style)
         .keyboardShortcut(.defaultAction)
     }
@@ -629,7 +619,7 @@ struct SkinGameScroll: View {
             Spacer(minLength: 0)
             SkinDivider().padding(.horizontal, 16).padding(.vertical, 10)
             #if os(macOS)
-            SkinMenuLink(title: L10n.installFromGog) { model.pickInstaller() }
+            SkinMenuLink(title: L10n.installFromGog) { model.showGog() }
             SkinMenuLink(title: L10n.settings) { withAnimation(.easeOut(duration: 0.2)) { model.settingsShown = true } }
             #else
             // A finger wants a button, not a line of the menu.
@@ -936,6 +926,7 @@ struct SkinProgressDialog: View {
         case .extracting: return L10n.phaseUnpacking
         case .verifying: return L10n.phaseVerifying
         case .patching: return L10n.phasePatching
+        case .downloading: return L10n.phaseDownloading
         }
     }
 }
@@ -1044,8 +1035,14 @@ struct SkinSettings: View {
                             cell(L10n.cameraButtons) {
                                 choices([L10n.showVideos, L10n.hideButtons], model.cameraButtons ? 0 : 1, size: 20) { model.setCameraButtons($0 == 0) }
                             }
+                            cell(L10n.commandPanel) {
+                                choices([L10n.showVideos, L10n.hideButtons], model.commandPanel ? 0 : 1, size: 20) { model.setCommandPanel($0 == 0) }
+                            }
                             cell(L10n.battleCells) {
                                 choices([L10n.off, L10n.on], model.battleCells ? 1 : 0, size: 20) { model.setBattleCells($0 == 1) }
+                            }
+                            cell(L10n.touchMode) {
+                                choices([L10n.touchCursor, L10n.touchNative], model.nativeTouch ? 1 : 0, size: 20) { model.setNativeTouch($0 == 1) }
                             }
                             cell(L10n.silentMode) {
                                 choices([L10n.respect, L10n.ignore], model.ignoreSilentMode ? 1 : 0, size: 20) { model.setIgnoreSilentMode($0 == 1) }
@@ -1168,8 +1165,14 @@ struct SkinSettings: View {
             row(L10n.cameraButtons) {
                 choices([L10n.showVideos, L10n.hideButtons], model.cameraButtons ? 0 : 1) { model.setCameraButtons($0 == 0) }
             }
+            row(L10n.commandPanel) {
+                choices([L10n.showVideos, L10n.hideButtons], model.commandPanel ? 0 : 1) { model.setCommandPanel($0 == 0) }
+            }
             row(L10n.battleCells) {
                 choices([L10n.off, L10n.on], model.battleCells ? 1 : 0) { model.setBattleCells($0 == 1) }
+            }
+            row(L10n.touchMode) {
+                choices([L10n.touchCursor, L10n.touchNative], model.nativeTouch ? 1 : 0) { model.setNativeTouch($0 == 1) }
             }
             row(L10n.silentMode) {
                 choices([L10n.respect, L10n.ignore], model.ignoreSilentMode ? 1 : 0) { model.setIgnoreSilentMode($0 == 1) }

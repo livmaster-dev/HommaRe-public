@@ -15,6 +15,9 @@ uint64_t host_present_test_last_id();
 uint8_t host_present_test_last_pixel();
 bool host_present_test_class_valid();
 void host_present_test_fail_allocations(unsigned count);
+// The next `count` composites fail to allocate, on the real worker's path too.
+void host_present_test_fail_composites(unsigned count);
+unsigned host_present_test_composite_failures_left();
 int host_present_test_requested_width();
 bool host_present_test_read_rgba(uint8_t *out, size_t bytes);
 
@@ -29,3 +32,6 @@ bool host_present_test_input_legacy();
 // completion acknowledgement) through the installed gpu::Device - a
 // gpu::FakeDevice in tests - with a drawable from `chain`.
 void host_present_test_commit_swapchain(gpu::Swapchain chain);
+// Set the fake presenter's clock as a tick would, without ticking: time that
+// passes while the worker is inside a commit.
+void host_present_test_set_clock(double ts);
