@@ -9,7 +9,8 @@ A recipe is text, one record per line, fields separated by tabs:
 
     recipe  1
     name    <mod name>
-    out     <profile path of the mod; phone/... only on an iPhone>
+    out     <profile path of the mod; phone/... only on an iPhone,
+            touch/... only with native touch (host.touch/native)>
     date    YYYY-MM-DD HH:MM:SS      the date its zip entries carry
     over    <out of a recipe applied first>   (optional) whose files are
             taken before the layers', as the generator took them
@@ -20,6 +21,8 @@ A recipe is text, one record per line, fields separated by tabs:
             (tools/touch_ui_mod.py); a picture takes no line edits
     @       <source line> <lines removed>    an edit; the lines it puts in follow
     new     <name>                           a file the port writes whole
+    new64   <name>                           (format 3) the same for a picture
+            the port drew: its bytes in base64, one + line per 76 characters
     +<text>  *<text>  =<text>                a line ending in LF, CRLF, nothing
 
 Line numbers count from 0 in the source file split after each LF; edits come
@@ -30,14 +33,15 @@ visibility, backgrounds, window references); `check_lines` keeps the game's
 texts and descriptions out.
 """
 
+import base64
 import difflib
 import hashlib
 import re
 import struct
 
-FORMAT = 2
-# Formats this reader takes: 1 has no `turn`.
-FORMATS = (1, 2)
+FORMAT = 3
+# Formats this reader takes: 1 has no `turn`, 2 no `new64`.
+FORMATS = (1, 2, 3)
 
 # What the edits may write: a window's placement (positions, sizes, anchors
 # and their flags), a root screen's alignment, whether it (or an option) is
@@ -121,15 +125,18 @@ def _unline(rec):
 
 
 def write(path, *, name, out, date, layers, files, sources, authored=(), over=None, allowed_lines=(),
-          turned=(), comment=""):
+          turned=(), drawn=(), comment=""):
     """Write the recipe for `files` ({name: bytes}, the mod's contents).
     sources: {name: (source name, source bytes)} for each file made from one
     of the game's; authored: the names written whole (ui_mod_parts.py);
-    turned: {name: turn} for the pictures made by turning their source.
+    turned: {name: turn} for the pictures made by turning their source;
+    drawn: the pictures written whole, in base64 (the port's own art).
     Raises ValueError when a file has neither, or an edit writes anything but
     layout (or one of allowed_lines)."""
     out_lines = [b"# " + c.encode() for c in comment.splitlines()]
-    out_lines += [b"recipe\t%d" % FORMAT, b"name\t" + name.encode(), b"out\t" + out.encode(),
+    # The oldest format that holds it, for the apps that read only that.
+    version = FORMAT if any(n in files for n in drawn) else 2
+    out_lines += [b"recipe\t%d" % version, b"name\t" + name.encode(), b"out\t" + out.encode(),
                   b"date\t" + date.encode()]
     if over:
         out_lines.append(b"over\t" + over.encode())
@@ -155,6 +162,10 @@ def write(path, *, name, out, date, layers, files, sources, authored=(), over=No
         elif fname in authored:
             out_lines.append(b"new\t" + fname.encode())
             out_lines += [_line(raw) for raw in split_lines(data)]
+        elif fname in drawn:
+            out_lines.append(b"new64\t" + fname.encode())
+            text = base64.b64encode(data)
+            out_lines += [b"+" + text[i:i + 76] for i in range(0, len(text), 76)]
         else:
             raise ValueError("%s: neither made from a game file nor written by the port" % fname)
     if bad:
@@ -173,7 +184,9 @@ def read(path):
             continue
         if raw[:1] in b"+*=":
             line = _unline(raw)
-            if "text" in cur:
+            if "b64" in cur:
+                cur["b64"] += line.rstrip(b"\n")
+            elif "text" in cur:
                 cur["text"] += line
             else:
                 cur["edits"][-1][2].append(line)
@@ -199,8 +212,14 @@ def read(path):
         elif key == "new":
             cur = {"name": vals[0], "text": b""}
             rec["files"].append(cur)
+        elif key == "new64":
+            cur = {"name": vals[0], "text": b"", "b64": b""}
+            rec["files"].append(cur)
         else:
             raise ValueError("%s: unknown record %r" % (path, key))
+    for f in rec["files"]:
+        if "b64" in f:
+            f["text"] = base64.b64decode(f.pop("b64"), validate=True)
     return rec
 
 

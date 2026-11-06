@@ -3,6 +3,7 @@
 games' modules, no game file and no mod made from one, and check it.
 
     tools/build_app.py --target app          # build/HommaRe.app (macOS), build/package/HommaRe (Linux)
+    tools/build_app.py --target app --arch arm64   # Linux on ARM from x86-64: build/linux-arm64/package/HommaRe
     tools/build_app.py --target ios-sim      # build/ios-sim/.../HommaRe.app
     RECOMP_IOS_TEAM=<team> tools/build_app.py --target ios
     tools/build_app.py --target ios --unsigned   # build/HommaRe-iOS.ipa
@@ -35,6 +36,7 @@ AltStore or SideStore sign it again with the player's Apple ID.
 """
 
 import argparse
+import importlib.util
 import platform as host_platform
 import shutil
 import subprocess
@@ -48,6 +50,11 @@ sys.path.insert(0, str(ROOT / "kit/tools"))
 from assemble_games import built_app, load_game  # noqa: E402
 import game_config  # noqa: E402
 import web_launcher  # noqa: E402
+
+# kit/tools/build.py by path: a module named `build` could be another package.
+_spec = importlib.util.spec_from_file_location("kit_build", ROOT / "kit/tools/build.py")
+kit_build = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(kit_build)
 
 
 def sign_ad_hoc(app, entitlements):
@@ -98,13 +105,24 @@ def main():
                    help="web: serve the site at localhost:PORT (default 8000) once it is checked")
     p.add_argument("--unsigned", action="store_true",
                    help="iOS: build without a team and pack build/<app>-iOS.ipa for sideloading")
+    p.add_argument("--arch", choices=("arm64", "aarch64"),
+                   help="Linux: cross-compile the app for 64-bit ARM (kit/tools/build.py --arch); it is "
+                        "left in build/linux-arm64/package/HommaRe")
+    p.add_argument("--sysroot", type=Path, help="--arch: the target's sysroot (kit/tools/linux_sysroot.py)")
     args = p.parse_args()
     if args.unsigned and args.target != "ios":
         p.error("--unsigned is for --target ios")
     if args.serve is not None and args.target != "web":
         p.error("--serve is for --target web")
+    if (args.arch or args.sysroot) and (args.target != "app" or host_platform.system() != "Linux"):
+        p.error("--arch and --sysroot are for --target app on Linux")
     desktop = "linux" if host_platform.system() == "Linux" else "macos"
     platform = {"app": desktop}.get(args.target, args.target)
+    # A cross build keeps its outputs in build/linux-<arch> beside the
+    # machine's own (kit/tools/build.py cross_arch); on the ARM machine itself
+    # --arch arm64 is the plain build.
+    cross = kit_build.cross_arch(args.arch)
+    builds = Path("linux-" + cross) if cross else Path()
 
     if not args.skip_build:
         for game in GAMES:
@@ -113,6 +131,10 @@ def main():
                 cmd += ["--game-modules", "--no-game-files", "--no-install"]
             if args.unsigned:
                 cmd.append("--unsigned")
+            if args.arch:
+                cmd += ["--arch", args.arch]
+            if args.sysroot:
+                cmd += ["--sysroot", str(args.sysroot.resolve())]
             if not args.overlay:
                 cmd.append("--release")
             if args.jobs:
@@ -130,12 +152,12 @@ def main():
             web_launcher.serve(site, args.serve)
         return code
     _, app_name = load_game(ROOT)
-    app = built_app(ROOT / "build", app_name, platform)
+    app = built_app(ROOT / "build" / builds, app_name, platform)
     if not app.is_dir():
         sys.exit("No %s after the build" % app)
     cmd = [sys.executable, str(ROOT / "kit/tools/assemble_games.py"), "--app", str(app), "--platform", platform]
     for game in GAMES[1:]:
-        cmd += ["--game", str(game)]
+        cmd += ["--game", str(game), "--build-root", str(game / "build" / builds)]
     print("+ " + " ".join(cmd), flush=True)
     subprocess.run(cmd, cwd=ROOT, check=True)
     if args.unsigned:

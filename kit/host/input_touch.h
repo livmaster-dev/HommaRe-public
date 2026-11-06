@@ -62,6 +62,15 @@ constexpr double kTouchZoomNotches = 2.0;
 // one direction and up once the fingers have not turned for kTouchTwistIdleNs.
 constexpr double kTouchTwistStep = 0.05;
 constexpr uint64_t kTouchTwistIdleNs = 120ull * 1000000ull;
+// Hover: a drag the game says a held Shift would split (RECOMP_TOUCH_DRAG_SPLIT)
+// whose finger rests this long within kTouchSplitSlop holds Shift until the
+// drop. The ring that counts it down shows after kTouchSplitShowNs, so a
+// passing pause draws nothing; moving kTouchSplitCancel from where Shift went
+// down lets it go again.
+constexpr uint64_t kTouchSplitHoldNs = 700ull * 1000000ull;
+constexpr uint64_t kTouchSplitShowNs = 300ull * 1000000ull;
+constexpr double kTouchSplitSlop = 10.0;
+constexpr double kTouchSplitCancel = 40.0;
 
 // A hardware pointer stops at the inner side of a strip the system keeps along
 // a window edge (a status bar): it cannot go further. A pointer resting within
@@ -105,7 +114,7 @@ struct TouchPoint {
 };
 
 struct TouchAction {
-    enum Kind { Motion, Button, Key, Wheel, Camera, Gesture } kind;
+    enum Kind { Motion, Button, Key, Wheel, Camera, Gesture, Native } kind;
     // Motion only: also place the game's own cursor here. True for a press
     // and for a left drag; false while the wheel button is held, when the
     // game scrolls or rotates from relative movement instead.
@@ -123,6 +132,9 @@ struct TouchAction {
     double zoom = 1, turn = 0;
     // Gesture: one the game gives a meaning of its own (runtime/native_seam.h
     // RECOMP_TOUCH_GESTURE_*), delivered in order with the clicks around it.
+    // Native: the gesture itself for a game that acts on it at the point
+    // (runtime/native_seam.h recomp_touch_event): RECOMP_TOUCH_EVENT_* here,
+    // RECOMP_TOUCH_PHASE_* in phase, at (x, y); a tap's count in button.
     int gesture = 0;
 };
 
@@ -143,7 +155,10 @@ class TouchMapper {
     // once; a finger that rests or moves after resting only moves the cursor
     // and lifts without a click; a tap with a second finger while the first
     // rests right-clicks where the first one is. Taps, drags and two-finger
-    // gestures are as in the classic table.
+    // gestures are as in the classic table, except that a drag of the
+    // interface is never snapped onto the window's edges, and one the game
+    // would split with Shift (RECOMP_TOUCH_DRAG_SPLIT) holds Shift once its
+    // finger rests kTouchSplitHoldNs (split_ring shows the count).
     void set_hover(bool on) {
         hover_ = on;
     }
@@ -157,6 +172,22 @@ class TouchMapper {
     //   a drag aims without buttons.
     void set_context(int flags) {
         context_ = flags;
+    }
+    // Native gestures (runtime/native_seam.h recomp_touch_event), for a game
+    // that acts on a gesture at its point with no cursor to place: one finger
+    // becomes Native actions - it touched, tapped (with the count of a double
+    // tap), rested and moved while resting, dragged the interface - instead of
+    // placements and clicks, and a two-finger tap a Native right tap. What
+    // the game says lies under the finger (set_context, now its answer for the
+    // point it touched) still picks the camera or a list for a drag, and
+    // multi-finger gestures are as with hover. Implies hover.
+    void set_native(bool on) {
+        native_ = on;
+        if (on)
+            hover_ = true;
+    }
+    bool native() const {
+        return native_;
     }
     // A game that moves its map camera itself (runtime/native_seam.h
     // recomp_camera_gesture): on a world map a one-finger drag and any
@@ -204,6 +235,35 @@ class TouchMapper {
     bool text_input_wanted() const {
         return text_input_;
     }
+    // A resting drag counting down to a split (RECOMP_TOUCH_DRAG_SPLIT): where
+    // the finger is, in window points, and how far the count is (0 to 1; 1 once
+    // Shift is held). False when there is nothing to show.
+    bool split_ring(uint64_t now_ns, double *x, double *y, double *progress) const;
+    // Commands from an on-screen panel (runtime/native_seam.h
+    // recomp_hotkeys_state), in SDL scancodes:
+    // - command_tap presses `key` with up to three modifiers (pressed first)
+    //   and lets go of them all as a click is let go, kTouchClickHoldNs and
+    //   kTouchClickHoldFrames presented frames later. False, with nothing
+    //   pressed, while a finger is on the game: its gesture owns the input.
+    // - command_latch holds a modifier (Ctrl, Shift) until the next click or
+    //   drag on the game has been let go and its release seen, or until it is
+    //   pressed again. Returns whether it is held now.
+    // - set_next_tap_right: the next tap on the game right-clicks where it
+    //   lands (what the game says about the thing there), then the taps are
+    //   left clicks again.
+    bool command_tap(int key, const int *mods, int nmods, uint64_t now_ns,
+                     std::vector<TouchAction> *out);
+    bool command_latch(int key, std::vector<TouchAction> *out);
+    bool latched(int key) const;
+    void set_next_tap_right(bool on) {
+        next_right_ = on;
+    }
+    bool next_tap_right() const {
+        return next_right_;
+    }
+    // The screen the commands were for is gone: held modifiers go up and the
+    // next tap is a left click again.
+    void command_reset(std::vector<TouchAction> *out);
 
   private:
     struct Finger {
@@ -220,6 +280,16 @@ class TouchMapper {
     bool scrolling_ = false;      // a drag over a list: the wheel scrolls it
     double scroll_y_ = 0;         // the finger's last point that sent a notch
     bool hover_ = false;
+    bool native_ = false;
+    bool native_drag_ = false;    // native: an interface drag under way (Native drag events)
+    bool native_press_ = false;   // native: the finger rested; a Native press is under way
+    bool native_pressed_moved_ = false;
+    int native_taps_ = 0;         // native: the last tap's count, for a double tap
+    double native_tap_x_ = 0, native_tap_y_ = 0;
+    uint64_t native_tap_ns_ = 0;
+    void native_event(std::vector<TouchAction> *out, int kind, int phase, double x, double y,
+                      int count = 1);
+    void native_tap(std::vector<TouchAction> *out, double x, double y, uint64_t now);
     bool scrubbing_ = false;      // hover: the rested finger moved; the cursor follows it
     // Hover: a second finger landed beside a resting first one. Its quick lift
     // right-clicks at the first finger; the gesture then ends without more clicks.
@@ -252,7 +322,7 @@ class TouchMapper {
     double twist_acc_ = 0;
     void two_finger_world(uint64_t now, std::vector<TouchAction> *out);
     void scroll(std::vector<TouchAction> *out, double x, double y);
-    void start_hover_drag(std::vector<TouchAction> *out);
+    void start_hover_drag(uint64_t now, std::vector<TouchAction> *out);
     void pan_begin(std::vector<TouchAction> *out, double fx, double fy);
     void pan_move(std::vector<TouchAction> *out, double fx, double fy);
     void pan_end(std::vector<TouchAction> *out, double fx, double fy);
@@ -289,6 +359,49 @@ class TouchMapper {
     bool presents_known_ = false;
     uint32_t presents_ = 0;
     uint32_t presents_at_press_ = 0;
+    // A drag the game would split with Shift (RECOMP_TOUCH_DRAG_SPLIT): where
+    // and since when its finger rests, and Shift once the rest was long enough.
+    // Shift outlives the drop by kTouchClickHoldFrames, as a click's release
+    // does, so the frame that sees the button go up still sees Shift.
+    bool hover_drag_ = false; // a hover left drag of the interface (no edge snap)
+    double split_x_ = 0, split_y_ = 0;
+    uint64_t split_t0_ = 0;
+    bool split_shift_ = false;
+    bool split_up_pending_ = false;
+    uint64_t split_up_due_ = 0, split_up_deadline_ = 0;
+    uint32_t split_up_presents_ = 0;
+    void split_rest(double x, double y, uint64_t now, std::vector<TouchAction> *out);
+    void split_tick(uint64_t now, std::vector<TouchAction> *out);
+    void split_drop(uint64_t now);
+    void split_release(std::vector<TouchAction> *out);
+    // The panel's commands: a tap's keys waiting to be let go, the held
+    // modifiers and whether the game has been clicked since they went down,
+    // and the right click the next tap becomes.
+    struct KeyUp {
+        int keys[4];
+        int n;
+        uint64_t due, deadline;
+        uint32_t presents;
+    };
+    std::vector<KeyUp> key_ups_;
+    int latch_keys_[4] = {};
+    int latch_n_ = 0;
+    bool latch_pressed_ = false;
+    bool latch_up_pending_ = false;
+    uint64_t latch_up_due_ = 0, latch_up_deadline_ = 0;
+    uint32_t latch_up_presents_ = 0;
+    bool next_right_ = false;
+    void command_tick(uint64_t now, std::vector<TouchAction> *out);
+    void latch_release(std::vector<TouchAction> *out);
+    bool held_long_enough(uint64_t now, uint64_t due, uint64_t deadline, uint32_t presents) const;
+    // Notes a button pressed on the game while a modifier is held (the click
+    // or drag that lets it go), whichever entry point emitted it.
+    struct PressWatch {
+        TouchMapper *mapper;
+        const std::vector<TouchAction> *out;
+        size_t from;
+        ~PressWatch();
+    };
     bool release_ready(uint64_t now) const;
     void place(std::vector<TouchAction> *out, double x, double y, bool snap = true);
     // chain: a tap soon after the last left click and near it lands exactly on

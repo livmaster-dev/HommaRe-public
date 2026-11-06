@@ -400,9 +400,9 @@ struct Actions: View {
     }
 }
 
-/// Play; Install while the selected game is not installed (the GOG installer
-/// on the Mac, the Files app on iOS); Resume install while its install is
-/// unfinished.
+/// Play; Install while the selected game is not installed (the GOG.com
+/// panel: a download from the player's GOG library, or their installer
+/// files); Resume install while its install is unfinished.
 struct PrimaryButton: View {
     @Bindable var model: LauncherModel
     var entry: GameEntry
@@ -422,11 +422,7 @@ struct PrimaryButton: View {
     var body: some View {
         if Self.installs(entry) {
             Button {
-                #if os(macOS)
-                model.pickInstaller()
-                #else
-                importerShown?.wrappedValue = true
-                #endif
+                model.showGog()
             } label: {
                 Label(L10n.installFromGog, systemImage: "arrow.down.circle.fill").labelStyle(PlayLabel())
                     .frame(maxWidth: fill ? .infinity : nil)
@@ -438,7 +434,6 @@ struct PrimaryButton: View {
     }
 
     @ViewBuilder private var playOrResume: some View {
-        #if os(macOS) || RECOMP_INNOEXTRACT_LIB
         if entry.isInterrupted {
             Button {
                 model.resumeInstall()
@@ -450,9 +445,6 @@ struct PrimaryButton: View {
         } else {
             playButton
         }
-        #else
-        playButton
-        #endif
     }
 
     private var playButton: some View {
@@ -558,6 +550,7 @@ struct ImportPanel: View {
         case .extracting: return L10n.installing(progress.name)
         case .verifying: return L10n.verifying(progress.name)
         case .patching: return L10n.patching(progress.name)
+        case .downloading: return L10n.downloading(progress.name)
         }
     }
 }
@@ -658,6 +651,18 @@ struct LauncherRootView: View {
                     SkinModal(size: geo.size, natural: settingsSize(geo.size, tall: tall)) {
                         SkinSettings(skin: skin, model: model, tall: tall, phone: SkinSettings.phone(for: geo.size))
                     }
+                } else if model.gogShown {
+                    if let skin {
+                        SkinModal(size: geo.size, natural: gogSize(geo.size, tall: tall)) {
+                            GogPanel(model: model, skin: skin, tall: tall, useInstallers: useInstallers)
+                        }
+                    } else {
+                        Color.black.opacity(0.45).ignoresSafeArea()
+                        GogPanel(model: model, skin: nil, useInstallers: useInstallers).padding(24)
+                    }
+                }
+                if model.gogLoginShown {
+                    GogLoginOverlay(model: model)
                 }
                 // Arrow keys move through the list.
                 Group {
@@ -709,6 +714,22 @@ struct LauncherRootView: View {
         // The first search; snapshots (ImageRenderer) run this task again and
         // must not start another one.
         .task { if !model.hasScanned { model.refresh() } }
+    }
+
+    /// The GOG.com panel's size before it is scaled to the window: a phone's
+    /// as the settings', a page of the options screen elsewhere.
+    private func gogSize(_ window: CGSize, tall: Bool) -> CGSize {
+        SkinSettings.phone(for: window) || tall ? settingsSize(window, tall: tall) : CGSize(width: 900, height: 680)
+    }
+
+    /// The GOG panel's way to the player's own installer files.
+    private func useInstallers() {
+        model.gogShown = false
+        #if os(macOS)
+        model.pickInstaller()
+        #else
+        importerShown = true
+        #endif
     }
 
     private func step(_ d: Int) {

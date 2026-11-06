@@ -64,6 +64,7 @@
 #define HOMM5_RET_ANCHOR_X 0x00e35733
 #define HOMM5_RET_ANCHOR_Y 0x00e3577d /* and for y (the dragged icon, native/ui_bounds.c; the phone rows, native/phone_layout.c) */
 #define HOMM5_FN_COUNTER_MAKE fn_00739b00 /* a battle's stack counter made (the base game's 008333f0) */
+#define HOMM5_FN_SET_PLACEMENT fn_00e35920 /* a window's SetPlacement (the base game's 00e3b9f0) */
 
 /* The phone's interface (native/phone_hud.c), from the base game's through
  * byte-identical functions, RTTI and the classes' sub-object offsets
@@ -287,6 +288,33 @@ void fn_00557470(X86 *c);
 #define NS_LOAD_CLOSE      0x00644510 /* V 14 votes, identical body */
 #define NS_LOAD_TYPE       0x00629930 /* V hash */
 #define NS_LOAD_SIZE       0x00629e30 /* V hash */
+/* A LAN game's and a hot seat's load screens (CLoadScreen<SLanSaveHeaderInfo>,
+ * CLoadScreen<SHotSeatHeaderInfo>), also at +0x2b4 with the same fields; their
+ * headers are longer (research notes lan-load-toe-map.md). */
+#define NS_VT_LOAD_LAN     0x00f58578
+#define NS_LOAD_LAN_CLICK  0x00649180
+#define NS_LOAD_LAN_LOAD   0x0062e5a0
+#define NS_LOAD_LAN_CONFIRMED 0x00643d00
+#define NS_L_LAN_ROW       0x298
+#define NS_VT_LOAD_HS      0x00f57534
+#define NS_LOAD_HS_CLICK   0x006490a0
+#define NS_LOAD_HS_LOAD    0x0062ecd0
+#define NS_LOAD_HS_CONFIRMED 0x0062ee60
+#define NS_L_HS_ROW        0x94
+/* The in-game Save screens, CSaveScreen<SHeaderInfo>, <SLanSaveHeaderInfo> and
+ * <SHotSeatHeaderInfo>: 4 bytes longer than the base game's (a LAN save
+ * callback at +0x2b0), so their IScreen is at +0x2c8; the name field and the
+ * NS_L_* fields are the load screen's, the row click and delete the load
+ * screen's of the kind (research notes save-screens-toe-map.md). */
+#define NS_VT_SAVE         0x00f5720c
+#define NS_SUB_SAVE        0x2c8
+#define NS_SAVE_SAVE       0x0062dfc0
+#define NS_VT_SAVE_LAN     0x00f58640
+#define NS_SAVE_LAN_SAVE   0x00644b20
+#define NS_VT_SAVE_HS      0x00f5778c
+#define NS_SAVE_HS_SAVE    0x0062f570
+#define NS_SAVE_CAN        0x00629ef0 /* fastcall ECX [screen+0x198]: AL may save now */
+#define NS_S_GAME          0x198
 #define NS_DIFF_OF_SAVE    0x00abe080 /* V hash */
 #define NS_DIFF_ENTRY      0x00abe040 /* V hash */
 
@@ -362,6 +390,36 @@ void fn_00557470(X86 *c);
 #define NS_GAME_VERSION "3.1"
 #define NS_PAK_DIRS "data" /* the paks it mounts, for the native views' pictures */
 
+/* GameSpy clDataList string readers and the fixed buffers of all 52 calls of
+ * the unbounded one (native/net_guard.c). The unbounded reader is the base
+ * game's 004432d0, the bounded one 00443390; PLAYERINFO's seven fields
+ * (0042a710, the base game's 0042a5e0) go into 12/16/36/36/68/132/132. The
+ * sites are in the base game's order (net_guard.c names each), the sizes the
+ * same. */
+#define HOMM5_GS_STR_ORIG fn_00443400
+#define HOMM5_GS_STR_BOUNDED fn_004434c0
+#define HOMM5_GS_STR_SITES \
+    {0x0042a7d8u, 12}, {0x0042a7ecu, 16}, {0x0042a800u, 36}, {0x0042a814u, 36}, {0x0042a828u, 68}, \
+        {0x0042a83cu, 132}, {0x0042a850u, 132}, {0x00424b6cu, 36}, {0x00424bafu, 132}, \
+        {0x00424bcau, 132}, {0x00425150u, 36}, {0x0042518fu, 132}, {0x004251a6u, 132}, \
+        {0x0043f668u, 16}, {0x0043f67eu, 132}, \
+        {0x0042742au, 36}, {0x004274a4u, 36}, {0x0042752fu, 132}, {0x00423a2eu, 132}, \
+        {0x00423a66u, 132}, {0x004224aau, 132}, {0x00428e9fu, 132}, {0x00430624u, 36}, \
+        {0x004260fau, 16}, {0x004235d6u, 16}, {0x00425ba0u, 36}, {0x004262b7u, 16}, \
+        {0x0041fdf1u, 36}, {0x0041fe07u, 36}, {0x0041fe1du, 128}, {0x0041fe33u, 128}, \
+        {0x004220adu, 129}, {0x0042220du, 129}, {0x0042272cu, 36}, {0x0042276du, 36}, \
+        {0x004229c9u, 16}, {0x004229ddu, 129}, {0x004229edu, 129}, {0x00422b0fu, 16}, \
+        {0x00422c9fu, 16}, {0x00423d1fu, 16}, {0x00423e7fu, 16}, {0x00425eb8u, 16}, \
+        {0x00425ee8u, 16}, {0x004278bau, 36}, {0x00427f77u, 33}, {0x00428150u, 36}, \
+        {0x00429839u, 16}, {0x00429872u, 132}, {0x0042994fu, 16}, {0x00429963u, 36}, \
+        {0x0042998au, 1024},
+
+/* The GS login (native/gs_login.c): the SDK's login entry, reached from
+ * ProcessLogin (00e0e0d0) through the thunk 00419530, and
+ * ProcessLoginRouterResult. */
+#define HOMM5_FN_GS_LOGIN fn_00419c20
+#define HOMM5_FN_GS_LOGIN_RESULT fn_00e0e500
+
 /* ---- ubi.com screens (native/screens_ubi.c): Tribes of the East 3.1 ----
  * research notes lan/ubi-screens-expansions.md. Inner offsets = base (no NS_UBI_UL_* etc. needed). */
 #define NS_UBI_VT_LOGIN         0x00f759b0  /* base 00fc2cb0; V RTTI CMPRegisterScreen IScreen */
@@ -429,7 +487,13 @@ void fn_00557470(X86 *c);
  * ITEM_DATA 0x04, GAME_INFO 0x0c; GI_OPEN 0x18, GI_NAME 0x1c, GI_LOCKED 0x34 (= password non-empty), GI_MAX 0x6c,
  * GI_SIZE 0x70, GI_SAVED 0x90, GI_MAP 0xcc, GI_ARENA 0xf8; CHAT_* 0x0c/0x18/0x0c; PLAYER_NAME 0x0c; EDIT_TEXT 0x3c;
  * BOX_CB 0x17c, BOX_EDIT 0x180, BOX_ID 0x188. V (lan-screens-toe.md "Checked and equal"). */
-#define NS_LAN_UBI_ONLY         1           /* the lobbies natively in ubi.com mode only */
+/* the duel's create dialog (CMPDMCreateScreen; lan-screens-toe.md §1, §5, §2) */
+#define NS_LAN_VT_DUEL_CREATE   0x00f7b504  /* base 00fc7cec; V RTTI */
+#define NS_LAN_SUB_DUEL_CREATE  0x1b4       /* base 0x1b0; V */
+#define NS_LAN_DUEL_CREATE_OK   0x008dfa00  /* base 0099c900; V reg `create` */
+#define NS_LAN_DUEL_CREATE_CANCEL 0x008df860 /* base 0099c760; V reg `cancel` */
+#define NS_LAN_DC_SPEED         0x198       /* base 0x194 (a new dword at +0x194); V init 008ded40 */
+/* name 0x17c, password 0x180, lockedgame 0x184, triple_heroes 0x18c: same; V */
 
 /* ---- network game: create (ns_mp_create) and players (ns_mp_wait), Tribes of the East 3.1 ----
  * Screen fields = base; the options block differs. */
@@ -454,6 +518,13 @@ void fn_00557470(X86 *c);
 #define NS_MPC_SPEED_NAME      0x00abe110  /* base 00b97ca0; V (= NS_DUEL_SPEED_NAME) */
 
 #define NS_VT_MPW              0x00f6c91c  /* base 00fbaae0; V RTTI CMPWaitScreen IScreen */
+/* A loaded LAN game's players (NUI::CMPUbiComLoadScreen, a CMPWaitScreen):
+ * the load logic keeps its model at +0x26c and sets +0x314 once the game
+ * starts (research notes lan-load-toe-map.md). */
+#define NS_VT_MPL              0x00f6c9dc
+#define NS_SUB_MPL             0x1e8
+#define NS_MPL_MODEL           0x26c
+#define NS_MPL_STARTED         0x314
 #define NS_SUB_MPW             0x1cc       /* same; V */
 #define NS_MPW_START           0x00899080  /* base 00962750; V re-checked ([+0x18c], [+0x1b4]; RET 4) */
 #define NS_MPW_BACK            0x00899050  /* base 00962720; V re-checked */
@@ -471,3 +542,54 @@ void fn_00557470(X86 *c);
  * 008f3ff8 re-checked; rest lan-screens-toe.md). */
 /* NS_MAP_GOAL is the out-string form here (NS_MAP_GOAL_OUT 1 already defined): see §3. */
 #define NS_MPO_QUICK_LABEL     "Быстрая схватка", "Quick combat"   /* ToE's own words; V */
+
+/* The battle's "strike from a cell" mode (native/tap_attack.c): the base
+ * game's functions matched in this exe (research notes tap-attack-toe-map.md,
+ * 2026-10-31). The combat screen's fields sit lower and the ICombat and
+ * ICombatBase vtables are in another order; the key bindings did not move. */
+#define HOMM5_TAP_SCREEN_VTABLE 0x00f591b8 /* NUI::CCombatArenaScreen, the full object */
+#define HOMM5_TAP_FN_ACTION fn_0064e770    /* the action for what is under the cursor */
+#define HOMM5_TAP_FN_CLICK fn_0064c360     /* win_left_button_up */
+#define HOMM5_TAP_FN_PICK fn_0064e160      /* what is under the cursor, into P, RET 8 */
+#define HOMM5_TAP_CURSOR_X 0x0110c464      /* NUI::CCursor's position */
+#define HOMM5_TAP_CURSOR_Y 0x0110c468
+#define HOMM5_TAP_FN_GRID fn_0070d860      /* the grid cells' states */
+#define HOMM5_TAP_SET_CELL 0x0070e140
+#define HOMM5_TAP_ATTACK_CELLS 0x00b88ff0
+#define HOMM5_TAP_MOVE_ATTACK 0x00bcd3a0
+#define HOMM5_TAP_MOVE_ATTACK_VTABLE 0x00fbf004
+#define HOMM5_TAP_RELEASE 0x004e42e0
+#define HOMM5_TAP_FREE 0x004dd510
+#define HOMM5_TAP_SCR_COMBAT 0x2a0
+#define HOMM5_TAP_SCR_ACTIVE 0x2ac
+#define HOMM5_TAP_SCR_PHASE 0x2e0
+#define HOMM5_TAP_SCR_S 0x2ec
+#define HOMM5_TAP_SCR_P 0x2f4
+#define HOMM5_TAP_SCR_GRID 0x3c4
+#define HOMM5_TAP_SCR_SHIFT 0x4c
+#define HOMM5_TAP_SCR_CTRL 0x54
+#define HOMM5_TAP_COMBAT_CELL_TO_WORLD 0x6c
+#define HOMM5_TAP_UNIT_CELL 0x40
+#define HOMM5_TAP_UNIT_SIZE 0x44
+
+/* native/touch_native.c (native touch), mapped from the base game with
+ * games/map_addresses.py; the screen and window layouts it reads match. */
+#define HOMM5_NT_QUEUE 0x004ec700          /* the WndProc's event queue (base 005f3140) */
+#define HOMM5_NT_QUEUE_LIST 0x010f4184     /* its list (base 01133ed4) */
+#define HOMM5_NT_CWS_ISCREEN_VT 0x00fef734 /* CWindowScreen's IScreen part */
+#define HOMM5_NT_VT_MOVIE 0x00f76d08       /* NUI::CVideoScreen */
+#define HOMM5_NT_VT_LOADING 0x00f5c7d8     /* NUI::CPWLScreenInterface */
+#define HOMM5_NT_FN_EDGE_SCROLL fn_0060de80 /* CCursor::GetEdgeScroll (vtable +0x20) */
+#define HOMM5_NT_FN_CURSOR_UPDATE fn_0060dd60 /* CCursor::Update (vtable +0x1C), RET 4 */
+#define HOMM5_VT_CARD 0x00ff55c4           /* CCommonGatheringWindow: an object's card */
+#define HOMM5_NT_ISCREEN_HIDE_TIP 0x6c  /* IScreen: hide the tooltip (as in the base game) */
+#define HOMM5_NT_FN_CARD_WINDOW fn_007078f0        /* CClickingTooltipCreator: the card's window (vt 00f62bf0 slot 0; base 007fcc80) */
+#define HOMM5_NT_FN_CARD_WINDOW_COMBAT fn_007082c0 /* CClickingCombatTooltipCreator's (vt 00f62c3c slot 0; base 007fd500) */
+#define HOMM5_NT_FN_CARD_WINDOW_ATB fn_00708200    /* CClickingATBTooltipCreator's, the turn order bar's (vt 00f62c88 slot 0; ToE only) */
+
+/* The touch panel's commands (native/hotkeys.c): the active key sections'
+ * vector, kept by 005b59b0 (the base game's 006bb7e0), and the profile's
+ * files, named for the expansion. */
+#define HOMM5_BIND_SECTIONS 0x0110b680
+#define HOMM5_INPUT_CFG "input_a2.cfg"
+#define HOMM5_GLOBAL_CFG "global_a2.cfg"

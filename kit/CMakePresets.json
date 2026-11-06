@@ -96,6 +96,30 @@
       }
     },
     {
+      "name": "linux-arm64",
+      "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64.cmake"
+    },
+    {
+      "name": "linux-arm64-debug",
+      "inherits": "linux-arm64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-arm64-stub",
+      "inherits": "linux-arm64",
+      "cacheVariables": {
+        "POP_TRANSLATE": "STUB"
+      }
+    },
+    {
       "name": "windows-cross",
       "inherits": "base",
       "toolchainFile": "${sourceDir}/cmake/toolchains/llvm-mingw.cmake",
@@ -225,6 +249,18 @@
       "configurePreset": "linux-stub"
     },
     {
+      "name": "linux-arm64",
+      "configurePreset": "linux-arm64"
+    },
+    {
+      "name": "linux-arm64-debug",
+      "configurePreset": "linux-arm64-debug"
+    },
+    {
+      "name": "linux-arm64-stub",
+      "configurePreset": "linux-arm64-stub"
+    },
+    {
       "name": "windows-stub",
       "configurePreset": "windows-stub"
     },
@@ -310,6 +346,27 @@
     {
       "name": "linux-stub",
       "configurePreset": "linux-stub",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-arm64",
+      "configurePreset": "linux-arm64",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-arm64-debug",
+      "configurePreset": "linux-arm64-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-arm64-stub",
+      "configurePreset": "linux-arm64-stub",
       "output": {
         "outputOnFailure": true
       }

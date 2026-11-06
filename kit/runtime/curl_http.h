@@ -16,6 +16,10 @@
 // always has, offline, and so does gsconnect when the game names no
 // gsconnect host, the host cannot ask, or the player cancels.
 //
+// The servers.ini that a chosen server answered with also names that server
+// for the game's login (its ServerID and LoginNonce, else its address): the
+// password the game then sends is a token derived from it (gs_login.h).
+//
 // The game sets a write callback (CURLOPT_WRITEFUNCTION) and its cookie
 // (CURLOPT_WRITEDATA) and nothing else that matters; the reply's body goes to
 // that callback in a guest buffer, as libcurl would hand it over.

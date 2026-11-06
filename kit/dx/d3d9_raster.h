@@ -12,6 +12,7 @@
 // image comes from the game's own shaders, and so a GPU path has something to
 // be compared against.
 #pragma once
+#include <stddef.h>
 #include <cstdint>
 #include <vector>
 

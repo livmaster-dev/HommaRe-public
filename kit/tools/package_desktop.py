@@ -98,13 +98,16 @@ def stage_linux_resources(cfg: dict, resources: Path) -> list:
     return files
 
 
-def stage(app_binary: Path, cfg: dict, out_dir: Path, system=None, build_dir=None, game_dir=None) -> Path:
+def stage(app_binary: Path, cfg: dict, out_dir: Path, system=None, build_dir=None, game_dir=None,
+          arch=None) -> Path:
     """Copy the app and host resources into a folder, plus a Linux tarball.
 
     Only named build resources are copied. Shaders are embedded in the host;
     SoundFonts and optional replacement textures belong to the player's game.
     game_dir, when given, is the game repository whose layouts/ (its shipped
-    on-screen control layouts) is bundled at resources/controls.
+    on-screen control layouts) is bundled at resources/controls. arch names
+    the tarball's processor for a cross build (aarch64); else it is this
+    machine's.
     """
     system = system or platform.system()
     if system not in {"Linux", "Windows"}:
@@ -206,7 +209,7 @@ def stage(app_binary: Path, cfg: dict, out_dir: Path, system=None, build_dir=Non
     files.append(readme)
 
     if system == "Linux":
-        machine = platform.machine().lower()
+        machine = (arch or platform.machine()).lower()
         arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
         archive = out_dir / f"{app_name}-linux-{arch}.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:

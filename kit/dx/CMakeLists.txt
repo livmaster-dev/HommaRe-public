@@ -70,6 +70,15 @@ pop_optimize(d3d9_tests 1)
 pop_test_binary(d3d9_tests)
 add_test(NAME d3d9_tests COMMAND d3d9_tests WORKING_DIRECTORY ${POP_ROOT})
 set_tests_properties(d3d9_tests PROPERTIES LABELS nogame)
+# Lazy buffers under page protection, in this machine's pages and in the
+# 16 KiB and 64 KiB ones of Apple silicon and some ARM Linux kernels.
+if(NOT WIN32)
+  foreach(page 0 16384 65536)
+    add_test(NAME d3d9_pages_${page} COMMAND d3d9_tests pages WORKING_DIRECTORY ${POP_ROOT})
+    set_tests_properties(d3d9_pages_${page} PROPERTIES LABELS nogame
+      ENVIRONMENT "RECOMP_D3D9_WRITE_TRACK=protect;RECOMP_D3D9_HOST_PAGE=${page}")
+  endforeach()
+endif()
 
 # The virtual pad through the DirectInput joystick and XInput. Its own binary
 # because it defines the host_pad_* callbacks strongly, which dx_tests must not.

@@ -52,7 +52,13 @@ def ctest(build_dir, labels, env):
 
 def configure(preset, game_dir, build_root):
     build_dir = build_py.build_dir_for(build_root, preset)
-    build_py.configure(preset, build_py.game_defines(game_dir, build_root), build_dir=build_dir)
+    defines = build_py.game_defines(game_dir, build_root)
+    # A cross preset (linux-arm64) runs its tests through qemu-user, against the
+    # sysroot tools/build.py --arch would use.
+    arch = build_py.cross_preset_arch(preset)
+    if arch:
+        defines.append("-DRECOMP_LINUX_SYSROOT=" + build_py.linux_sysroot(arch).as_posix())
+    build_py.configure(preset, defines, build_dir=build_dir)
     return build_dir
 
 

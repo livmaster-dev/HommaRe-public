@@ -2046,7 +2046,19 @@ void k_WaitForMultipleObjects(X86 *c) {
 //                            (the pre-scheduler behaviour, for bisection)
 // -------------------------------------------------------------------------
 const uint32_t STILL_ACTIVE_ = 0x103;
-const uint32_t THREAD_STACK_BYTES = 0x00040000u; // 256 KB, committed
+// The smallest guest thread stack, committed. A thread gets at least what its
+// creator asked for and at least the image's SizeOfStackReserve, as on Windows:
+// Heroes V's network threads run a routine (00dd11b0 in Hammers of Fate) with
+// half a megabyte of locals, and on a 256 KB stack it wrote over whatever the
+// heap kept below it.
+const uint32_t THREAD_STACK_BYTES = 0x00040000u; // 256 KB
+const uint32_t THREAD_STACK_MAX = 0x01000000u;   // 16 MB
+
+uint32_t thread_stack_bytes(uint32_t requested) {
+    uint32_t n = std::max(requested, loader_stack_reserve());
+    n = std::min(std::max(n, THREAD_STACK_BYTES), THREAD_STACK_MAX);
+    return (n + 0xffffu) & ~0xffffu;
+}
 const uint32_t WAIT_TIMEOUT_ = 0x102;
 
 // What a blocked thread is waiting for.  A blocked thread is not runnable and
@@ -2479,7 +2491,14 @@ void sched_wait_locked(size_t me, double until, double max_slice) {
         // handoff makes short mouse/keyboard workers cost a full 2 ms slice,
         // many times per rendered frame while the pointer moves. Poll events
         // first, then wait on the notification the returning worker signals.
+        // Host code rounds to nearest (x86.h); the scheduler is reached from
+        // translated code too, in the guest's rounding mode.
+        const unsigned guest_rc = recomp_host_rc();
+        if (guest_rc != 0)
+            recomp_host_set_rc(0);
         waiter(awaiting_baton ? 0.0 : slice);
+        if (guest_rc != 0)
+            recomp_host_set_rc(guest_rc);
         g_in_idle_slice = false;
         g_sched_m.lock();
         if (!awaiting_baton || g_baton == me)
@@ -3590,11 +3609,11 @@ bool request_process_exit(uint32_t code) {
 // TEB with the SEH head empty and the stack bounds Windows records there, and
 // a TLS array with the image's initial block and all other slots zeroed.
 // Returns false when the guest heap cannot supply them.
-bool thread_prepare_context(GuestThread *t) {
-    t->stack_lo = heap_alloc(THREAD_STACK_BYTES, true, 16);
+bool thread_prepare_context(GuestThread *t, uint32_t stack_bytes) {
+    t->stack_lo = heap_alloc(stack_bytes, true, 16);
     if (!t->stack_lo)
         return false;
-    t->stack_hi = t->stack_lo + THREAD_STACK_BYTES;
+    t->stack_hi = t->stack_lo + stack_bytes;
     uint32_t block = heap_alloc(TEB_SIZE + TLS_SLOTS * 4, true, 16);
     if (!block) {
         heap_free(t->stack_lo);
@@ -3609,6 +3628,7 @@ bool thread_prepare_context(GuestThread *t) {
     t->ctx.fpu_sw = 0;
     t->ctx.fpu_tag = 0xffff;
     t->ctx.fpu_top = 0;
+    t->ctx.mxcsr = RECOMP_MXCSR_DEFAULT; // a new thread's, whatever its creator's
     t->ctx.eflags_misc = 0x00000202u;
     t->ctx.fs_base = t->teb;
     wr32(t->teb + 0x00, 0xffffffffu); // SEH chain head: empty
@@ -3653,6 +3673,7 @@ void run_thread_body(X86 *c, uint32_t h) {
     // frame stays live across an ExitThread longjmp, so it survives intact.
     X86 caller_ctx = *c;
     const uint32_t profile_depth = recomp_profile_depth();
+    c->mxcsr = RECOMP_MXCSR_DEFAULT; // a new thread's, whatever its creator's
     if (setjmp(g_sync_thread_jmp) == 0) {
         uint32_t result = guest_call(c, start, param);
         if (HObj *t = handle_get(h, H_THREAD))
@@ -3660,6 +3681,7 @@ void run_thread_body(X86 *c, uint32_t h) {
     }
     recomp_profile_truncate(profile_depth);
     *c = caller_ctx;
+    recomp_fp_host();          // back in the CreateThread shim, however the body ended
     recomp_seh_frame_leave(c); // retire checkpoints from a synchronous guest worker
     g_in_sync_thread = saved_in;
     g_sync_thread_handle = saved_handle;
@@ -3669,13 +3691,13 @@ void run_thread_body(X86 *c, uint32_t h) {
 // Starts a cooperative thread.  It does not run yet: CreateThread returns to
 // its caller first, exactly as on Windows, and the new thread gets the baton
 // the first time somebody yields.
-bool thread_spawn(uint32_t h) {
+bool thread_spawn(uint32_t h, uint32_t stack_bytes) {
     cur_thread(); // main is threads()[0]
     GuestThread *t = new GuestThread();
     t->index = threads().size();
     t->handle = h;
     t->id = g_next_thread_id++;
-    if (!thread_prepare_context(t)) {
+    if (!thread_prepare_context(t, stack_bytes)) {
         delete t;
         return false;
     }
@@ -3727,7 +3749,7 @@ void k_CreateThread(X86 *c) {
         return;
     }
 
-    if (!thread_spawn(h)) {
+    if (!thread_spawn(h, thread_stack_bytes(arg(c, 1)))) {
         LOGW("CreateThread(%08x): no context available, reporting failure", start);
         handles()[h].exit_code = 0;
         handles()[h].thread_ran = true;

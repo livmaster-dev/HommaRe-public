@@ -462,6 +462,14 @@ bool imports_dispatch(X86 *c, uint32_t target) {
         recomp_seh_validate_chain(c, "import enter", ab_desc);
     }
 
+    // Host code - the observers and the shim - rounds to nearest, whatever the
+    // guest set MXCSR to; the guest's mode, possibly a new one from
+    // _control87, is back in force before translated code runs again (x86.h,
+    // SSE rounding control).
+    const bool guest_directed = (c->mxcsr & 0x6000u) != 0;
+    if (RECOMP_UNLIKELY(guest_directed))
+        recomp_fp_host();
+
     // The arguments as they are NOW, before the shim runs: a stdcall shim pops
     // them, so after the call they are gone and this is the only point they
     // can be read. Only meaningful for a known stdcall count; a cdecl or
@@ -492,6 +500,8 @@ bool imports_dispatch(X86 *c, uint32_t target) {
     // Read after the shim ran, so the pointer is into the table as it is now.
     if (g_return_observer)
         g_return_observer(label(), c->r[R_EAX]);
+    if (RECOMP_UNLIKELY(guest_directed || (c->mxcsr & 0x6000u) != 0))
+        recomp_fp_guest(c);
     if (trace)
         log_msg(2, "<- %s (eax=%08x)", label(), c->r[R_EAX]);
     if (RECOMP_UNLIKELY(ab_old))
@@ -589,8 +599,14 @@ uint32_t guest_call(X86 *c, uint32_t fn, const uint32_t *args, int nargs) {
     c->r[R_ESP] = esp;
     call->return_sp = esp;
     callbacks.stack.push_back(call);
+    // Guest code rounds as its MXCSR says; the caller, usually a shim, gets
+    // its own mode back however the callback ends.
+    const unsigned caller_rc = recomp_host_rc();
+    recomp_fp_guest(c);
     if (!setjmp(call->env))
         recomp_run(c, fn);
+    if (recomp_host_rc() != caller_rc)
+        recomp_host_set_rc(caller_rc);
     recomp_seh_callback_leave(c, recomp_callback_depth());
     uint32_t eax = c->r[R_EAX];
     c->r[R_ESP] = call->saved_esp;

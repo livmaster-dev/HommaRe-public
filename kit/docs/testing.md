@@ -49,6 +49,16 @@ first builds and runs a deterministic 32-frame entity capture from your own game
 in an isolated directory; no saved capture from another checkout is needed. The gameplay
 runner uses an isolated profile and original textures unless a local pack exists.
 
+For Linux on 64-bit ARM from an x86-64 Linux host, make the sysroot once with
+`tools/linux_sysroot.py --arch arm64`, then `tools/test.py --preset linux-arm64-stub
+--native` builds the test binaries and runs them through qemu-aarch64. qemu-user
+has the host's page size whatever `-p` says, so `d3d9_pages_16384` and
+`d3d9_pages_65536` (`RECOMP_D3D9_HOST_PAGE`) stand in for 16 and 64 KiB kernels.
+qemu writes a core file into `kit/` for every child `seh_tests` aborts on purpose
+unless `ulimit -c 0` is set first. The GPU suites run on lavapipe under qemu when
+`VK_DRIVER_FILES` names the sysroot's `usr/share/vulkan/icd.d/lvp_icd.aarch64.json`
+(the loader cannot open it through qemu's path remapping), but very slowly.
+
 For a Windows cross-build, set `LLVM_MINGW_ROOT`, then run
 `tools/build.py --preset windows-cross --stub --target app` and
 `tools/test.py --preset windows-cross-stub --compile-only`. CI verifies the

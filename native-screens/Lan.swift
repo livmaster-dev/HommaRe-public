@@ -339,6 +339,8 @@ struct FormField: Decodable, Hashable, Identifiable {
     let on: Bool?
     let index: Int?
     let values: [String]?
+    /// A text field's characters, when the game's edit line takes only these.
+    let allowed: String?
 }
 
 extension FormScreen: ScreenDocument {
@@ -532,7 +534,13 @@ struct FormFieldRow: View {
             default:
                 VStack(alignment: .leading, spacing: 3) {
                     Text(field.label).font(Theme.body(13)).foregroundStyle(Theme.textDim)
-                    let binding = Binding(get: { draft ?? field.text ?? "" }, set: { draft = $0 })
+                    let binding = Binding(get: { draft ?? field.text ?? "" }, set: { typed in
+                        if let allowed = field.allowed {
+                            draft = String(typed.filter { allowed.contains($0) })
+                        } else {
+                            draft = typed
+                        }
+                    })
                     Group {
                         if field.kind == "secret" {
                             SecureField("", text: binding)

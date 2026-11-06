@@ -42,6 +42,9 @@ void homm5_anchor_axis(X86 *c);
  * (the base game's 008333f0). */
 void homm5_counter_make(X86 *c);
 #define FN_00739b00 homm5_counter_make
+/* 00e35920: a window's SetPlacement (the base game's 00e3b9f0). */
+void homm5_window_place(X86 *c);
+#define FN_00e35920 homm5_window_place
 
 /* The phone's interface (native/phone_hud.c; addresses and their sources in
  * native/addresses.h): the base game's 00e74f30 (root placement), 00e3dd70
@@ -160,3 +163,50 @@ void homm5_game_view_draw(X86 *c);
  * passes through: native/screens_question.c notes its title and text. */
 void homm5_msgbox_setup(X86 *c);
 #define FN_006d32e0 homm5_msgbox_setup
+
+/* 00443400: the GameSpy clDataList unbounded string reader (native/net_guard.c;
+ * the base game's 004432d0). */
+void homm5_gs_str_read(X86 *c);
+#define FN_00443400 homm5_gs_str_read
+
+/* 00419c20: the GS SDK's login and 00e0e500: ProcessLoginRouterResult (the
+ * base game's 00419ae0 and 00b31380); native/gs_login.c. */
+void homm5_gs_login(X86 *c);
+#define FN_00419c20 homm5_gs_login
+void homm5_gs_login_result(X86 *c);
+#define FN_00e0e500 homm5_gs_login_result
+
+/* 0064e160 (the battle's pick under the cursor), 0064e770 (the action for
+ * it), 0064c360 (its left button release) and 0070d860 (the grid cells'
+ * states): the base game's 0074de10, 0074e470, 0074bf70 and 0080bac0 for
+ * native/tap_attack.c. */
+void homm5_tap_pick(X86 *c);
+#define FN_0064e160 homm5_tap_pick
+void homm5_tap_action(X86 *c);
+#define FN_0064e770 homm5_tap_action
+void homm5_tap_click(X86 *c);
+#define FN_0064c360 homm5_tap_click
+void homm5_tap_grid(X86 *c);
+#define FN_0070d860 homm5_tap_grid
+
+/* CCursor::GetEdgeScroll: native/touch_native.c answers (0,0) while native
+ * touch is in charge (the launcher's "Touch: native"). */
+void homm5_edge_scroll(X86 *c);
+#define FN_0060de80 homm5_edge_scroll
+
+/* 0060dd60 (CCursor::Update): while a finger's point is held, native/touch_native.c
+ * keeps the cursor there instead of at GetCursorPos (off the window on a
+ * touch), so the battle's cursor and damage hint are drawn at the point. */
+void homm5_cursor_update(X86 *c);
+#define FN_0060dd60 homm5_cursor_update
+
+/* 007078f0 / 007082c0 / 00708200: a two-level card's creator (NUI::CClickingTooltipCreator,
+ * CClickingCombatTooltipCreator, CClickingATBTooltipCreator) handing out its card's window (slot 0).
+ * native/touch_native.c notes the card a finger showed, so a tap on it shows the
+ * full card and a tap beside it closes it, and keeps it short after the lift. */
+void homm5_card_window(X86 *c);
+#define FN_007078f0 homm5_card_window
+void homm5_card_window_combat(X86 *c);
+#define FN_007082c0 homm5_card_window_combat
+void homm5_card_window_atb(X86 *c);
+#define FN_00708200 homm5_card_window_atb

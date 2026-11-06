@@ -340,6 +340,7 @@ void recomp_seh_intercept(X86 *c, uint32_t target) {
     // a disposition to that dispatcher via a callback sentinel, or raise
     // again while both dispatch walks are still live. Only a normal return
     // here has completed the establishing function's guest RET.
+    recomp_fp_guest(c); // guest code, though the raise may have come from a shim
     recomp_call(c, target);
     landing->finished = true;
     bool above = true;
@@ -362,6 +363,7 @@ void recomp_seh_intercept(X86 *c, uint32_t target) {
 
 void recomp_seh_land(X86 *c) {
     trace_frames(c, "landing");
+    recomp_fp_guest(c);
     SehFrame *landing = state.landing;
     if (!landing || landing->cpu != c || !landing->finished)
         invalid_chain(c, 0, c->eip, "landing without a checkpoint");

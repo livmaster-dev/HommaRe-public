@@ -188,7 +188,7 @@ static void edit_text(uint32_t edit, char *out, size_t cap) {
 static int lang_ru(Scratch *s) {
     char diff[64];
     ns_difficulty_name(s, 0, diff, sizeof diff);
-    return ns_ru = (unsigned char)diff[0] >= 0xd0;
+    return ns_set_lang(diff);
 }
 
 /* A wait box a screen keeps (the box's +0xf8), checked by the box's vtable. */
@@ -211,6 +211,19 @@ static void wait_box_cancel(Scratch *s, uint32_t box) {
     ns_call(s, rd32(rd32(notify)), notify, 0, NULL, 0);
 }
 
+/* What the login's edit lines take (ETET_UBI): the game's dialog lets no
+ * other character in, and the GS login sends the narrow string it makes. */
+static const char UBI_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-";
+
+/* `text` with only UBI_CHARS left, in place. */
+static void ubi_filter(char *text) {
+    char *out = text;
+    for (const char *in = text; *in; ++in)
+        if (strchr(UBI_CHARS, *in))
+            *out++ = *in;
+    *out = 0;
+}
+
 static void j_text_field(Json *j, int first, int id, const char *kind, const char *label, const char *text) {
     j_printf(j, "%s{\"id\":%d,", first ? "" : ",", id);
     j_kv_str(j, "kind", kind);
@@ -218,6 +231,8 @@ static void j_text_field(Json *j, int first, int id, const char *kind, const cha
     j_kv_str(j, "label", label);
     j_lit(j, ",");
     j_kv_str(j, "text", text);
+    j_lit(j, ",");
+    j_kv_str(j, "allowed", UBI_CHARS);
     j_lit(j, ",\"enabled\":true}");
 }
 
@@ -229,6 +244,7 @@ static void login_command(Scratch *s, uint32_t screen, const char *cmd) {
     if (strcmp(verb, "text") == 0) {
         const int id = ns_cmd_int(cmd, "id", -1);
         ns_cmd_str(cmd, "text", text, sizeof text);
+        ubi_filter(text); /* as the game's own edit lines would */
         if (id == F_LOGIN || id == F_PASSWORD)
             ns_lan_set_edit(s, rd32(screen + (id == F_LOGIN ? UL_LOGIN : UL_PASSWORD)), text);
     } else if (strcmp(verb, "press") == 0) {
@@ -258,7 +274,7 @@ static void login_document(Json *j, Scratch *s, uint32_t screen) {
     const uint32_t box = wait_box(rd32(screen + UL_WAIT));
     const int busy = box || !form || !ns_visible(s, form);
     j_lit(j, "{\"screen\":\"form\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, "/UI/MPRegiter/account-name.txt", "Сетевой профиль", "Online Profile"));
     j_lit(j, ",\"fields\":[");
@@ -266,10 +282,12 @@ static void login_document(Json *j, Scratch *s, uint32_t screen) {
     j_text_field(j, 0, F_PASSWORD, "secret", ns_label(s, "/UI/MPRegiter/password.txt", "Пароль", "Password"),
                  password);
     j_lit(j, "],");
-    j_kv_str(j, "note", ns_tr("Подойдёт любой CD-ключ. Новое имя с паролем создаёт учётную запись на этом сервере; "
-                              "не используйте пароль от других сервисов.",
-                              "Any CD key works. A new name and password make an account on this server; "
-                              "don't use a password you use elsewhere."));
+    j_kv_str(j, "note", ns_tr("Подойдёт любой CD-ключ. Новое имя с паролем создаёт учётную запись на этом сервере. "
+                              "Пароль уходит туда только в виде хеша, но всё равно придумайте новый, "
+                              "не от Ubisoft и не от других сервисов.",
+                              "Any CD key works. A new name and password make an account on this server. "
+                              "The password reaches it only as a hash, but still make up a new one, "
+                              "not your Ubisoft login or one you use elsewhere."));
     if (busy) {
         const char *what = rd32(screen + UL_INIT)      ? ns_tr("Подключение к серверу...", "Connecting to the server...")
                            : rd32(screen + UL_LOGGING) ? ns_tr("Входим на сервер...", "Logging in...")
@@ -316,7 +334,7 @@ static void cdkey_document(Json *j, Scratch *s, uint32_t box) {
     char text[64];
     edit_text(rd32(box + UB_EDIT), text, sizeof text);
     j_lit(j, "{\"screen\":\"lan_name\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, "/UI/MPRegister/EnterCDKeyHeader.txt", "Пожалуйста, введите сетевой ключ",
                                   "Please enter the CD key"));
@@ -372,7 +390,7 @@ static void channels_document(Json *j, Scratch *s, uint32_t screen) {
         ns_ptr(item) ? cast(s, ns_vcall(s, item, ITEM_DATA, NULL, 0), NS_UBI_RTTI_OBJECT, NS_UBI_RTTI_CHANNEL) : 0;
     const uint32_t box = wait_box(rd32(screen + UC_WAIT));
     j_lit(j, "{\"screen\":\"table\",");
-    j_kv_str(j, "lang", ns_ru ? "ru" : "en");
+    j_kv_str(j, "lang", ns_lang_code());
     j_lit(j, ",");
     j_kv_str(j, "title", ns_label(s, "/UI/MPChangeChannel/available-channels.txt", "Доступные каналы",
                                   "Available Channels"));

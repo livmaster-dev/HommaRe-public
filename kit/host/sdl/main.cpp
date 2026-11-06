@@ -40,6 +40,7 @@
 #include "../input_touch.h"
 #include "../input_trackpad.h"
 #include "../controls/controls_host.h"
+#include "../controls/json.h"
 #include "../../mods/controls_settings.h"
 #include "../controls/gamepad_sdl.h"
 #include "../../mods/mods_internal.h"
@@ -55,6 +56,7 @@
 #include "../../dx/host_d9.h"
 #include "../../runtime/loader.h"
 #include "../../runtime/mods_seam.h"
+#include "../../runtime/x86.h"
 #include "../../runtime/native_seam.h"
 #include "../../runtime/win32.h"
 
@@ -281,6 +283,15 @@ void note_screen_size() {
     g_fullscreen_w.store(w);
     g_fullscreen_h.store(fh);
 }
+// The app left the foreground or came back (platform_ui_ios.mm, from the
+// lifecycle watcher: SDL3 never queues those events, so handle_event never
+// sees them). Inactive counts as away: a pulled-down Control Center on a
+// foldable hands the scene sizes as transient as a lock does.
+extern "C" void host_note_app_active(int active) {
+    if (active)
+        g_foreground_ns.store(os_monotonic_ns());
+    g_app_active.store(active != 0);
+}
 extern "C" int host_display_fullscreen_size(int *w, int *h) {
     const int fw = g_fullscreen_w.load(), fh = g_fullscreen_h.load();
     if (!w || !h || fw <= 0 || fh <= 0)
@@ -379,7 +390,8 @@ struct PendingInput {
         PLACE,
         CAMERA,
         LIST_SCROLL,
-        GESTURE
+        GESTURE,
+        NATIVE // a native touch gesture: RECOMP_TOUCH_EVENT_* in button, phase in key, count in dz
     } kind;
     int32_t x = 0, y = 0, dz = 0;
     double dx = 0, dy = 0; // Drawable deltas preserve subpixel motion in the queue.
@@ -1029,6 +1041,9 @@ void apply_input(const PendingInput &e) {
     case PendingInput::GESTURE: // RECOMP_TOUCH_GESTURE_* in button
         recomp_touch_gesture(e.button);
         break;
+    case PendingInput::NATIVE:
+        host_gate_touch_event(e.button, e.key, e.x, e.y, e.dz);
+        break;
     }
 }
 
@@ -1175,6 +1190,22 @@ TouchMapper g_touch = [] {
     return t;
 }();
 
+// Native touch (runtime/native_seam.h recomp_touch_event): a finger touched
+// since a mouse, trackpad or pencil last moved the pointer.
+bool g_native_touch_active = false;
+
+// A mouse, trackpad or pencil moved the pointer: the game's cursor is its own
+// again, in order with the motion.
+void native_touch_pointer_used() {
+    if (!g_touch.native() || !g_native_touch_active)
+        return;
+    g_native_touch_active = false;
+    PendingInput p;
+    p.kind = PendingInput::NATIVE;
+    p.button = RECOMP_TOUCH_EVENT_POINTER;
+    queue_or_apply(p);
+}
+
 // The game's hover delay follows the fingers (runtime/native_seam.h).
 void sync_touch_hover() {
     static int sent = RECOMP_TOUCH_HOVER_GAME;
@@ -1195,6 +1226,35 @@ void push_touch_action_now(const TouchAction &a);
 void push_touch_actions(const std::vector<TouchAction> &actions) {
     for (const TouchAction &a : actions)
         push_touch_action_now(a);
+}
+
+// The modifiers the touch path holds itself (a resting drag's Shift, a pad
+// button bound to one). A pushed key event carries no modifier state of its
+// own, and handle_key takes a modifier's state from the event's mod alone, so
+// every key the touch path pushes carries these along with the keyboard's.
+SDL_Keymod g_touch_mods = SDL_KMOD_NONE;
+
+SDL_Keymod touch_modifier_bit(SDL_Scancode sc) {
+    switch (sc) {
+    case SDL_SCANCODE_LSHIFT:
+        return SDL_KMOD_LSHIFT;
+    case SDL_SCANCODE_RSHIFT:
+        return SDL_KMOD_RSHIFT;
+    case SDL_SCANCODE_LCTRL:
+        return SDL_KMOD_LCTRL;
+    case SDL_SCANCODE_RCTRL:
+        return SDL_KMOD_RCTRL;
+    case SDL_SCANCODE_LALT:
+        return SDL_KMOD_LALT;
+    case SDL_SCANCODE_RALT:
+        return SDL_KMOD_RALT;
+    case SDL_SCANCODE_LGUI:
+        return SDL_KMOD_LGUI;
+    case SDL_SCANCODE_RGUI:
+        return SDL_KMOD_RGUI;
+    default:
+        return SDL_KMOD_NONE;
+    }
 }
 
 void push_touch_action_now(const TouchAction &a) {
@@ -1233,13 +1293,18 @@ void push_touch_action_now(const TouchAction &a) {
             e.button.x = (float)a.x;
             e.button.y = (float)a.y;
             break;
-        case TouchAction::Key:
+        case TouchAction::Key: {
+            const SDL_Keymod bit = touch_modifier_bit((SDL_Scancode)a.scancode);
+            g_touch_mods =
+                a.down ? SDL_Keymod(g_touch_mods | bit) : SDL_Keymod(g_touch_mods & ~bit);
             e.type = a.down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
             e.key.windowID = ours;
             e.key.scancode = (SDL_Scancode)a.scancode;
             e.key.key = SDL_GetKeyFromScancode((SDL_Scancode)a.scancode, SDL_KMOD_NONE, false);
+            e.key.mod = SDL_Keymod(SDL_GetModState() | g_touch_mods);
             e.key.down = a.down;
             break;
+        }
         case TouchAction::Camera: {
             // In order with the clicks around it, mapped as a placement is.
             PendingInput p;
@@ -1258,7 +1323,34 @@ void push_touch_action_now(const TouchAction &a) {
             queue_or_apply(p);
             return;
         }
+        case TouchAction::Native: {
+            // In order with the input around it, mapped as a placement is.
+            if (a.gesture == RECOMP_TOUCH_EVENT_DOWN)
+                g_native_touch_active = true;
+            PendingInput p;
+            p.kind = PendingInput::NATIVE;
+            view_point_to_drawable(a.x, a.y, &p.x, &p.y, &p.drawable_w, &p.drawable_h);
+            p.button = a.gesture;
+            p.key = (uint16_t)a.phase;
+            p.dz = a.button;
+            queue_or_apply(p);
+            return;
+        }
         case TouchAction::Wheel:
+            if (g_touch.native()) {
+                // Native: the list under the finger follows it, a precise
+                // scroll at that point as a trackpad's is (recomp_ui_scroll),
+                // with no cursor brought back for a wheel.
+                PendingInput p;
+                p.kind = PendingInput::LIST_SCROLL;
+                view_point_to_drawable(a.x, a.y, &p.x, &p.y, &p.drawable_w, &p.drawable_h);
+                int bw, bh, dw, dh;
+                window_sizes(&bw, &bh, &dw, &dh);
+                p.dx = a.wheel * kTouchScrollStep;
+                p.dy = bh > 0 ? p.dx * dh / bh : p.dx;
+                queue_or_apply(p);
+                return;
+            }
             e.type = SDL_EVENT_MOUSE_WHEEL;
             e.wheel.windowID = ours;
             e.wheel.mouse_x = (float)a.x;
@@ -1266,6 +1358,8 @@ void push_touch_action_now(const TouchAction &a) {
             e.wheel.y = (float)a.wheel;
             // handle_event() flips a FLIPPED wheel's sign; NORMAL passes a.wheel through as-is.
             e.wheel.direction = SDL_MOUSEWHEEL_NORMAL;
+            // Not a mouse's wheel: handle_event() passes its fractions through.
+            e.wheel.which = SDL_TOUCH_MOUSEID;
             break;
         }
         SDL_PushEvent(&e);
@@ -1279,6 +1373,23 @@ void push_touch_key(int scancode, bool down) {
     a.down = down;
     push_touch_action_now(a);
 }
+
+} // namespace (closed for the C seam below, reopened after it)
+
+// runtime/native_seam.h: a key a game's native touch presses.
+extern "C" void host_touch_key(int scancode, int down) {
+    push_touch_key(scancode, down != 0);
+}
+
+// runtime/native_seam.h: the tick for what a resting finger brought up. The
+// game asks from its own thread; the tick is given on the host's next turn
+// (after_events), where the platform's haptics live.
+static std::atomic<bool> g_touch_haptic{false};
+extern "C" void host_touch_haptic(void) {
+    g_touch_haptic.store(true, std::memory_order_relaxed);
+}
+
+namespace {
 
 // The on-screen controls' hooks.
 void toggle_system_keyboard() {
@@ -1514,12 +1625,6 @@ void audio_service_restarted() {
 // One SDL event, translated into both of the input paths the game reads: the
 // DirectInput device state, and the Win32 message queue.
 void handle_event(const SDL_Event &event) {
-    if (event.type == SDL_EVENT_WILL_ENTER_BACKGROUND || event.type == SDL_EVENT_DID_ENTER_BACKGROUND) {
-        g_app_active.store(false);
-    } else if (event.type == SDL_EVENT_DID_ENTER_FOREGROUND) {
-        g_foreground_ns.store(os_monotonic_ns());
-        g_app_active.store(true);
-    }
     if (platform_ui_handle_lifecycle(event))
         return;
     if (handle_editor_event(event))
@@ -1532,6 +1637,7 @@ void handle_event(const SDL_Event &event) {
         if (event.motion.which != SDL_TOUCH_MOUSEID) {
             g_touch.pointer_used(); // a mouse, trackpad or pencil: the game's hover delay
             sync_touch_hover();
+            native_touch_pointer_used();
         }
         if (event.motion.windowID == ours || !g_pointer_confinement.empty())
             handle_mouse_move(event.motion);
@@ -1584,8 +1690,30 @@ void handle_event(const SDL_Event &event) {
         if (event.wheel.windowID == ours) {
             PendingInput e;
             e.kind = PendingInput::WHEEL;
-            const double steps =
+            double steps =
                 event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+            // A high-resolution wheel (libinput's on Linux, some mice on
+            // Windows) reports a notch as several fractions of one, which a
+            // game written for whole notches (WHEEL_DELTA, 120) handles badly.
+            // The fractions add up here and only whole notches go on, to
+            // WM_MOUSEWHEEL and DirectInput's lZ alike; turning back drops
+            // what was left the other way.
+            if (event.wheel.which != SDL_TOUCH_MOUSEID) {
+                static double left = 0;
+                if ((left > 0 && steps < 0) || (left < 0 && steps > 0))
+                    left = 0;
+                left += steps;
+                steps = std::trunc(left + (left > 0 ? 1e-6 : -1e-6));
+                left -= steps;
+            }
+            static const bool trace_wheel = recomp_env("TRACE_WHEEL") != nullptr;
+            if (trace_wheel)
+                fprintf(stderr, "[wheel %.3f] sdl y %+.4f (mouse %u%s) -> %+d notch(es)\n",
+                        double(os_monotonic_ns()) / 1e9, event.wheel.y, (unsigned)event.wheel.which,
+                        event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? ", flipped" : "",
+                        (int)steps);
+            if (steps == 0)
+                break;
             e.dz = (int32_t)lround(steps * 120.0);
             // WM_MOUSEWHEEL carries the position of the wheel event itself.
             view_point_to_drawable(event.wheel.mouse_x, event.wheel.mouse_y, &e.x, &e.y,
@@ -1941,7 +2069,102 @@ std::vector<AutoInput> parse_auto_input(const char *spec) {
     return out;
 }
 
+// RECOMP_TOUCH_SCRIPT=<file>: fingers for an unattended run, without a touch
+// screen. The file is read a few times a second and removed; each line is a
+// gesture, made of the SDL finger events a screen sends and handled as they
+// are (the gesture mapper, the on-screen controls):
+//   tap X Y | hold X Y MS | drag X0 Y0 X1 Y1 MS | tap2 X0 Y0 X1 Y1 | wait MS
+// X, Y window points, or fractions of the window when at most 1. The lines
+// run one after another.
+struct ScriptFinger {
+    uint64_t at; // SDL_GetTicksNS
+    Uint32 type;
+    SDL_FingerID id;
+    float x, y; // fractions of the window
+};
+
+void touch_script_tick() {
+    static const char *path = recomp_env("TOUCH_SCRIPT");
+    if (!path || !*path || !g_window)
+        return;
+    static std::vector<ScriptFinger> due; // in time order
+    static uint64_t free_at = 0;          // when the last gesture is over
+    static uint64_t polled = 0;
+    static SDL_FingerID next_id = 1;
+    const uint64_t now = SDL_GetTicksNS();
+    if (now - polled > 200ull * 1000000ull) {
+        polled = now;
+        if (FILE *f = fopen(path, "r")) {
+            int w = 0, h = 0;
+            SDL_GetWindowSize(g_window, &w, &h);
+            auto fx = [&](double v) { return float(v <= 1.0 ? v : (w > 0 ? v / w : 0)); };
+            auto fy = [&](double v) { return float(v <= 1.0 ? v : (h > 0 ? v / h : 0)); };
+            char line[160];
+            uint64_t t = std::max(now, free_at) + 50ull * 1000000ull;
+            const uint64_t ms = 1000000ull;
+            while (fgets(line, sizeof line, f)) {
+                char cmd[16] = {};
+                double a = 0, b = 0, c = 0, d = 0, e = 0;
+                const int n = sscanf(line, "%15s %lf %lf %lf %lf %lf", cmd, &a, &b, &c, &d, &e);
+                const std::string k = cmd;
+                const SDL_FingerID id = next_id++;
+                if (k == "tap" && n >= 3) {
+                    due.push_back({t, SDL_EVENT_FINGER_DOWN, id, fx(a), fy(b)});
+                    due.push_back({t + 60 * ms, SDL_EVENT_FINGER_UP, id, fx(a), fy(b)});
+                    t += 260 * ms;
+                } else if (k == "hold" && n >= 4) {
+                    due.push_back({t, SDL_EVENT_FINGER_DOWN, id, fx(a), fy(b)});
+                    due.push_back({t + (uint64_t)c * ms, SDL_EVENT_FINGER_UP, id, fx(a), fy(b)});
+                    t += (uint64_t)c * ms + 200 * ms;
+                } else if (k == "drag" && n >= 6) {
+                    due.push_back({t, SDL_EVENT_FINGER_DOWN, id, fx(a), fy(b)});
+                    const int steps = std::max(2, (int)(e / 16));
+                    for (int i = 1; i <= steps; ++i) {
+                        const double f2 = double(i) / steps;
+                        due.push_back({t + (uint64_t)(e * f2) * ms, SDL_EVENT_FINGER_MOTION, id,
+                                       fx(a + (c - a) * f2), fy(b + (d - b) * f2)});
+                    }
+                    due.push_back({t + (uint64_t)e * ms + 30 * ms, SDL_EVENT_FINGER_UP, id, fx(c), fy(d)});
+                    t += (uint64_t)e * ms + 230 * ms;
+                } else if (k == "tap2" && n >= 5) {
+                    const SDL_FingerID id2 = next_id++;
+                    due.push_back({t, SDL_EVENT_FINGER_DOWN, id, fx(a), fy(b)});
+                    due.push_back({t + 20 * ms, SDL_EVENT_FINGER_DOWN, id2, fx(c), fy(d)});
+                    due.push_back({t + 80 * ms, SDL_EVENT_FINGER_UP, id2, fx(c), fy(d)});
+                    due.push_back({t + 90 * ms, SDL_EVENT_FINGER_UP, id, fx(a), fy(b)});
+                    t += 300 * ms;
+                } else if (k == "wait" && n >= 2) {
+                    t += (uint64_t)a * ms;
+                } else if (cmd[0] && cmd[0] != '#') {
+                    fprintf(stderr, "[host] RECOMP_TOUCH_SCRIPT: bad line %s", line);
+                }
+            }
+            fclose(f);
+            remove(path);
+            free_at = t;
+            std::stable_sort(due.begin(), due.end(),
+                             [](const ScriptFinger &l, const ScriptFinger &r) { return l.at < r.at; });
+        }
+    }
+    size_t sent = 0;
+    for (; sent < due.size() && due[sent].at <= now; ++sent) {
+        const ScriptFinger &d = due[sent];
+        SDL_Event e{};
+        e.type = d.type;
+        e.common.timestamp = now;
+        e.tfinger.touchID = 1;
+        e.tfinger.fingerID = d.id;
+        e.tfinger.x = d.x;
+        e.tfinger.y = d.y;
+        e.tfinger.pressure = d.type == SDL_EVENT_FINGER_UP ? 0.0f : 1.0f;
+        e.tfinger.windowID = SDL_GetWindowID(g_window);
+        SDL_PushEvent(&e);
+    }
+    due.erase(due.begin(), due.begin() + (long)sent);
+}
+
 void auto_input_tick() {
+    touch_script_tick();
     static const std::vector<AutoInput> script = parse_auto_input(recomp_env("AUTO_KEYS"));
     static const double max_seconds = [] {
         const char *v = recomp_env("MAX_SECONDS");
@@ -2243,8 +2466,194 @@ void sync_native_screen() {
     }
 }
 
-// The housekeeping every turn does once the events are in.
+// The commands the game offers on its screen now (recomp_hotkeys_state), the
+// document as the game wrote it: what the control panel offers besides the
+// camera. Empty when there are none. A document stands once the game has kept
+// it kHotkeysSettleNs: while it loads, the game turns its screens' key sections
+// on for a frame or two each (the map's, a battle's), which would flash the
+// panel.
+std::string g_hotkeys_document;
+uint32_t g_hotkeys_generation = 0;
+constexpr uint64_t kHotkeysSettleNs = 300ull * 1000000ull;
+constexpr uint64_t kHotkeysGoneNs = 80ull * 1000000ull;
+constexpr uint64_t kHotkeysAskNs = 15ull * 1000000ull;
+
+// One command of the document, as the panel presses it.
+struct HotkeyCommand {
+    std::string id, kind;
+    int key = 0;
+    int mods[3] = {};
+    int nmods = 0;
+};
+static std::vector<HotkeyCommand> g_hotkeys;
+
+static void parse_hotkeys() {
+    g_hotkeys.clear();
+    controls::Json doc;
+    std::string error;
+    if (g_hotkeys_document.empty() || !controls::json_parse(g_hotkeys_document, &doc, &error))
+        return;
+    const controls::Json *commands = doc.get("commands");
+    if (!commands || commands->type != controls::Json::Array)
+        return;
+    for (const controls::Json &c : commands->a) {
+        HotkeyCommand h;
+        h.id = c.str("id", "");
+        h.kind = c.str("kind", "tap");
+        h.key = int(c.num("key", 0));
+        if (const controls::Json *mods = c.get("mods"))
+            for (const controls::Json &m : mods->a)
+                if (h.nmods < 3)
+                    h.mods[h.nmods++] = int(m.n);
+        g_hotkeys.push_back(h);
+    }
+}
+
+// The document's screen and its commands' ids: what the panel's cells are.
+// The rest (where the game's interface is) may change every few frames.
+static std::string hotkeys_core(const std::string &document) {
+    controls::Json doc;
+    std::string error;
+    if (document.empty() || !controls::json_parse(document, &doc, &error))
+        return std::string();
+    std::string core = doc.str("screen", "");
+    const controls::Json *commands = doc.get("commands");
+    if (commands && commands->type == controls::Json::Array)
+        for (const controls::Json &c : commands->a)
+            core += " " + c.str("id", "");
+    return core;
+}
+
+static void sync_hotkeys() {
+    static std::vector<char> buf(8192);
+    static unsigned serial = 0;
+    static std::string latest, latest_core, shown_core;
+    static uint64_t latest_ns = 0, asked_ns = 0;
+    // RECOMP_HOTKEYS_SAMPLE=<file>: that document instead of the game's, from
+    // the start, to work on the panel without reaching a screen that has one.
+    static const std::string sample = [] {
+        const char *path = recomp_env("HOTKEYS_SAMPLE");
+        std::string text;
+        if (path && *path) {
+            std::ifstream in(path, std::ios::binary);
+            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            fprintf(stderr, "[host] hotkeys sample %s: %zu bytes\n", path, text.size());
+        }
+        return text;
+    }();
+    if (!sample.empty()) {
+        if (g_hotkeys_document != sample) {
+            g_hotkeys_document = sample;
+            ++g_hotkeys_generation;
+            parse_hotkeys();
+        }
+        return;
+    }
+    // Only a touch screen has the panel; the game is asked once a frame's
+    // worth at most (the turn comes up to every millisecond).
+    static const bool touch = platform_ui_touch_device();
+    const uint64_t now = SDL_GetTicksNS();
+    if (!touch || now - asked_ns < kHotkeysAskNs)
+        return;
+    asked_ns = now;
+    int n = recomp_hotkeys_state(buf.data(), int(buf.size()), &serial);
+    if (n >= int(buf.size())) {
+        buf.resize(size_t(n) + 1024);
+        n = recomp_hotkeys_state(buf.data(), int(buf.size()), &serial);
+    }
+    static const bool trace = recomp_env("TRACE_HOTKEYS") != nullptr;
+    if (n < 0 && !latest.empty()) {
+        latest.clear();
+        latest_core.clear();
+        latest_ns = now;
+        serial = 0;
+        if (trace)
+            fprintf(stderr, "[panel] t%llu game: none\n", (unsigned long long)(now / 1000000));
+    } else if (n > 0 && n < int(buf.size())) {
+        if (trace)
+            fprintf(stderr, "[panel] t%llu game: %d bytes\n", (unsigned long long)(now / 1000000),
+                    n);
+        latest.assign(buf.data(), size_t(n));
+        std::string core = hotkeys_core(latest);
+        if (core != latest_core) {
+            latest_core = std::move(core);
+            latest_ns = now;
+        }
+    }
+    // A document stands once its screen and commands have kept
+    // kHotkeysSettleNs; none (a video, a menu, a scene over the map) takes the
+    // panel away sooner, after a blink's worth (the map's own messages drop
+    // its section for a frame or two). Only the game's interface moved: the
+    // panel follows at once.
+    if (latest == g_hotkeys_document)
+        return;
+    if (latest_core != shown_core &&
+        now - latest_ns < (latest.empty() ? kHotkeysGoneNs : kHotkeysSettleNs))
+        return;
+    g_hotkeys_document = latest;
+    ++g_hotkeys_generation;
+    parse_hotkeys();
+    if (latest_core == shown_core)
+        return;
+    // Another screen, or other commands: keys held for the ones before, and
+    // their right click, are over.
+    shown_core = latest_core;
+    std::vector<TouchAction> actions;
+    g_touch.command_reset(&actions);
+    push_touch_actions(actions);
+}
+
+// A command pressed on the control panel, by its id: as the document says.
+static void press_hotkey(const char *id) {
+    static const bool trace = recomp_env("TRACE_HOTKEYS") != nullptr;
+    if (trace)
+        fprintf(stderr, "[panel] command %s%s\n", id,
+                g_native_screen_up ? " (native screen up)" : "");
+    if (g_native_screen_up)
+        return;
+    for (const HotkeyCommand &h : g_hotkeys) {
+        if (h.id != id)
+            continue;
+        std::vector<TouchAction> actions;
+        if (h.kind == "latch" && h.key)
+            g_touch.command_latch(h.key, &actions);
+        else if (h.kind == "next_tap_right")
+            g_touch.set_next_tap_right(!g_touch.next_tap_right());
+        else if (h.key)
+            g_touch.command_tap(h.key, h.mods, h.nmods, SDL_GetTicksNS(), &actions);
+        push_touch_actions(actions);
+        return;
+    }
+}
+
+// The commands holding now, for the panel to show them pressed.
+static std::string active_hotkeys() {
+    std::string active;
+    for (const HotkeyCommand &h : g_hotkeys)
+        if ((h.kind == "latch" && g_touch.latched(h.key)) ||
+            (h.kind == "next_tap_right" && g_touch.next_tap_right()))
+            active += (active.empty() ? "" : " ") + h.id;
+    return active;
+}
+
+static void after_events_nearest();
+
+// The housekeeping every turn does once the events are in. It rounds to
+// nearest whoever calls it: the pump runs from translated code too (the
+// game's message loop, an idle wait), in the guest's rounding mode, toward
+// zero in Heroes V, and the window's safe insets then came out one ulp apart
+// from one turn to the next - a "change" published, logged and drawn every
+// frame (hundreds of megabytes of log on an iPhone in minutes).
 void after_events() {
+    const unsigned guest_rc = recomp_host_rc();
+    if (guest_rc != 0)
+        recomp_host_set_rc(0);
+    after_events_nearest();
+    if (guest_rc != 0)
+        recomp_host_set_rc(guest_rc);
+}
+
+static void after_events_nearest() {
     publish_safe_insets();
     install_trackpad();
     update_prompt_text_input();
@@ -2256,9 +2665,18 @@ void after_events() {
         g_touch.frames_presented(host_present_count());
         const int context = recomp_touch_context();
         g_touch.set_context(context);
-        g_touch.tick(SDL_GetTicksNS(), &actions);
+        const uint64_t now = SDL_GetTicksNS();
+        g_touch.tick(now, &actions);
         push_touch_actions(actions);
         sync_touch_hover();
+        {
+            // A stack dragged and held still: the ring counting down to a split.
+            // (A finger resting for a card has no ring: the card, when one
+            // comes, comes with a haptic tick, native/touch_native.c.)
+            double rx = 0, ry = 0, progress = 0;
+            const bool ring = g_touch.split_ring(now, &rx, &ry, &progress);
+            platform_ui_split_ring(g_window, ring, rx, ry, progress);
+        }
         // The system keyboard: four fingers toggle it, and it comes up by
         // itself while the cursor rests on one of the game's text fields
         // (RECOMP_TOUCH_TEXT), going once it leaves. The field's line is the
@@ -2281,16 +2699,41 @@ void after_events() {
                 }
             }
         }
-        // The camera buttons over the 3D map, unless the launcher turned them off.
+        if (g_touch_haptic.exchange(false, std::memory_order_relaxed))
+            platform_ui_haptic_tap();
+        sync_native_screen();
+        sync_hotkeys();
+        // The control panel: the camera buttons over the 3D map and the game's
+        // commands, unless the launcher turned either off. No commands over a
+        // native screen or while the system keyboard types into a text field.
         static const bool camera_buttons = [] {
             int64_t on = 1;
             mods_settings_file_get("host.touch/camera_buttons", &on);
             return on != 0;
         }();
-        platform_ui_camera_buttons(g_window,
-                                   camera_buttons && (context & RECOMP_TOUCH_MAP_SCREEN),
-                                   g_phone_form.load(), recomp_camera_step);
-        sync_native_screen();
+        static const bool hotkeys = [] {
+            int64_t on = 1;
+            mods_settings_file_get("host.touch/hotkeys", &on);
+            return on != 0;
+        }();
+        {
+            const std::string active = active_hotkeys();
+            ControlPanel panel;
+            panel.camera = camera_buttons && (context & RECOMP_TOUCH_MAP_SCREEN);
+            panel.commands = hotkeys && !g_native_screen_up && !(context & RECOMP_TOUCH_TEXT)
+                                 ? g_hotkeys_document.c_str()
+                                 : "";
+            panel.generation = g_hotkeys_generation;
+            panel.active = active.c_str();
+            panel.phone = g_phone_form.load();
+            panel.keyboard = !platform_ui_keypad_wanted() && !recomp_env("KEYPAD");
+            const PointRect pic = game_rect_points();
+            panel.pic_x = pic.x;
+            panel.pic_y = pic.y;
+            panel.pic_w = pic.w;
+            panel.pic_h = pic.h;
+            platform_ui_control_panel(g_window, panel, recomp_camera_step, press_hotkey);
+        }
         // The controls follow the hardware keyboard (attached: key layouts
         // hidden), a physical controller (connected: pad layouts hidden and
         // its state fed to the pad) and the settings rows; the view is
@@ -2601,10 +3044,11 @@ void report(FILE *out, bool abnormal) {
 // the app that started it, and its startup-video choice: an empty movie list
 // with this marker in the profile's video/ (LauncherModel.setSkipIntro).
 [[maybe_unused]] static const char *const kLauncherKeys[] = {
-    "host.display/frame_limit", "host.display/energy_saver", "host.display/idle_frames",
-    "host.display/render_quality", "host.touch/camera_buttons", "host.input/trackpad_camera",
-    "host.display/metal_hud", "homm5.perf/gpu_skin", "host.touch/battle_cells",
-    "host.ui/phone_interface", "host.audio/silent_mode", "homm5.wide/ui_bounds", "host.ui/native_menus"};
+    "host.display/frame_limit",    "host.display/energy_saver", "host.display/idle_frames",
+    "host.display/render_quality", "host.touch/camera_buttons", "host.touch/hotkeys",
+    "host.input/trackpad_camera",  "host.display/metal_hud",    "homm5.perf/gpu_skin",
+    "host.touch/battle_cells",     "host.touch/native",         "host.ui/phone_interface",
+    "host.audio/silent_mode",      "homm5.wide/ui_bounds",      "host.ui/native_menus"};
 static const char kIntroMarker[] = "<!-- launcher: skip the startup videos -->";
 static const char *const kIntroFiles[] = {"video/intro.xml", "video/intro_a1.xml"};
 
@@ -2702,6 +3146,7 @@ static int run_game_module(const launcher::NativeChoice &choice, const char *arg
     os_setenv("RECOMP_LAUNCHER_SETTINGS", settings.c_str());
     os_setenv("RECOMP_LAUNCHER_SKIP_INTRO", intro_skipped(host_layout().profile_dir) ? "1" : "0");
     fprintf(stderr, "[host] %s goes to module %s\n", choice.game.c_str(), path.c_str());
+    platform_ui_hand_over_lifecycle(); // the module's own copy takes the app's lifecycle
     std::string exe = choice.exe;
     char flag[] = "--exe";
     char *args[] = {const_cast<char *>(argv0), flag, exe.data(), nullptr};
@@ -2812,18 +3257,20 @@ static void seed_default_settings() {
 #endif
     static const Default table[] = {
         {"host.display/frame_limit", desktop_frame_limit, 1, 1},
-        {"host.display/energy_saver", 2, 2, 2},      // never
-        {"host.display/render_quality", 4, 3, 4},    // performance; iPad balanced
-        {"host.display/idle_frames", 1, 1, 1},       // 30 fps after a minute idle: on
-        {"host.display/metal_hud", 0, 0, 0},         // off
-        {"homm5.perf/gpu_skin", 1, -1, -1},          // animated models on the GPU
-        {"homm5.wide/ui_bounds", 2, -1, -1},         // interface within 16:9
-        {"host.input/trackpad_camera", 0, -1, -1},   // two fingers: height
-        {"host.touch/camera_buttons", -1, 0, 0},     // hidden
-        {"host.touch/battle_cells", -1, 1, 1},       // touch-friendly battle: on
-        {"host.audio/silent_mode", -1, 0, 0},        // respect the silent switch
-        {"host.ui/phone_interface", -1, 0, 1},       // iPad never, iPhone automatic
-        {"host.ui/native_menus", -1, 2, 1},          // native menus: iPhone on, iPad off
+        {"host.display/energy_saver", 2, 2, 2},    // never
+        {"host.display/render_quality", 4, 3, 4},  // performance; iPad balanced
+        {"host.display/idle_frames", 1, 1, 1},     // 30 fps after a minute idle: on
+        {"host.display/metal_hud", 0, 0, 0},       // off
+        {"homm5.perf/gpu_skin", 1, -1, -1},        // animated models on the GPU
+        {"homm5.wide/ui_bounds", 2, -1, -1},       // interface within 16:9
+        {"host.input/trackpad_camera", 0, -1, -1}, // two fingers: height
+        {"host.touch/camera_buttons", -1, 0, 0},   // hidden
+        {"host.touch/hotkeys", -1, 1, 1},          // the game's commands: shown
+        {"host.touch/battle_cells", -1, 1, 1},     // touch-friendly battle: on
+        {"host.touch/native", -1, 0, 0},           // touch: the cursor the fingers move
+        {"host.audio/silent_mode", -1, 0, 0},      // respect the silent switch
+        {"host.ui/phone_interface", -1, 0, 1},     // iPad never, iPhone automatic
+        {"host.ui/native_menus", -1, 2, 1},        // native menus: iPhone on, iPad off
     };
     const int device = !platform_ui_touch_device() ? 0 : platform_ui_phone() ? 2 : 1;
     for (const Default &d : table) {
@@ -2892,12 +3339,46 @@ static void apply_game_root(const std::string &exe, const std::string &chosen_ro
 }
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
+// game.toml [ios] cfg_seeds: a config file the install lacks, copied from the
+// one it is made from, so that its cfg_defaults below have a file to go in.
+static void apply_cfg_seeds(const std::string &root) {
+    const std::string records = RECOMP_IOS_CFG_SEEDS;
+    size_t at = 0;
+    while (at < records.size()) {
+        size_t end = records.find(';', at);
+        const std::string rec = records.substr(at, end - at);
+        at = end == std::string::npos ? records.size() : end + 1;
+        const size_t bar = rec.find('|');
+        if (bar == std::string::npos)
+            continue;
+        const std::string path = root + "/" + rec.substr(0, bar), from = root + "/" + rec.substr(bar + 1);
+        FILE *f = fopen(path.c_str(), "rb");
+        if (f) {
+            fclose(f);
+            continue;
+        }
+        FILE *in = fopen(from.c_str(), "rb");
+        if (!in)
+            continue;
+        FILE *out = fopen(path.c_str(), "wb");
+        if (out) {
+            char buf[4096];
+            for (size_t n; (n = fread(buf, 1, sizeof buf, in)) > 0;)
+                fwrite(buf, 1, n, out);
+            fclose(out);
+            fprintf(stderr, "[ios] %s: made from %s\n", rec.substr(0, bar).c_str(), rec.substr(bar + 1).c_str());
+        }
+        fclose(in);
+    }
+}
+
 // game.toml [ios] cfg_defaults: a touch device's own starting settings, set in
 // the game's config files ("setvar key = value") of the imported copy before
 // the game reads them. Only those lines change, and only when they differ.
 static void apply_cfg_defaults(const std::string &exe) {
     const char *root_env = recomp_env("GAME_ROOT");
     std::string root = root_env && *root_env ? root_env : exe.substr(0, exe.find_last_of('/'));
+    apply_cfg_seeds(root);
     const std::string records = RECOMP_IOS_CFG_DEFAULTS;
     size_t at = 0;
     while (at < records.size()) {
@@ -3289,6 +3770,23 @@ int main(int argc, char **argv) {
         mods_settings_file_get("host.touch/battle_cells", &cells);
         os_setenv("RECOMP_TOUCH_BATTLE_CELLS", cells ? "1" : "0");
     }
+    // The launcher's "Touch" (host.touch/native): 1 native gestures, the game
+    // acting on each at its point with no cursor (runtime/native_seam.h
+    // recomp_touch_event); 0 the hover gestures, which place the game's
+    // cursor. Off by default; RECOMP_TOUCH_NATIVE=0|1 wins. Only a game with
+    // the adapter takes it.
+    {
+        int64_t native_touch = 0;
+        mods_settings_file_get("host.touch/native", &native_touch);
+        if (const char *v = recomp_env("TOUCH_NATIVE"); v && *v)
+            native_touch = atoi(v);
+        const bool taken = native_touch &&
+                           recomp_touch_event(RECOMP_TOUCH_EVENT_QUERY, 0, 0, 0, 0, 0, 0) != 0;
+        g_touch.set_native(taken);
+        if (native_touch)
+            fprintf(stderr, "[host] touch: %s\n",
+                    taken ? "native gestures" : "native wanted, the game has no adapter");
+    }
     platform_ui_init_hints();
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         fprintf(stderr, RECOMP_APP_NAME ": SDL_Init failed: %s\n", SDL_GetError());
@@ -3436,7 +3934,8 @@ int main(int argc, char **argv) {
         // game.toml ui_mods: the interface mods (wide screen, the phone's and
         // the touch screen's), made from this install with the recipes the
         // app carries.
-        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), platform_ui_phone_interface());
+        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"),
+                     platform_ui_phone_interface(), g_touch.native());
         host_text_overrides(root, host_layout().profile_dir, RECOMP_TEXTS_PAK, RECOMP_TEXTS_FILES,
                             RECOMP_TEXTS_REPLACE);
     }

@@ -7,7 +7,9 @@
 // Run from the repository root:
 //   .venv/bin/python tools/test.py --compile-only && build/recomp/curl_http_tests
 #include "../curl_http.h"
+#include "../gs_login.h"
 #include "../http_get.h"
+#include "../native_seam.h"
 #include "../imports.h"
 #include "../loader.h"
 #include "../memory.h"
@@ -409,6 +411,29 @@ static void test_imports() {
           "the server that answered is reported used");
     check(g_script.ends == 1, "the question ends once");
     call_import(c, "libcurl.dll", "curl_easy_cleanup", {h});
+    // The game's login then sends that server a token (gs_login.h), keyed by
+    // its address, since this servers.ini names no ServerID.
+    char sent[64] = {};
+    check(recomp_gs_login_password("Alice", "secret", sent, sizeof sent) == 1 &&
+              sent == gs_login::token("secret", good, "Alice"),
+          "the login's token is the address's (%s)", good.c_str());
+
+    // A servers.ini with a ServerID: the token follows the server, not its
+    // address, and the game still gets the whole file.
+    const std::string with_id = std::string(kIni) + "ServerID=00112233445566778899aabbccddeeff\r\n";
+    TestServer server2;
+    server2.start(ok_reply(with_id));
+    g_script = {};
+    g_script.answers = {"127.0.0.1:" + std::to_string(server2.port)};
+    g_written.clear();
+    h = easy(url);
+    check(call_import(c, "libcurl.dll", "curl_easy_perform", {h}) == 0 && g_written == with_id,
+          "a servers.ini with a ServerID reaches the game whole");
+    server2.stop();
+    call_import(c, "libcurl.dll", "curl_easy_cleanup", {h});
+    check(recomp_gs_login_password("alice", "secret", sent, sizeof sent) == 1 &&
+              std::string(sent) == "Wgs4hXgot3GJCinm",
+          "the login's token is the ServerID's (%s)", sent);
 
     // Cancelled: an error, nothing written, nothing remembered.
     g_script = {};
@@ -418,6 +443,8 @@ static void test_imports() {
     check(call_import(c, "libcurl.dll", "curl_easy_perform", {h}) == 7 && g_written.empty() &&
               g_script.used.empty(),
           "cancelled: couldn't connect, nothing written");
+    check(recomp_gs_login_password("alice", "secret", sent, sizeof sent) == 0,
+          "and no token after it: no chosen server is in play");
     call_import(c, "libcurl.dll", "curl_easy_cleanup", {h});
 
     // Anything else stays offline and never asks.

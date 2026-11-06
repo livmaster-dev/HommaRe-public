@@ -12,6 +12,8 @@ list(APPEND POP_RUNTIME_SOURCES legacy_dlls.cpp winsock.cpp)
 # does the web's: a page has no sockets of its own (Emscripten's would be
 # WebSockets to a proxy the site does not have), as with WinSock there.
 list(APPEND POP_RUNTIME_SOURCES curl_http.cpp)
+# The password a GS game sends to that server: a token, never the password.
+list(APPEND POP_RUNTIME_SOURCES gs_login.cpp)
 if(WIN32 OR EMSCRIPTEN)
   list(APPEND POP_RUNTIME_SOURCES http_get_none.cpp)
 else()
@@ -21,6 +23,16 @@ endif()
 list(APPEND POP_RUNTIME_SOURCES gdi32_canvas.cpp)
 if(NOT TARGET ZLIB::ZLIB) # the web's is Emscripten's port (cmake/Dependencies.cmake)
   find_package(ZLIB REQUIRED)
+endif()
+# An Apple SDK's zlib.h is in the SDK's own usr/include, which the compiler
+# searches anyway. Named again (the Xcode generator passes it as -isystem) it
+# comes before libc++'s headers, which Xcode 27.2's libc++ refuses.
+if(APPLE)
+  get_target_property(POP_ZLIB_INCLUDES ZLIB::ZLIB INTERFACE_INCLUDE_DIRECTORIES)
+  if(POP_ZLIB_INCLUDES)
+    list(FILTER POP_ZLIB_INCLUDES EXCLUDE REGEX "\\.sdk/usr/include/?$")
+    set_target_properties(ZLIB::ZLIB PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${POP_ZLIB_INCLUDES}")
+  endif()
 endif()
 
 # The faces the runtime's GDI draws Windows' own UI fonts with
@@ -39,9 +51,19 @@ add_custom_command(
   VERBATIM)
 list(APPEND POP_RUNTIME_SOURCES ${POP_BUNDLED_FONTS_CPP})
 
+# The guest's transcendental math (recomp_libm_*, x86.h), one implementation on
+# every host: a subset of musl's libm (third_party/musl-libm/README.md), its
+# names prefixed by a forced include so the host's own libm is untouched.
+# Static, so the translated code (cmake/Translate.cmake) can link it too.
+set(POP_LIBM_DIR ${POP_ROOT}/third_party/musl-libm)
+file(GLOB POP_LIBM_SOURCES CONFIGURE_DEPENDS ${POP_LIBM_DIR}/*.c)
+add_library(recomp_libm STATIC ${POP_LIBM_SOURCES})
+target_compile_options(recomp_libm PRIVATE -w "SHELL:-include ${POP_LIBM_DIR}/recomp_libm_names.h")
+pop_optimize(recomp_libm 2)
+
 add_library(recomp_runtime OBJECT ${POP_RUNTIME_SOURCES})
 target_include_directories(recomp_runtime PUBLIC ${POP_ROOT} ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(recomp_runtime PUBLIC recomp_platform ZLIB::ZLIB)
+target_link_libraries(recomp_runtime PUBLIC recomp_platform recomp_libm ZLIB::ZLIB)
 target_compile_options(recomp_runtime PRIVATE ${POP_WARN_HOST})
 pop_optimize(recomp_runtime 2)
 
@@ -50,7 +72,7 @@ pop_optimize(recomp_runtime 2)
 if(NOT IOS AND NOT ANDROID)
 add_library(recomp_runtime_testing OBJECT ${POP_RUNTIME_SOURCES})
 target_include_directories(recomp_runtime_testing PUBLIC ${POP_ROOT} ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(recomp_runtime_testing PUBLIC recomp_platform ZLIB::ZLIB)
+target_link_libraries(recomp_runtime_testing PUBLIC recomp_platform recomp_libm ZLIB::ZLIB)
 target_compile_definitions(recomp_runtime_testing PUBLIC POPM_TESTING=1)
 target_compile_options(recomp_runtime_testing PRIVATE ${POP_WARN_HOST})
 pop_optimize(recomp_runtime_testing 1)
@@ -80,6 +102,15 @@ pop_optimize(curl_http_tests 1)
 pop_test_binary(curl_http_tests)
 add_test(NAME curl_http_tests COMMAND curl_http_tests WORKING_DIRECTORY ${POP_ROOT})
 set_tests_properties(curl_http_tests PROPERTIES LABELS nogame TIMEOUT 120)
+
+# The login token a GS game sends a chosen server instead of the password.
+add_executable(gs_login_tests tests/gs_login_tests.cpp tests/stub_recomp_call.cpp)
+target_link_libraries(gs_login_tests PRIVATE recomp_platform recomp_runtime)
+target_compile_options(gs_login_tests PRIVATE ${POP_WARN_HOST})
+pop_optimize(gs_login_tests 2)
+pop_test_binary(gs_login_tests)
+add_test(NAME gs_login_tests COMMAND gs_login_tests WORKING_DIRECTORY ${POP_ROOT})
+set_tests_properties(gs_login_tests PROPERTIES LABELS nogame TIMEOUT 120)
 endif()
 
 # Linked by the hosts, the fixture and the mod tests, not by the unit tests.
@@ -128,6 +159,18 @@ pop_optimize(winsock_tests 1)
 pop_test_binary(winsock_tests)
 add_test(NAME winsock_tests COMMAND winsock_tests WORKING_DIRECTORY ${POP_ROOT})
 set_tests_properties(winsock_tests PROPERTIES LABELS nogame TIMEOUT 60)
+# Floating point network play depends on: x86's answers for the conversions
+# and rounding, no FMA contraction, and the bundled libm's results, which must
+# hash the same on every host. Standalone (x86.h and the libm), so it also
+# builds for a cross target by hand (see the file).
+add_executable(fp_determinism_tests tests/fp_determinism_tests.cpp)
+target_include_directories(fp_determinism_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(fp_determinism_tests PRIVATE recomp_libm)
+target_compile_options(fp_determinism_tests PRIVATE ${POP_WARN_HOST})
+pop_optimize(fp_determinism_tests 2)
+pop_test_binary(fp_determinism_tests)
+add_test(NAME fp_determinism_tests COMMAND fp_determinism_tests WORKING_DIRECTORY ${POP_ROOT})
+set_tests_properties(fp_determinism_tests PROPERTIES LABELS nogame TIMEOUT 60)
 
 endif()
 
@@ -152,7 +195,8 @@ if(POP_REAL_GEN AND NOT IOS AND NOT ANDROID)
     string(REGEX REPLACE "^#define FIDX_([0-9a-f]+) 0u$" "\\1"
       PROFILE_TARGET_TOKEN "${PROFILE_FIRST_INDEX}")
     target_compile_definitions(profile_tests PRIVATE RECOMP_PROFILE_TARGET=${PROFILE_TARGET_TOKEN})
-    target_link_libraries(profile_tests PRIVATE recomp_platform recomp_runtime recomp_dx_null)
+    # recomp_mods: a game's native code reads its settings (mods_settings_file_get).
+    target_link_libraries(profile_tests PRIVATE recomp_platform recomp_runtime recomp_dx_null recomp_mods lua)
     target_compile_options(profile_tests PRIVATE ${POP_WARN_HOST})
     pop_optimize(profile_tests 1)
     pop_link_gen(profile_tests)

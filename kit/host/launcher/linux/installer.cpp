@@ -635,6 +635,31 @@ struct Patch {
 };
 
 constexpr const char *kPatchStaging = ".recomp-patch";
+constexpr const char *kProbeStaging = ".recomp-probe";
+
+// SHA-256 of one file of `setup` (`path` in the install folder), unpacked
+// alone into `dir` (removed after); empty when the installer has none.
+Outcome file_digest(const std::string &helper, const std::string &setup, const std::string &path,
+                    const std::string &dir, std::string *out) {
+    out->clear();
+    remove_tree(dir);
+    if (!make_dirs(dir))
+        return Outcome::fail(os_error("Could not create", dir));
+    std::string ignored;
+    Outcome o = capture(helper, {"--extract", "--include", "/" + path, "--output-dir", dir, setup}, &ignored);
+    std::vector<std::string> found;
+    walk_files(dir, &found);
+    // The installer's spelling, which need not be the manifest's.
+    for (const std::string &f : found) {
+        std::string data;
+        if (o.ok && lower(file_name(f)) == lower(file_name(path)) && read_all(f, &data)) {
+            *out = sha256_hex(data.data(), data.size());
+            break;
+        }
+    }
+    remove_tree(dir);
+    return o;
+}
 
 // Unpacks what `patch` carries into `dir` (emptied first), each file
 // inflated and named by its SHA-256.
@@ -1035,21 +1060,38 @@ Outcome plan(const std::string &setup, const Config &config, const std::string &
     if (Outcome o = capture(h, {"--list", setup}, &text); !o.ok)
         return o;
     const std::set<std::string> listed = listed_paths(text);
+    std::vector<std::pair<std::string, Manifest>> fitting;
     for (const std::string &name : installer->manifests) {
         Manifest m;
-        if (!load_manifest(manifest_dir, name, &m))
-            continue;
-        if (std::all_of(m.files.begin(), m.files.end(),
-                        [&](const ManifestFile &f) { return listed.count(lower(f.path)) != 0; })) {
-            Plan p;
-            p.installer = *installer;
-            p.manifest_name = name;
-            p.manifest = std::move(m);
-            p.setup = setup;
-            p.dest = join(base, installer->folder);
-            *out = std::move(p);
-            return {};
-        }
+        if (load_manifest(manifest_dir, name, &m) &&
+            std::all_of(m.files.begin(), m.files.end(),
+                        [&](const ManifestFile &f) { return listed.count(lower(f.path)) != 0; }))
+            fitting.emplace_back(name, std::move(m));
+    }
+    // Two languages of a build can hold the same paths (English and French
+    // do): GOG's description of the installer, which names its language,
+    // tells them apart.
+    auto chosen = fitting.begin();
+    if (fitting.size() > 1) {
+        const std::string info = "goggame-" + id + ".info";
+        std::string sum;
+        if (Outcome o = file_digest(h, setup, info, join(base, kProbeStaging), &sum); !o.ok)
+            return o;
+        chosen = std::find_if(fitting.begin(), fitting.end(), [&](const auto &c) {
+            return std::any_of(c.second.files.begin(), c.second.files.end(), [&](const ManifestFile &f) {
+                return lower(f.path) == info && f.sha256 == sum;
+            });
+        });
+    }
+    if (chosen != fitting.end()) {
+        Plan p;
+        p.installer = *installer;
+        p.manifest_name = chosen->first;
+        p.manifest = std::move(chosen->second);
+        p.setup = setup;
+        p.dest = join(base, installer->folder);
+        *out = std::move(p);
+        return {};
     }
     return Outcome::fail(t("otherInstallerBuild", {{"name", file_name(setup)}}));
 }

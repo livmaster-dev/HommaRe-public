@@ -230,6 +230,10 @@ bool host_gate_pointer_place(int32_t x, int32_t y);
 // A camera gesture (runtime/native_seam.h recomp_camera_gesture) at drawable
 // point (x, y), handed to the game in its own pixels.
 void host_gate_camera_gesture(int phase, int32_t x, int32_t y, double zoom, double turn);
+// A native touch gesture (runtime/native_seam.h recomp_touch_event) at
+// drawable point (x, y), handed to the game in its own pixels. A finger's
+// touch also takes the cursor away: GetCursorPos lands far outside the window.
+void host_gate_touch_event(int kind, int phase, int32_t x, int32_t y, int count);
 // A precise scroll over the interface (recomp_ui_scroll): `dy` drawable pixels
 // at drawable (x, y). True when the game's list took it.
 bool host_gate_ui_scroll(int32_t x, int32_t y, double dy);

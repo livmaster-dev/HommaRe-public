@@ -44,6 +44,15 @@ __attribute__((weak)) void host_access_counts(HostAccessCounts *out) {
         memset(out, 0, sizeof *out);
 }
 
+// Frames the host has presented (host/present.h). A game's native code may
+// pace itself by it (HoMM5's animation LOD), and the binaries that link the
+// generated library without a host - pop_fixture, profile_tests - need it
+// defined: none presented. Always weak for the same reason as above: the
+// headless host defines it as well as the real one.
+__attribute__((weak)) uint32_t host_present_count(void) {
+    return 0;
+}
+
 HOST_DEFAULT void host_present(const void *, int, int, int, const uint32_t *, int) {}
 HOST_DEFAULT void host_set_display_mode(int, int, int) {}
 HOST_DEFAULT void host_set_render_resolution(int, int) {}
