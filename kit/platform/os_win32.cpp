@@ -610,6 +610,9 @@ void os_write_stderr_raw(const char *s, size_t n) {
     DWORD written = 0;
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), s, (DWORD)n, &written, nullptr);
 }
+void os_fault_exit(int code) {
+    os_exit_immediately(code);
+}
 void os_exit_immediately(int code) {
     _exit(code);
 }

@@ -410,10 +410,18 @@ void fault_handler(const char *name) {
     // guest_current_context() reads only thread-local state and a vector that
     // is never resized while guest code runs, so it is safe to ask here.
     X86 *c = guest_current_context();
+    // A host thread (the presenter, audio, UIKit's work on a thread of its
+    // own) has no guest context: what follows is the main guest thread's,
+    // which was elsewhere - it did not make this fault. A thread-local read.
+    const bool guest = sched_is_guest_thread();
     sig_write("\n[host] ");
     sig_write(name);
-    sig_write(" in guest thread ");
-    sig_write_u32(guest_current_thread_id());
+    if (guest) {
+        sig_write(" in guest thread ");
+        sig_write_u32(guest_current_thread_id());
+    } else {
+        sig_write(" in a host thread, not running guest code; the main guest thread was at");
+    }
     sig_write(": EIP=");
     sig_write_hex8(c->eip);
     sig_write(" ESP=");
@@ -421,6 +429,12 @@ void fault_handler(const char *name) {
     sig_write(" EBP=");
     sig_write_hex8(c->r[R_EBP]);
     sig_write("\n");
+    // Translated code stores EIP on a RET or an indirect jump and the
+    // registers at a call or return, so the fault is past that point: further
+    // on in the function returned to, in a native replacement (they keep no
+    // EIP), or in host code it called - the host pc line above says which.
+    sig_write("[host] EIP is where the guest's last RET or indirect jump went, the registers are "
+              "as of its last call or return\n");
     // The rest of the register file and the top of the guest stack: the
     // arguments and return addresses that say which call went wrong. Plain
     // loads from the arena, bounds checked here, are signal-safe.
@@ -458,7 +472,7 @@ void fault_handler(const char *name) {
     }
     sig_write("[host] no run report from a signal handler: printing one is not "
               "signal-safe and could hang instead of exiting\n");
-    os_exit_immediately(same_text(name, "an abort from the runtime") ? 6 : 5);
+    os_fault_exit(same_text(name, "an abort from the runtime") ? 6 : 5);
 }
 
 } // namespace

@@ -15,6 +15,9 @@
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#if !defined(__EMSCRIPTEN__)
+#include <sys/ucontext.h>
+#endif
 #include <spawn.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -40,6 +43,7 @@
 #include <mach/thread_policy.h>
 #include <mach-o/dyld.h>
 #include <mach/mach_time.h>
+#include <TargetConditionals.h>
 #endif
 #ifndef MAP_ANON
 #define MAP_ANON MAP_ANONYMOUS
@@ -1066,19 +1070,175 @@ int os_exe_path(char *buf, size_t cap) {
 }
 
 static OsFaultFn g_fault_fn = nullptr;
-static void fault_trampoline(int sig) {
+static int g_fault_sig = 0;
+// The signal may have come from kill or sigqueue, not from an instruction:
+// nothing faults again on return, so the default action has to be raised.
+// Darwin says nothing of the sender (si_code 2, si_pid 0 for a kill, as for
+// an access fault, measured on macOS 27 and the iOS 27 simulator), only
+// si_addr 0 - which a real access through NULL also has; raised, it still
+// ends in the system's report, an EXC_CRASH (SIGSEGV) one.
+static bool g_fault_sent = false;
+// What the signals did before (on Android the system's crash reporter,
+// debuggerd's handler, which bionic installs in every process).
+static struct sigaction g_fault_before[3];
+// The read end of the pipe the host log goes through, when a reader thread
+// copies it to a file (the iOS app's log: Library/Caches/host.log). A fault
+// report written to the pipe and followed at once by the exit is lost with
+// whatever the reader had not taken yet; os_fault_exit waits for it first.
+// Read from RECOMP_HOST_LOG_PIPE_FD at install, so a game module's copy of
+// this file (its own statics) knows the base app's pipe too.
+static int g_fault_log_pipe = -1;
+
+static void fault_write_hex(uint64_t v) {
+    char buf[19] = "0x";
+    for (int i = 0; i < 16; ++i)
+        buf[2 + i] = "0123456789abcdef"[(v >> (60 - 4 * i)) & 0xf];
+    buf[18] = 0;
+    os_write_stderr_raw(buf, 18);
+}
+
+static void fault_write(const char *s) {
+    os_write_stderr_raw(s, strlen(s));
+}
+
+// The host's side of a fault: where in which library the faulting thread
+// was (host code the guest called - the graphics device's - faults with the
+// guest's EIP at the call's return) and the address it touched. dladdr is
+// not on the async-signal-safe list, but only reads the loader's tables; the
+// process is ending either way.
+static void fault_host_place(int sig, siginfo_t *info, void *context) {
+    uint64_t pc = 0, lr = 0;
+#if defined(__APPLE__) && defined(__aarch64__)
+    pc = ((ucontext_t *)context)->uc_mcontext->__ss.__pc;
+    lr = ((ucontext_t *)context)->uc_mcontext->__ss.__lr;
+#elif defined(__APPLE__) && defined(__x86_64__)
+    pc = ((ucontext_t *)context)->uc_mcontext->__ss.__rip;
+#elif defined(__linux__) && defined(__aarch64__)
+    pc = ((ucontext_t *)context)->uc_mcontext.pc;
+    lr = ((ucontext_t *)context)->uc_mcontext.regs[30];
+#elif defined(__linux__) && defined(__x86_64__)
+    pc = (uint64_t)((ucontext_t *)context)->uc_mcontext.gregs[REG_RIP];
+#endif
+    (void)context;
+    fault_write("\n[host] host pc ");
+    fault_write_hex(pc);
+    Dl_info where{};
+    if (pc && dladdr((void *)pc, &where) && where.dli_fname) {
+        const char *name = strrchr(where.dli_fname, '/');
+        fault_write(" (");
+        fault_write(name ? name + 1 : where.dli_fname);
+        fault_write("+");
+        fault_write_hex(pc - (uint64_t)where.dli_fbase);
+        if (where.dli_sname) {
+            fault_write(" ");
+            fault_write(where.dli_sname);
+        }
+        fault_write(")");
+    }
+    if (sig == SIGSEGV || sig == SIGBUS) {
+        fault_write(", fault address ");
+        fault_write_hex((uint64_t)(uintptr_t)info->si_addr);
+    }
+    // The return address too: a fault in a leaf, or a call through a bad
+    // pointer (pc wild), still names its caller.
+    if (lr) {
+        fault_write("\n[host] host lr ");
+        fault_write_hex(lr);
+        Dl_info back{};
+        if (dladdr((void *)lr, &back) && back.dli_fname) {
+            const char *name = strrchr(back.dli_fname, '/');
+            fault_write(" (");
+            fault_write(name ? name + 1 : back.dli_fname);
+            fault_write("+");
+            fault_write_hex(lr - (uint64_t)back.dli_fbase);
+            if (back.dli_sname) {
+                fault_write(" ");
+                fault_write(back.dli_sname);
+            }
+            fault_write(")");
+        }
+    }
+#if defined(__APPLE__)
+    // Which host thread: the main thread (the game's own on iOS, UIKit's
+    // too), or a named one (the presenter, audio, a guest worker).
+    char thread_name[64] = {0};
+    pthread_getname_np(pthread_self(), thread_name, sizeof thread_name);
+    fault_write("\n[host] host thread ");
+    fault_write(pthread_main_np() ? "main" : thread_name[0] ? thread_name : "unnamed");
+#endif
+}
+
+static void fault_trampoline(int sig, siginfo_t *info, void *context) {
     const char *what = sig == SIGSEGV   ? "SIGSEGV"
                        : sig == SIGBUS  ? "SIGBUS"
                        : sig == SIGABRT ? "an abort from the runtime"
                                         : "a fatal signal";
+    g_fault_sig = sig;
+    g_fault_sent = info && (info->si_code == SI_USER || info->si_code == SI_QUEUE || info->si_code <= 0);
+#if defined(__APPLE__)
+    g_fault_sent = g_fault_sent || (sig != SIGABRT && info && !info->si_addr);
+#endif
+    fault_host_place(sig, info, context);
     g_fault_fn(what);
 }
 int os_install_fault_handlers(OsFaultFn fn) {
     g_fault_fn = fn;
-    signal(SIGSEGV, fault_trampoline);
-    signal(SIGBUS, fault_trampoline);
-    signal(SIGABRT, fault_trampoline);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = fault_trampoline;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, &g_fault_before[0]);
+    sigaction(SIGBUS, &sa, &g_fault_before[1]);
+    sigaction(SIGABRT, &sa, &g_fault_before[2]);
+    if (const char *fd = getenv("RECOMP_HOST_LOG_PIPE_FD"))
+        g_fault_log_pipe = atoi(fd) > 0 ? atoi(fd) : -1;
     return 1;
+}
+
+// Lets the log's reader thread take what the fault report put in the pipe
+// before the process ends: until the pipe is empty (a second at most, the
+// reader may be the faulting thread), then a moment for its write to the
+// file. ioctl and nanosleep are plain system calls.
+static void fault_drain_log() {
+    if (g_fault_log_pipe < 0)
+        return;
+    const struct timespec tick = {0, 10 * 1000 * 1000};
+    for (int i = 0; i < 100; ++i) {
+        int unread = 0;
+        if (ioctl(g_fault_log_pipe, FIONREAD, &unread) != 0 || unread <= 0)
+            break;
+        nanosleep(&tick, nullptr);
+    }
+    const struct timespec settle = {0, 50 * 1000 * 1000};
+    nanosleep(&settle, nullptr);
+}
+
+void os_fault_exit(int code) {
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+    // The system's own crash report (Android: a tombstone, which a player's
+    // Send logs carries through ApplicationExitInfo; iOS: the app's .ips in
+    // Analytics Data, the host's stack of every thread with the images'
+    // load addresses): the handler the signal had before ours (debuggerd's;
+    // on iOS the default action) put back (over whatever chained to ours
+    // since: the lazy buffers' page tracking) and taken when the faulting
+    // access runs again on return. An exit of our own leaves no report.
+    (void)code;
+    if (g_fault_sig) {
+#if defined(__APPLE__)
+        fault_write("[host] the system keeps its crash report of this: Settings > Privacy & Security > "
+                    "Analytics & Improvements > Analytics Data, the app's .ips of this time\n");
+#endif
+        fault_drain_log();
+        const int i = g_fault_sig == SIGSEGV ? 0 : g_fault_sig == SIGBUS ? 1 : 2;
+        sigaction(g_fault_sig, &g_fault_before[i], nullptr);
+        if (g_fault_sig == SIGABRT || g_fault_sent)
+            raise(g_fault_sig);
+        return;
+    }
+#endif
+    fault_drain_log();
+    _exit(code);
 }
 
 void os_write_stderr_raw(const char *s, size_t n) {

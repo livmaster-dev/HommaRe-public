@@ -127,6 +127,9 @@ void tee_log_to_file() {
     dup2(fds[1], STDOUT_FILENO);
     dup2(fds[1], STDERR_FILENO);
     close(fds[1]);
+    // The fault handler waits on this pipe before the process ends, or the
+    // report it writes dies in it unread (os_posix.cpp fault_drain_log).
+    setenv("RECOMP_HOST_LOG_PIPE_FD", std::to_string(fds[0]).c_str(), 1);
     std::thread([fd = fds[0], file, console]() {
         char buf[4096];
         ssize_t n;
