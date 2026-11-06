@@ -114,9 +114,11 @@ struct ControlPanel {
 };
 // A camera button calls `camera` with a RECOMP_CAMERA_* step, a command
 // `command` with its id. Call it every turn: it only acts on a change; another
-// `phone` builds it again at the other size. iOS: a framed column of round
-// buttons at the top right (a phone's: at the left, by the camera housing),
-// which take their touches themselves. Desktop and Android: nothing.
+// `phone` builds it again at the other size. iOS: a framed grid of round
+// buttons at the left: a phone's at the top, by the camera housing; a larger
+// screen's right above the game's bottom-left corner window (the minimap, a
+// battle's hero portrait), its buttons the size of the game's round ones.
+// They take their touches themselves. Desktop and Android: nothing.
 void platform_ui_control_panel(SDL_Window *window, const ControlPanel &panel,
                                void (*camera)(int step), void (*command)(const char *id));
 

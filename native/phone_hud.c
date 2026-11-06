@@ -2011,6 +2011,70 @@ void homm5_tooltip_move(X86 *c) { hud_tips(c, HOMM5_FN_TOOLTIP_MOVE); }
  * game's thread. */
 int homm5_window_shown(uint32_t win); /* native/phone_layout.c */
 
+/* One root's children for homm5_hud_busy, from out[n] on; the new count. */
+static int busy_of(const Hud *h, int panels, float (*out)[4], int n, int cap) {
+    const uint32_t win = h->root - ROOT_MAIN;
+    const uint32_t b = rd32(win + WINDOW_CHILDREN), e = rd32(win + WINDOW_CHILDREN + 4);
+    if (b < 0x10000u || e < b || e - b > 4u * 256u)
+        return n;
+    for (uint32_t at = b; at < e && n < cap; at += 4) {
+        const uint32_t child = rd32(at);
+        float r[4];
+        if (!child || !window_rect(child, r) || !homm5_window_shown(child) ||
+            homm5_phone_layout_draw(child) == LAYOUT_HIDE || follows_picture(h, child))
+            continue;
+#ifdef HOMM5_VT_CARD
+        if (rd32(child) == HOMM5_VT_CARD)
+            continue; /* a card a finger brought up comes and goes: not interface */
+#endif
+        Panel pn;
+        const Mapping m =
+            panels && panel_of(h, child, &pn, 0) ? panel_mapping(h, &pn) : hud_mapping(h);
+        if (!(m.vw > 0.0f) || !(m.vh > 0.0f))
+            continue;
+        const float sx = m.rw / m.vw / h->plain.rw, sy = m.rh / m.vh / h->plain.rh;
+        float q[4] = {(r[0] - m.ox) * sx, (r[1] - m.oy) * sy, (r[2] - m.ox) * sx,
+                      (r[3] - m.oy) * sy};
+        int finite = 1;
+        for (int k = 0; k < 4; ++k) {
+            finite &= q[k] == q[k] && q[k] > -1e9f && q[k] < 1e9f;
+            q[k] = clampf_(q[k], 0.0f, 1.0f);
+        }
+        if (!finite)
+            continue;
+        if (q[2] - q[0] <= 0.005f || q[3] - q[1] <= 0.005f ||
+            (q[2] - q[0]) * (q[3] - q[1]) >= 0.5f)
+            continue;
+        memcpy(out[n++], q, sizeof q);
+    }
+    return n;
+}
+
+uint32_t homm5_top_root(void); /* native/touch.c: the map's or a battle's root window */
+
+/* The top screen's root drawn as the game lays it out, unscaled (an iPad's,
+ * a foldable's opened screen): no Hud of its own in the last frame. Zero
+ * where there is none or it has one. */
+static int plain_top_hud(Hud *h) {
+    const uint32_t top = homm5_top_root();
+    if (!top)
+        return 0;
+    const int f = !g_hud_frame;
+    for (int i = 0; i < g_hud_count[f]; ++i)
+        if (g_huds[f][i].root - ROOT_MAIN == top)
+            return 0;
+    memset(h, 0, sizeof *h);
+    h->root = top + ROOT_MAIN;
+    h->kind = hud_kind(h->root);
+    h->plain = plain_mapping();
+    h->k = 1.0f;
+    h->ox = h->plain.ox;
+    h->oy = h->plain.oy;
+    h->w = h->plain.vw;
+    h->h = h->plain.vh;
+    return h->kind && h->kind != HUD_FULL && h->plain.rw > 0.0f && h->plain.rh > 0.0f;
+}
+
 int homm5_hud_busy(float (*out)[4], int cap) {
     const int f = !g_hud_frame; /* the last frame drawn whole */
     int n = 0;
@@ -2018,39 +2082,67 @@ int homm5_hud_busy(float (*out)[4], int cap) {
         const Hud *h = &g_huds[f][i];
         if (h->kind == HUD_FULL || h->plain.rw <= 0.0f || h->plain.rh <= 0.0f)
             continue;
-        const uint32_t win = h->root - ROOT_MAIN;
-        const uint32_t b = rd32(win + WINDOW_CHILDREN), e = rd32(win + WINDOW_CHILDREN + 4);
-        if (b < 0x10000u || e < b || e - b > 4u * 256u)
-            continue;
-        for (uint32_t at = b; at < e && n < cap; at += 4) {
-            const uint32_t child = rd32(at);
-            float r[4];
-            if (!child || !window_rect(child, r) || !homm5_window_shown(child) ||
-                homm5_phone_layout_draw(child) == LAYOUT_HIDE || follows_picture(h, child))
-                continue;
-#ifdef HOMM5_VT_CARD
-            if (rd32(child) == HOMM5_VT_CARD)
-                continue; /* a card a finger brought up comes and goes: not interface */
-#endif
-            Panel pn;
-            const Mapping m = panel_of(h, child, &pn, 0) ? panel_mapping(h, &pn) : hud_mapping(h);
-            if (!(m.vw > 0.0f) || !(m.vh > 0.0f))
-                continue;
-            const float sx = m.rw / m.vw / h->plain.rw, sy = m.rh / m.vh / h->plain.rh;
-            float q[4] = {(r[0] - m.ox) * sx, (r[1] - m.oy) * sy, (r[2] - m.ox) * sx,
-                          (r[3] - m.oy) * sy};
-            int finite = 1;
-            for (int k = 0; k < 4; ++k) {
-                finite &= q[k] == q[k] && q[k] > -1e9f && q[k] < 1e9f;
-                q[k] = clampf_(q[k], 0.0f, 1.0f);
-            }
-            if (!finite)
-                continue;
-            if (q[2] - q[0] <= 0.005f || q[3] - q[1] <= 0.005f ||
-                (q[2] - q[0]) * (q[3] - q[1]) >= 0.5f)
-                continue;
-            memcpy(out[n++], q, sizeof q);
-        }
+        n = busy_of(h, 1, out, n, cap);
     }
+    Hud plain;
+    if (n < cap && plain_top_hud(&plain))
+        n = busy_of(&plain, 0, out, n, cap);
     return n;
+}
+
+/* For native/hotkeys.c: a window of the interface drawn in the last frame (a
+ * child of a root's child, at any depth) as fractions of the picture, mapped
+ * as homm5_hud_busy maps its root's child. The command panel sizes its buttons
+ * by the game's own round ones. 0 where the window is not under a root drawn
+ * then. Called on the game's thread. */
+int homm5_hud_window_frac(uint32_t win, float q[4]) {
+    const int f = !g_hud_frame;
+    float r[4];
+    if (!win || !window_rect(win, r))
+        return 0;
+    for (int i = 0; i < g_hud_count[f]; ++i) {
+        const Hud *h = &g_huds[f][i];
+        if (h->kind == HUD_FULL || h->plain.rw <= 0.0f || h->plain.rh <= 0.0f)
+            continue;
+        const uint32_t root = h->root - ROOT_MAIN;
+        uint32_t top = win;
+        for (int depth = 0; top && depth < 32 && rd32(top + WINDOW_PARENT) != root; ++depth)
+            top = rd32(top + WINDOW_PARENT);
+        if (!top || rd32(top + WINDOW_PARENT) != root)
+            continue;
+        Panel pn;
+        const Mapping m = panel_of(h, top, &pn, 0) ? panel_mapping(h, &pn) : hud_mapping(h);
+        if (!(m.vw > 0.0f) || !(m.vh > 0.0f))
+            return 0;
+        const float sx = m.rw / m.vw / h->plain.rw, sy = m.rh / m.vh / h->plain.rh;
+        q[0] = (r[0] - m.ox) * sx;
+        q[1] = (r[1] - m.oy) * sy;
+        q[2] = (r[2] - m.ox) * sx;
+        q[3] = (r[3] - m.oy) * sy;
+        for (int k = 0; k < 4; ++k)
+            if (!(q[k] == q[k]) || q[k] < -1.0f || q[k] > 2.0f)
+                return 0;
+        return q[2] > q[0] && q[3] > q[1];
+    }
+    /* The top screen drawn unscaled: its plain mapping. */
+    Hud plain;
+    if (!plain_top_hud(&plain))
+        return 0;
+    const uint32_t root = plain.root - ROOT_MAIN;
+    uint32_t top = win;
+    for (int depth = 0; top && depth < 32 && rd32(top + WINDOW_PARENT) != root; ++depth)
+        top = rd32(top + WINDOW_PARENT);
+    if (!top || rd32(top + WINDOW_PARENT) != root || !(plain.plain.vw > 0.0f) ||
+        !(plain.plain.vh > 0.0f))
+        return 0;
+    const Mapping m = hud_mapping(&plain);
+    const float sx = 1.0f / m.vw, sy = 1.0f / m.vh;
+    q[0] = (r[0] - m.ox) * sx;
+    q[1] = (r[1] - m.oy) * sy;
+    q[2] = (r[2] - m.ox) * sx;
+    q[3] = (r[3] - m.oy) * sy;
+    for (int k = 0; k < 4; ++k)
+        if (!(q[k] == q[k]) || q[k] < -1.0f || q[k] > 2.0f)
+            return 0;
+    return q[2] > q[0] && q[3] > q[1];
 }

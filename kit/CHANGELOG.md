@@ -1,5 +1,18 @@
 # Changelog
 
+## iOS control panel on larger screens: by the game's corner, its buttons' size
+
+- On a larger screen (an iPad, a foldable iPhone opened), where the game
+  lays out its own interface, the panel stands at the left right above the
+  window in the picture's bottom-left corner (the map's minimap, a battle's
+  hero portrait), two buttons wide and growing up from there, as far in from
+  the edge as the portrait. Where nothing fits there it looks for room from
+  the top left, as on a phone.
+- Its buttons take the size of the game's own round ones: the document's new
+  `"button": [w, h]` (fractions of the picture, from the game's dial), 40 to
+  72 pt; a phone keeps 44 pt. Windows smaller than a button (a battle's stack
+  counters, which move) do not push it about.
+
 ## iOS control panel: the game's commands beside the camera
 
 - A new seam, `recomp_hotkeys_state(buf, cap, serial)` in

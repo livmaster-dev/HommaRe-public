@@ -74,12 +74,17 @@ int homm5_window_shown(uint32_t win);
 
 /* native/phone_hud.c: where the interface stands, as fractions of the picture. */
 int homm5_hud_busy(float (*out)[4], int cap);
+int homm5_hud_window_frac(uint32_t win, float q[4]);
 
 /* That, from the game's thread, for the host's panel to keep clear of: two
  * buffers, the one `g_busy_at` names complete. */
 enum { BUSY_MAX = 24 };
 static float g_busy[2][BUSY_MAX][4];
 static int g_busy_n[2];
+/* The size of the game's own round button (its menu's, on the map's and a
+ * battle's dial), as fractions of the picture's width and height; 0 unseen.
+ * The panel's buttons take it on a large screen. */
+static float g_button[2][2];
 static volatile int g_busy_at;
 
 /* The catalog's commands whose button the screen on top shows now (bit i:
@@ -103,8 +108,10 @@ static int listed(const char *list, const char *word) {
 }
 
 /* Walks the top screen's windows (children at +0xa4, a vector of pointers)
- * for the catalog's buttons and keeps the commands whose button shows. */
-static uint32_t scan_onscreen(void) {
+ * for the catalog's buttons and keeps the commands whose button shows; the
+ * dial's menu button's size into `button` (w, h), where it shows. */
+static uint32_t scan_onscreen(float button[2]) {
+    button[0] = button[1] = 0.0f;
     const uint32_t root = homm5_top_root();
     if (!root)
         return 0;
@@ -120,6 +127,12 @@ static uint32_t scan_onscreen(void) {
         for (int i = 0; name[0] && i < count; ++i)
             if (listed(hk_command_buttons(i), name) && homm5_window_shown(win))
                 found |= 1u << i;
+        float q[4];
+        if (!button[0] && !strcmp(name, "OnJog-Menu") && homm5_window_shown(win) &&
+            homm5_hud_window_frac(win, q)) {
+            button[0] = q[2] - q[0];
+            button[1] = q[3] - q[1];
+        }
         const uint32_t b = peek32(win + 0xa4u), e = peek32(win + 0xa8u);
         if (!b || e < b || e - b > 4u * 256u)
             continue;
@@ -134,8 +147,8 @@ void homm5_hotkeys_frame(X86 *c) {
     static unsigned frame, last_ask;
     static int done, asked;
     if (++frame % 15 == 0) {
-        g_onscreen = scan_onscreen();
         const int w = !g_busy_at;
+        g_onscreen = scan_onscreen(g_button[w]);
         g_busy_n[w] = homm5_hud_busy(g_busy[w], BUSY_MAX);
         __atomic_store_n(&g_busy_at, w, __ATOMIC_RELEASE);
     }
@@ -375,7 +388,8 @@ static int refresh_bindings(void) {
 
 /* The interface's rectangles as the document's "busy": [[x0, y0, x1, y1], ...]
  * in hundredths of the picture, so a panel a pixel over does not count as a
- * change. */
+ * change; and the game's round button's size as "button": [w, h], where one
+ * shows. */
 static void busy_json(char *out, size_t cap) {
     const int at = __atomic_load_n(&g_busy_at, __ATOMIC_ACQUIRE);
     size_t len = (size_t)snprintf(out, cap, ",\"busy\":[");
@@ -384,7 +398,10 @@ static void busy_json(char *out, size_t cap) {
         len += (size_t)snprintf(out + len, cap - len, "%s[%.2f,%.2f,%.2f,%.2f]", i ? "," : "",
                                 r[0], r[1], r[2], r[3]);
     }
-    snprintf(out + len, cap - len, "]");
+    len += (size_t)snprintf(out + len, cap - len, "]");
+    const float *b = g_button[at];
+    if (len < cap && b[0] > 0.005f && b[0] < 0.5f && b[1] > 0.005f && b[1] < 0.5f)
+        snprintf(out + len, cap - len, ",\"button\":[%.3f,%.3f]", b[0], b[1]);
 }
 
 int recomp_hotkeys_state(char *buf, int cap, unsigned *serial) {
