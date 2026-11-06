@@ -4,6 +4,17 @@ What changed for players in each release of HommaRe. The builds are in
 [Releases](../../releases); the recompilation kit underneath keeps its own notes in
 [kit/CHANGELOG.md](kit/CHANGELOG.md).
 
+## 0.1-playable-439 (2026-11-06)
+
+- **The command panel on an iPad or an opened foldable iPhone** now stands at the left,
+  right above the minimap on the map and above the hero's portrait in battle, two
+  buttons wide, and its buttons are the size of the game's own round ones. It went to
+  the top right before. On a phone it is where it was.
+- **iPhone and iPad crash reports:** when the game closes on a fault, its log now keeps
+  the whole report, iOS writes its own crash report (in *Settings → Privacy & Security →
+  Analytics & Improvements → Analytics Data*, "HommaRe-…"), and the report names the
+  thread that faulted. Please attach both to an issue if the game closes on you.
+
 ## 0.1-playable-433 (2026-11-05)
 
 - **A command panel on iPad and iPhone,** in all three games: the camera buttons' panel
