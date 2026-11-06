@@ -41,6 +41,15 @@ bool game_path_save(const std::string &path) {
     return fclose(f) == 0;
 }
 
+std::string game_path_normal(std::string path) {
+#ifdef _WIN32
+    for (char &c : path)
+        if (c == '\\')
+            c = '/';
+#endif
+    return path;
+}
+
 GamePath game_path_resolve(const char *flag, const char *data_root) {
     GamePath g;
     // A mobile host owns its data location. Missing files must not fall back
@@ -55,12 +64,12 @@ GamePath game_path_resolve(const char *flag, const char *data_root) {
         return g;
     }
     if (flag && *flag) {
-        g.exe = flag;
+        g.exe = game_path_normal(flag);
         g.source = GamePathSource::Flag;
         return g;
     }
     if (const char *env = recomp_env("EXE"); env && *env) {
-        g.exe = env;
+        g.exe = game_path_normal(env);
         g.source = GamePathSource::Environment;
         return g;
     }
@@ -84,7 +93,7 @@ GamePath game_path_resolve(const char *flag, const char *data_root) {
             while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
                 path.pop_back();
             if (!path.empty() && game_path_is_supported(path, nullptr)) {
-                g.exe = path;
+                g.exe = game_path_normal(path);
                 g.source = GamePathSource::Saved;
             }
         }

@@ -8,18 +8,16 @@ set(POP_RUNTIME_SOURCES
 # zlib1.dll on the host's zlib, and the offline stand-ins (legacy_dlls.cpp).
 list(APPEND POP_RUNTIME_SOURCES legacy_dlls.cpp winsock.cpp)
 # libcurl.dll's one useful request, a GS game's server list, over plain HTTP
-# (curl_http.cpp); the sockets are POSIX's, and a Windows build fails it.
-list(APPEND POP_RUNTIME_SOURCES curl_http.cpp)
+# (curl_http.cpp) on the platform layer's sockets (http_get.cpp).
+list(APPEND POP_RUNTIME_SOURCES curl_http.cpp http_get.cpp)
 # The password a GS game sends to that server: a token, never the password.
 list(APPEND POP_RUNTIME_SOURCES gs_login.cpp)
-if(WIN32)
-  list(APPEND POP_RUNTIME_SOURCES http_get_none.cpp)
-else()
-  list(APPEND POP_RUNTIME_SOURCES http_get_posix.cpp)
-endif()
 # The pages the host draws over the game, in the kit's Open Sans.
 list(APPEND POP_RUNTIME_SOURCES gdi32_canvas.cpp)
-find_package(ZLIB REQUIRED)
+# Windows compiles its own (cmake/Dependencies.cmake).
+if(NOT TARGET ZLIB::ZLIB)
+  find_package(ZLIB REQUIRED)
+endif()
 # An Apple SDK's zlib.h is in the SDK's own usr/include, which the compiler
 # searches anyway. Named again (the Xcode generator passes it as -isystem) it
 # comes before libc++'s headers, which Xcode 27.2's libc++ refuses.
@@ -89,8 +87,8 @@ set_tests_properties(interp_tests PROPERTIES LABELS nogame TIMEOUT 120)
 endif()
 
 # libcurl's stand-in and its HTTP GET against a server on 127.0.0.1, which the
-# suite runs itself over POSIX sockets, as the stand-in does.
-if(NOT IOS AND NOT ANDROID AND NOT WIN32)
+# suite runs itself over the platform layer's sockets, as the stand-in does.
+if(NOT IOS AND NOT ANDROID)
 add_executable(curl_http_tests tests/curl_http_tests.cpp tests/stub_recomp_call.cpp)
 target_link_libraries(curl_http_tests PRIVATE recomp_platform recomp_runtime)
 target_compile_options(curl_http_tests PRIVATE ${POP_WARN_HOST})

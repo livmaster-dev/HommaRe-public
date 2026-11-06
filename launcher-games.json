@@ -37,6 +37,18 @@
       "pl": "Natywny port na iPada i iPhone’a",
       "zh-Hans": "适用于 iPad 和 iPhone 的原生移植版"
     },
+    "windows": {
+      "en": "Native port for Windows",
+      "ru": "Нативный порт для Windows",
+      "cs": "Nativní port pro Windows",
+      "de": "Nativer Port für Windows",
+      "es": "Port nativo para Windows",
+      "fr": "Portage natif pour Windows",
+      "it": "Port nativo per Windows",
+      "hu": "Natív port Windowsra",
+      "pl": "Natywny port na Windowsa",
+      "zh-Hans": "适用于 Windows 的原生移植版"
+    },
     "linux": {
       "en": "Native port for Linux",
       "ru": "Нативный порт для Linux",
@@ -62,7 +74,8 @@
     "pl": "Nieoficjalny port fanowski, niezwiązany z Ubisoftem. Pliki gry nie są dołączone — graj na własnej kopii z GOG.",
     "zh-Hans": "非官方的玩家移植版，与 Ubisoft 无关。不含任何游戏文件：请使用你自己的 GOG 版本。"
   },
-  "installNames": ["Heroes of Might and Magic V", "Heroes V", "HoMM5", "Heroes 5", "Tribes of the East"],
+  "installNames": ["Heroes of Might and Magic V", "Heroes of Might & Magic V", "Heroes V", "HoMM5", "Heroes 5",
+                   "Tribes of the East"],
   "exclude": ["__redist", "commonappdata", "tmp", "Editor", "Editor Documentation", "FanDocuments", "*.pdf", "*.part"],
   "installers": [
     {

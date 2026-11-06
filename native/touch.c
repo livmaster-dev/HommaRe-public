@@ -22,9 +22,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "x86.h"
+#include "platform/os.h"
 
 /* The game's own addresses: the base game's below, an expansion's from its
  * games/<id>/native/addresses.h (game.toml [translate] native addresses,
@@ -116,8 +116,7 @@ void recomp_app_background(void) {
     int waited = 0;
     const uint32_t ask = __atomic_add_fetch(&g_save_asked, 1u, __ATOMIC_ACQ_REL);
     while ((int32_t)(__atomic_load_n(&g_save_answered, __ATOMIC_ACQUIRE) - ask) < 0 && waited < 3000) {
-        struct timespec ts = {0, 10 * 1000000};
-        nanosleep(&ts, NULL);
+        os_sleep_us(10000);
         waited += 10;
     }
     fprintf(stderr, "[homm5] settings %s before going to the background\n",

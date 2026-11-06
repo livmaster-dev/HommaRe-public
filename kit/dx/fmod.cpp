@@ -29,6 +29,7 @@
 #include "../platform/os.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iterator>
 #include <map>
 #include <vector>

@@ -3,9 +3,9 @@
  * and the stack slot it used. */
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 
 #include "x86.h"
+#include "platform/os.h"
 #include "funcs.h"
 #include "native_check.h"
 
@@ -118,9 +118,7 @@ void h5_aabb_add(X86 *c) {
     int native = mode;
     if (mode == 2) {
         static int shown = -1;
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        native = (int)((ts.tv_sec / 10) & 1);
+        native = (int)((os_monotonic_ns() / 10000000000ull) & 1);
         if (native != shown) {
             shown = native;
             fprintf(stderr, "[aabb] %s\n", native ? "native" : "original");

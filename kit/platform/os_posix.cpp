@@ -1065,6 +1065,21 @@ int os_exe_path(char *buf, size_t cap) {
 #endif
 }
 
+void os_attach_parent_console(void) {}
+
+int os_module_path(const void *address, char *buf, size_t cap) {
+#ifdef __EMSCRIPTEN__
+    (void)address;
+    return os_exe_path(buf, cap);
+#else
+    Dl_info info{};
+    if (!dladdr(address, &info) || !info.dli_fname || strlen(info.dli_fname) + 1 > cap)
+        return -1;
+    memcpy(buf, info.dli_fname, strlen(info.dli_fname) + 1);
+    return 0;
+#endif
+}
+
 static OsFaultFn g_fault_fn = nullptr;
 static void fault_trampoline(int sig) {
     const char *what = sig == SIGSEGV   ? "SIGSEGV"

@@ -159,6 +159,7 @@ void test_process_and_strings() {
     char exe[4096];
     CHECK(os_exe_path(exe, sizeof exe) == 0);
     char dir[512];
+    CHECK(strchr(os_temp_dir(), '\\') == nullptr);
     snprintf(dir, sizeof dir, "%s/pop-platform-XXXXXX", os_temp_dir());
     CHECK(os_mkdtemp(dir) == 0);
     OsStat st;
@@ -185,6 +186,15 @@ void test_process_and_strings() {
     CHECK(os_user_data_dir("PopRecompTest", data, sizeof data) == 0);
     CHECK(strstr(data, "PopRecompTest") != nullptr);
     CHECK(data[strlen(data) - 1] != '/' && data[strlen(data) - 1] != '\\');
+    CHECK(strchr(data, '\\') == nullptr); // paths come out in '/' everywhere
+    // The file that holds a function of this binary's is the binary itself
+    // (as the loader names it: glibc says argv[0] for the executable).
+    char mine[4096];
+    CHECK(os_module_path(reinterpret_cast<const void *>(&test_process_and_strings), mine,
+                         sizeof mine) == 0);
+    CHECK(strstr(mine, "platform_tests") != nullptr);
+    CHECK(strchr(mine, '\\') == nullptr);
+    CHECK(os_module_path(reinterpret_cast<const void *>(&test_process_and_strings), mine, 4) == -1);
     {
         uint64_t free_bytes = 0;
         const std::string dir = scratch_dir();
@@ -204,7 +214,7 @@ void test_process_and_strings() {
     CHECK(os_dlopen_noload("/definitely/not/loaded") == nullptr);
     CHECK(os_dlopen("/definitely/not/a/plugin") == nullptr);
     CHECK(os_dlerror() != nullptr);
-    os_write_stderr_raw("platform_tests: raw stderr write ok\n", 35);
+    os_write_stderr_raw("platform_tests: raw stderr write ok\n", 36);
 }
 
 // The kit's switches are RECOMP_<NAME>; the spellings they had while the kit

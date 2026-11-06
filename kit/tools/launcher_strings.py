@@ -12,8 +12,9 @@ that every t("key") in LauncherStrings.swift has an entry and passes the
 placeholders it names, and that LauncherCatalog.swift is the JSON as it is
 now. --write regenerates that file: the JSON in a Swift raw string, read
 once at start, so the app needs no resource file for it. The native launcher
-on Linux (host/launcher/linux/) embeds the JSON itself at build time and
-prefers an entry's ".linux" variant where there is one.
+on Linux and Windows (host/launcher/linux/) embeds the JSON itself at build
+time and prefers an entry's ".linux" variant where there is one (on
+Windows its ".windows" one first).
 """
 
 import argparse

@@ -116,6 +116,15 @@ int copy_out(const std::string &s, char *buf, size_t cap) {
     return 0;
 }
 
+// The path of a loaded executable or DLL (nullptr: the executable).
+int module_file(HMODULE m, char *buf, size_t cap) {
+    wchar_t w[32768];
+    DWORD n = GetModuleFileNameW(m, w, 32768);
+    if (!n || n >= 32768)
+        return -1;
+    return copy_out(narrow(w), buf, cap);
+}
+
 struct ThreadStart {
     void *(*fn)(void *);
     void *arg;
@@ -270,7 +279,12 @@ void os_vm_release(void *p, size_t bytes) {
 }
 
 void *os_dlopen(const char *path) {
-    HMODULE m = LoadLibraryW(widen(path).c_str());
+    // LoadLibrary wants backslashes; paths here come in '/'.
+    std::wstring w = widen(path);
+    for (wchar_t &c : w)
+        if (c == L'/')
+            c = L'\\';
+    HMODULE m = LoadLibraryW(w.c_str());
     if (!m)
         remember_dlerror();
     return m;
@@ -380,9 +394,8 @@ const char *os_temp_dir(void) {
         return ".";
     while (n > 1 && (w[n - 1] == L'\\' || w[n - 1] == L'/'))
         w[--n] = 0;
-    std::string s = narrow(w);
-    strncpy(buf, s.c_str(), sizeof buf - 1);
-    buf[sizeof buf - 1] = 0;
+    if (copy_out(narrow(w), buf, sizeof buf) != 0)
+        return ".";
     return buf;
 }
 
@@ -446,11 +459,8 @@ int os_user_data_dir(const char *app, char *buf, size_t cap) {
     DWORD n = GetEnvironmentVariableW(L"APPDATA", w, MAX_PATH + 1);
     if (!n || n > MAX_PATH)
         return -1;
-    std::string s = narrow(w) + "\\" + app;
-    if (s.size() + 1 > cap)
-        return -1;
-    memcpy(buf, s.c_str(), s.size() + 1);
-    return 0;
+    // In '/', like every other path this layer hands out: callers split there.
+    return copy_out(narrow(w) + "/" + app, buf, cap);
 }
 
 int os_spawn(const char *const argv[], int64_t *pid_out) {
@@ -563,11 +573,28 @@ void *os_fdopen(int fd, const char *mode) {
 }
 
 int os_exe_path(char *buf, size_t cap) {
-    wchar_t w[32768];
-    DWORD n = GetModuleFileNameW(nullptr, w, 32768);
-    if (!n || n >= 32768)
+    return module_file(nullptr, buf, cap);
+}
+void os_attach_parent_console(void) {
+    // Redirected (2> log.txt, a pipe, Wine's own terminal): keep that.
+    const HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    if (err && err != INVALID_HANDLE_VALUE && GetFileType(err) != FILE_TYPE_UNKNOWN)
+        return;
+    if (!AttachConsole(ATTACH_PARENT_PROCESS))
+        return; // started from Explorer: nowhere to write
+    // The C streams and the handles os_write_stderr_raw writes to.
+    if (freopen("CONOUT$", "w", stdout))
+        SetStdHandle(STD_OUTPUT_HANDLE, (HANDLE)_get_osfhandle(_fileno(stdout)));
+    if (freopen("CONOUT$", "w", stderr))
+        SetStdHandle(STD_ERROR_HANDLE, (HANDLE)_get_osfhandle(_fileno(stderr)));
+}
+int os_module_path(const void *address, char *buf, size_t cap) {
+    HMODULE m = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)address, &m))
         return -1;
-    return copy_out(narrow(w), buf, cap);
+    return module_file(m, buf, cap);
 }
 // The unhandled-exception filter: the fault address relative to this
 // executable's base (so a linker map resolves it), the top of the stack as

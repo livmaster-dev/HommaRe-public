@@ -5,7 +5,13 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace launcher::native {
 
@@ -82,6 +88,18 @@ std::vector<std::pair<std::string, std::string>> preferred_languages() {
             ids.push_back(list.substr(start, colon - start));
             start = colon + 1;
         }
+#ifdef _WIN32
+    // Windows sets none of those: its display languages, most wanted first
+    // ("ru-RU", "en-US"), unless the environment names one.
+    ULONG count = 0, size = 0;
+    if (locale.empty() && GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, nullptr, &size) &&
+        size) {
+        std::wstring names(size, L'\0');
+        if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, names.data(), &size))
+            for (const wchar_t *n = names.c_str(); *n; n += wcslen(n) + 1)
+                ids.push_back(std::string(n, n + wcslen(n))); // tags are ASCII
+    }
+#endif
     ids.push_back(locale);
     std::vector<std::pair<std::string, std::string>> out;
     for (std::string id : ids) {
@@ -148,7 +166,12 @@ void choose_language(const std::string &code) {
 
 std::string t(const char *key, const Args &args) {
     const auto &strings = catalog().strings;
-    auto it = strings.find(std::string(key) + ".linux");
+    auto it = strings.end();
+#ifdef _WIN32
+    it = strings.find(std::string(key) + ".windows"); // then the desktop's, as on Linux
+#endif
+    if (it == strings.end())
+        it = strings.find(std::string(key) + ".linux");
     if (it == strings.end())
         it = strings.find(key);
     if (it == strings.end())
@@ -206,6 +229,9 @@ std::string bytes(int64_t count) {
 }
 
 std::string location(const std::string &path) {
+#ifdef _WIN32
+    return path; // a Windows user knows C:/Users/<name>, not ~
+#endif
     const char *home = getenv("HOME");
     const std::string h = home ? home : "";
     if (!h.empty() && h != "/" && path.compare(0, h.size() + 1, h + "/") == 0)

@@ -1155,6 +1155,12 @@ static void test_game_path() {
         CHECK(first.exe == RECOMP_DEVELOPER_EXE);
     // A flag wins without any check.
     CHECK(game_path_resolve("/x/D3DPopTB.exe").source == GamePathSource::Flag);
+    // Windows' own spelling is split at '/' like the rest; elsewhere '\' is a name's.
+#ifdef _WIN32
+    CHECK(game_path_resolve("C:\\G V\\bin\\x.exe").exe == "C:/G V/bin/x.exe");
+#else
+    CHECK(game_path_normal("/x/a\\b.exe") == "/x/a\\b.exe");
+#endif
     // A saved path to a wrong file is ignored.
     std::string wrong = std::string(dir) + "/wrong.exe";
     FILE *f = fopen(wrong.c_str(), "wb");

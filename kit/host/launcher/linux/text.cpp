@@ -130,6 +130,12 @@ const std::map<std::string, std::string> &font_files() {
         std::vector<std::string> roots;
         if (!g_font_dir.empty())
             roots.push_back(g_font_dir);
+#ifdef _WIN32
+        if (const char *windows = getenv("WINDIR"); windows && *windows)
+            roots.push_back(std::string(windows) + "/Fonts");
+        if (const char *local = getenv("LOCALAPPDATA"); local && *local)
+            roots.push_back(std::string(local) + "/Microsoft/Windows/Fonts"); // per-user installs
+#endif
         const char *home = getenv("HOME");
         const char *data = getenv("XDG_DATA_HOME");
         if (data && *data)
