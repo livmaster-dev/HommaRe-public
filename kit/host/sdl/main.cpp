@@ -3549,7 +3549,8 @@ void web_guest() {
         // page names the install root above the EXE (RECOMP_GAME_ROOT).
         const char *root_env = recomp_env("GAME_ROOT");
         const std::string root = root_env && *root_env ? root_env : dir;
-        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), false);
+        // No phone interface and no native touch in a browser.
+        host_ui_mods(root, host_layout().profile_dir, host_resource("ui-mods"), false, false);
         host_text_overrides(root, host_layout().profile_dir, RECOMP_TEXTS_PAK, RECOMP_TEXTS_FILES,
                             RECOMP_TEXTS_REPLACE);
     }
