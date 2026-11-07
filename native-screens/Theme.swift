@@ -4,7 +4,6 @@
 // finger: nothing to press under 44 pt.
 
 import SwiftUI
-import UIKit
 
 enum Theme {
     static let panel = Color(red: 0.16, green: 0.12, blue: 0.09).opacity(0.94)
@@ -48,38 +47,46 @@ enum Theme {
     static func heading(_ size: CGFloat) -> Font {
         registerFonts
         // The game's own header lettering, when it was built from the install.
-        if UIFont(name: GameFont.bold, size: size) != nil {
+        if PlatformFont(name: GameFont.bold, size: size) != nil {
             return .custom(GameFont.bold, size: size)
         }
-        if UIFont(name: "CormorantGaramond-BoldItalic", size: size) != nil {
+        if PlatformFont(name: "CormorantGaramond-BoldItalic", size: size) != nil {
             return .custom("CormorantGaramond-BoldItalic", size: size)
         }
         // A variable font: its SemiBold is a weight on its axis, not a face.
-        let base = UIFontDescriptor(name: "CormorantGaramond-Regular", size: size)
+        let base = PlatformFontDescriptor(name: "CormorantGaramond-Regular", size: size)
         let wght = 0x7767_6874 // 'wght'
-        let semibold = base.addingAttributes([UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): [wght: 600]])
-        let font = UIFont(descriptor: semibold, size: size)
-        return font.familyName.hasPrefix("Cormorant") ? Font(font) : .system(size: size, weight: .semibold, design: .serif)
+        let semibold = base.addingAttributes([PlatformFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): [wght: 600]])
+        guard let font = PlatformFont.with(semibold, size: size) else { return .system(size: size, weight: .semibold, design: .serif) }
+        return Self.family(font).hasPrefix("Cormorant") ? Font(font as CTFont) : .system(size: size, weight: .semibold, design: .serif)
     }
     static func body(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         registerFonts
         let game = weight == .bold ? GameFont.bold : GameFont.regular
-        if UIFont(name: game, size: size) != nil {
+        if PlatformFont(name: game, size: size) != nil {
             return .custom(game, size: size)
         }
         let italic = weight == .regular ? "Alegreya-Italic" : weight == .bold ? "AlegreyaItalic-Bold"
                                                                             : "AlegreyaItalic-Medium"
-        if UIFont(name: italic, size: size) != nil {
+        if PlatformFont(name: italic, size: size) != nil {
             return .custom(italic, size: size)
         }
         return font(weight == .regular ? "AlegreyaSans-Regular" : weight == .bold ? "AlegreyaSans-Bold"
                                                                                 : "AlegreyaSans-Medium",
                     size, design: .default, weight: weight)
     }
+    private static func family(_ font: PlatformFont) -> String {
+        #if os(iOS)
+        font.familyName
+        #else
+        font.familyName ?? ""
+        #endif
+    }
+
     private static func font(_ name: String, _ size: CGFloat, design: Font.Design,
                              weight: Font.Weight) -> Font {
         registerFonts
-        return UIFont(name: name, size: size) != nil
+        return PlatformFont(name: name, size: size) != nil
             ? .custom(name, size: size)
             : .system(size: size, weight: weight, design: design)
     }
@@ -278,8 +285,8 @@ struct MapPreview: View {
                     .overlay { GameImage(ref: path, placeholder: "map", fill: true) }
                     .clipped()
             } else if let path, !path.isEmpty,
-               let image = path.hasSuffix(".bgra") ? RawPicture.image(atPath: path) : UIImage(contentsOfFile: path) {
-                Image(uiImage: image).resizable().scaledToFill()
+               let image = path.hasSuffix(".bgra") ? RawPicture.image(atPath: path) : PlatformImage(contentsOfFile: path) {
+                Image(platformImage: image).resizable().scaledToFill()
             } else {
                 ZStack {
                     Theme.well

@@ -39,6 +39,12 @@ struct File {
     bool turn_left = false; // the source, a picture, turned a quarter to the left
     std::string text;
     std::vector<Edit> edits;
+    // A picture made here (compose): its size, the game's pictures it takes
+    // from (name, SHA-256) and its steps, each record's fields.
+    bool composed = false;
+    uint32_t width = 0, height = 0;
+    std::vector<std::pair<std::string, std::string>> srcs;
+    std::vector<std::vector<std::string>> steps;
 };
 
 struct Recipe {
@@ -155,7 +161,7 @@ bool parse(const fs::path &path, Recipe &r) {
         const std::vector<std::string> v = fields(line);
         const std::string &key = v[0];
         if (key == "recipe") {
-            if (v.size() < 2 || (v[1] != "1" && v[1] != "2" && v[1] != "3"))
+            if (v.size() < 2 || (v[1] != "1" && v[1] != "2" && v[1] != "3" && v[1] != "4"))
                 return false; // a format this build does not know
         } else if (key == "name" && v.size() > 1) {
             r.name = v[1];
@@ -179,6 +185,23 @@ bool parse(const fs::path &path, Recipe &r) {
             f.whole = true;
             f.base64 = key == "new64";
             r.files.push_back(std::move(f));
+        } else if (key == "compose" && v.size() > 3) {
+            File f;
+            f.name = v[1];
+            f.composed = true;
+            f.width = (uint32_t)strtoul(v[2].c_str(), nullptr, 10);
+            f.height = (uint32_t)strtoul(v[3].c_str(), nullptr, 10);
+            if (!f.width || !f.height || f.width > 4096 || f.height > 4096)
+                return false;
+            r.files.push_back(std::move(f));
+        } else if (key == "src" && v.size() > 2 && !r.files.empty() && r.files.back().composed) {
+            r.files.back().srcs.emplace_back(v[1], v[2]);
+        } else if ((key == "blit" || key == "fill" || key == "lay") && !r.files.empty() &&
+                   r.files.back().composed &&
+                   v.size() >= (key == "blit"   ? 10u
+                                : key == "fill" ? 6u
+                                                : 4u)) {
+            r.files.back().steps.push_back(v);
         } else if (key == "turn" && v.size() > 1 && v[1] == "left" && !r.files.empty() &&
                    !r.files.back().whole) {
             r.files.back().turn_left = true;
@@ -238,6 +261,103 @@ bool turn_left(const std::string &dds, std::string &out) {
     return true;
 }
 
+using Files = std::map<std::string, std::string>;
+
+// An uncompressed 32-bit DDS without mips: its size and its BGRA pixels.
+bool dds_pixels(const std::string &dds, uint32_t &width, uint32_t &height,
+                const unsigned char *&px) {
+    if (dds.size() < 128 || dds.compare(0, 4, "DDS ") != 0)
+        return false;
+    uint32_t bits = 0;
+    memcpy(&height, dds.data() + 12, 4);
+    memcpy(&width, dds.data() + 16, 4);
+    memcpy(&bits, dds.data() + 88, 4);
+    if (bits != 32 || dds.size() < 128 + (uint64_t)width * height * 4)
+        return false;
+    px = (const unsigned char *)dds.data() + 128;
+    return true;
+}
+
+// The picture a compose record makes (tools/ui_recipe.py compose, the
+// reference): transparent, then its steps in order; `sources` the game's
+// pictures as its src lines name them, `pictures` the recipe's own (new64).
+bool compose(const File &f, const std::vector<const std::string *> &sources, const Files &pictures,
+             std::string &out) {
+    const uint32_t width = f.width, height = f.height;
+    std::vector<unsigned char> px((size_t)width * height * 4, 0);
+    auto num = [](const std::string &s) { return (int64_t)strtoll(s.c_str(), nullptr, 10); };
+    auto inside = [&](int64_t x, int64_t y) { return x >= 0 && y >= 0 && x < width && y < height; };
+    for (const std::vector<std::string> &st : f.steps) {
+        if (st[0] == "blit") {
+            const size_t i = (size_t)num(st[1]);
+            uint32_t w = 0, h = 0;
+            const unsigned char *src = nullptr;
+            if (i >= sources.size() || !dds_pixels(*sources[i], w, h, src))
+                return false;
+            const int64_t sx = num(st[2]), sy = num(st[3]), sw = num(st[4]), sh = num(st[5]);
+            const int64_t dx = num(st[6]), dy = num(st[7]), dw = num(st[8]), dh = num(st[9]);
+            if (dw <= 0 || dh <= 0 || dw > 4096 || dh > 4096)
+                return false;
+            for (int64_t y = 0; y < dh; ++y) {
+                const int64_t ty = sy + y * sh / dh;
+                for (int64_t x = 0; x < dw; ++x) {
+                    const int64_t tx = sx + x * sw / dw;
+                    if (inside(dx + x, dy + y) && tx >= 0 && ty >= 0 && tx < w && ty < h)
+                        memcpy(&px[(size_t)(((dy + y) * width + dx + x) * 4)],
+                               src + (ty * w + tx) * 4, 4);
+                }
+            }
+        } else if (st[0] == "fill") {
+            const uint32_t v = (uint32_t)strtoul(st[5].c_str(), nullptr, 16);
+            const unsigned char bgra[4] = {(unsigned char)(v >> 8), (unsigned char)(v >> 16),
+                                           (unsigned char)(v >> 24), (unsigned char)v};
+            const int64_t dx = num(st[1]), dy = num(st[2]), dw = num(st[3]), dh = num(st[4]);
+            for (int64_t y = dy; y < dy + dh; ++y)
+                for (int64_t x = dx; x < dx + dw; ++x)
+                    if (inside(x, y))
+                        memcpy(&px[(size_t)((y * width + x) * 4)], bgra, 4);
+        } else if (st[0] == "lay") {
+            auto it = pictures.find(st[1]);
+            uint32_t w = 0, h = 0;
+            const unsigned char *src = nullptr;
+            if (it == pictures.end() || !dds_pixels(it->second, w, h, src))
+                return false;
+            const int64_t dx = num(st[2]), dy = num(st[3]);
+            for (int64_t y = 0; y < h; ++y)
+                for (int64_t x = 0; x < w; ++x) {
+                    if (!inside(dx + x, dy + y))
+                        continue;
+                    const unsigned char *q = src + (y * w + x) * 4;
+                    unsigned char *o = &px[(size_t)(((dy + y) * width + dx + x) * 4)];
+                    const int a = q[3], da = o[3];
+                    if (!a)
+                        continue;
+                    const int oa = a + da * (255 - a) / 255;
+                    for (int c = 0; c < 3; ++c)
+                        o[c] =
+                            (unsigned char)(oa ? (q[c] * a + o[c] * da * (255 - a) / 255) / oa : 0);
+                    o[3] = (unsigned char)oa;
+                }
+        } else {
+            return false;
+        }
+    }
+    // The header tools/ui_recipe.py dds_bytes writes.
+    unsigned char head[128] = {};
+    auto put = [&](size_t at, uint32_t v) { memcpy(head + at, &v, 4); };
+    memcpy(head, "DDS ", 4);
+    const uint32_t fields[7] = {124, 0x1007, height, width, 0, 0, 1};
+    for (int i = 0; i < 7; ++i)
+        put(4 + 4 * (size_t)i, fields[i]);
+    const uint32_t format[8] = {32, 0x41, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000};
+    for (int i = 0; i < 8; ++i)
+        put(76 + 4 * (size_t)i, format[i]);
+    put(108, 0x1000);
+    out.assign((const char *)head, sizeof head);
+    out.append((const char *)px.data(), px.size());
+    return true;
+}
+
 bool same_letters(const std::string &a, const std::string &b) {
     return a.size() == b.size() &&
            std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) { return tolower((unsigned char)x) == tolower((unsigned char)y); });
@@ -267,8 +387,6 @@ fs::path resolve(const fs::path &root, const std::string &rel) {
     }
     return at;
 }
-
-using Files = std::map<std::string, std::string>;
 
 uint32_t u16(const unsigned char *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8;
@@ -494,16 +612,45 @@ void host_ui_mods(const std::string &game_root, const std::string &profile_dir,
             over = it != made.end() ? it->second : read_zip(profile / profile_path(r.over).first);
         }
         std::vector<std::string> names;
-        for (const File &f : r.files)
-            if (!f.whole && !over.count(f.source))
+        for (const File &f : r.files) {
+            if (f.composed) {
+                for (const auto &src : f.srcs)
+                    if (!over.count(src.first))
+                        names.push_back(src.first);
+            } else if (!f.whole && !over.count(f.source)) {
                 names.push_back(f.source);
+            }
+        }
         const Files layers = read_layers(root, r.layers, names);
 
-        Files files;
+        Files files, pictures;
+        for (const File &f : r.files)
+            if (f.whole)
+                pictures[f.name] = f.text;
         int left = 0;
         for (const File &f : r.files) {
             if (f.whole) {
                 files[f.name] = f.text;
+                continue;
+            }
+            if (f.composed) {
+                std::vector<const std::string *> sources;
+                bool fits = true;
+                for (const auto &[name, sha] : f.srcs) {
+                    const std::string *src = nullptr;
+                    if (auto it = over.find(name); it != over.end())
+                        src = &it->second;
+                    else if (auto in = layers.find(name); in != layers.end())
+                        src = &in->second;
+                    fits = fits && src && sha256_hex(src->data(), src->size()) == sha;
+                    sources.push_back(src);
+                }
+                std::string bytes;
+                if (!fits || !compose(f, sources, pictures, bytes)) {
+                    ++left;
+                    continue;
+                }
+                files[f.name] = std::move(bytes);
                 continue;
             }
             // The mod it goes over first, as the generator took it.

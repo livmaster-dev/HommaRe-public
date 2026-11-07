@@ -39,5 +39,34 @@ enum ScreenWords {
                                   "pl": "Przywrócić ustawienia domyślne?"],
         "Send": ["de": "Senden", "fr": "Envoyer", "pl": "Wyślij"],
         "started": ["de": "läuft", "fr": "en cours", "pl": "trwa"],
+        // The skill wheel (SkillWheel.swift), in the games' own words for
+        // skills (Fertigkeiten, compétences, umiejętności) and perks.
+        "Skill wheel": ["de": "Fertigkeitenrad", "fr": "Roue des compétences", "pl": "Koło umiejętności"],
+        "Skill": ["de": "Fertigkeit", "fr": "Compétence", "pl": "Umiejętność"],
+        "Racial skill": ["de": "Volksfertigkeit", "fr": "Compétence raciale", "pl": "Umiejętność rasowa"],
+        "Perk": ["de": "Fähigkeit", "fr": "Capacité", "pl": "Zdolność"],
+        "Perks": ["de": "Fähigkeiten", "fr": "Capacités", "pl": "Zdolności"],
+        "Ultimate": ["de": "Ultimative Fähigkeit", "fr": "Capacité ultime", "pl": "Zdolność ostateczna"],
+        "Needs": ["de": "Benötigt", "fr": "Nécessite", "pl": "Wymaga"],
+        "Opens": ["de": "Ermöglicht", "fr": "Permet", "pl": "Odblokowuje"],
+        "chance": ["de": "Chance", "fr": "chance", "pl": "szansa"],
+        "The game has no skill table to show.": ["de": "Das Spiel hat keine Fertigkeitentabelle.",
+                                                 "fr": "Le jeu n'a pas de table des compétences.",
+                                                 "pl": "Gra nie ma tabeli umiejętności."],
+        "Tap a skill or a perk to see what it does and what it needs. Pinch or double-tap to zoom.": [
+            "de": "Tippe auf eine Fertigkeit oder Fähigkeit: was sie bewirkt und was sie benötigt. Zum Vergrößern zwei Finger spreizen oder doppelt tippen.",
+            "fr": "Touchez une compétence ou une capacité pour voir son effet et ce qu'elle nécessite. Pincez ou touchez deux fois pour zoomer.",
+            "pl": "Dotknij umiejętności lub zdolności, aby zobaczyć, co daje i czego wymaga. Rozsuń palce lub stuknij dwa razy, aby powiększyć."],
+        // The hero on the wheel.
+        "Hero": ["de": "Held", "fr": "Héros", "pl": "Bohater"],
+        "level": ["de": "Stufe", "fr": "niveau", "pl": "poziom"],
+        "Their class": ["de": "Seine Klasse", "fr": "Sa classe", "pl": "Jego klasa"],
+        "learnt": ["de": "erlernt", "fr": "acquis", "pl": "poznane"],
+        "can take": ["de": "wählbar", "fr": "possible", "pl": "do wzięcia"],
+        "offered": ["de": "angeboten", "fr": "proposé", "pl": "proponowane"],
+        "Learnt": ["de": "Erlernt", "fr": "Acquis", "pl": "Poznane"],
+        "Can take": ["de": "Jetzt wählbar", "fr": "Possible maintenant", "pl": "Można wziąć"],
+        "Offered now": ["de": "Jetzt angeboten", "fr": "Proposé maintenant", "pl": "Proponowane teraz"],
+        "Not learnt": ["de": "Nicht erlernt", "fr": "Non acquis", "pl": "Nie poznane"],
     ]
 }

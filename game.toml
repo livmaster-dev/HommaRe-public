@@ -56,7 +56,7 @@ entry_points = [0x006c6490]
 # the touch adapter, saves, the map camera, the wide-screen interface and
 # the ubi-gs login, which sends a token instead of the password (gs_login.c),
 # and the bound on the GS SDK's server string copies (net_guard.c).
-native = { header = "native/overrides.h", sources = ["native/overrides.c", "native/scene.c", "native/granny.c", "native/lighting.c", "native/gpu_skin.cpp", "native/touch.c", "native/save.cpp", "native/camera.c", "native/widescreen.c", "native/phone_hud.c", "native/horplus.c", "native/ui_bounds.c", "native/phone_layout.c", "native/render_split.c", "native/tap_attack.c", "native/hotkeys.c", "native/hotkeys_cfg.c", "native/native_screens.c", "native/screens_custom.c", "native/screens_menu.c", "native/screens_load.c", "native/screens_hof.c", "native/screens_options.c", "native/screens_duel.c", "native/screens_question.c", "native/screens_escmenu.c", "native/screens_lan.c", "native/screens_ubi.c", "native/screens_words.c", "native/gs_login.c", "native/net_guard.c"] }
+native = { header = "native/overrides.h", sources = ["native/overrides.c", "native/scene.c", "native/granny.c", "native/lighting.c", "native/gpu_skin.cpp", "native/touch.c", "native/save.cpp", "native/camera.c", "native/widescreen.c", "native/phone_hud.c", "native/horplus.c", "native/ui_bounds.c", "native/phone_layout.c", "native/render_split.c", "native/tap_attack.c", "native/hotkeys.c", "native/hotkeys_cfg.c", "native/native_screens.c", "native/skill_wheel.c", "native/screens_custom.c", "native/screens_menu.c", "native/screens_load.c", "native/screens_hof.c", "native/screens_options.c", "native/screens_duel.c", "native/screens_question.c", "native/screens_escmenu.c", "native/screens_lan.c", "native/screens_ubi.c", "native/screens_words.c", "native/gs_login.c", "native/net_guard.c"] }
 # A Direct3D 9 game: no DirectDraw lock to track, so stores skip the watch/dirty check.
 store_hooks = false
 # Flags are followed over the jumps inside a function: CMP; Jcc computes only
@@ -247,20 +247,23 @@ display_name = "HommaRe"
 # on the cards (tools/native_touch_ui_mod.py), and the screen resolution out
 # of the game's options:
 # the game draws at the screen's size, the launcher's render quality chooses
-# the 3D's share (tools/mobile_options_mod.py).
-ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "NativeTouchUI", "MobileOptions"]
+# the 3D's share (tools/mobile_options_mod.py); and the skill wheel's buttons in
+# the level-up window and the hero screen (tools/skill_wheel_ui_mod.py, on every
+# platform).
+ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "NativeTouchUI", "MobileOptions", "SkillWheelUI"]
 cfg_defaults = { "profiles/default_profile/user.cfg" = { gfx_resolution = "screen", ui_use_hwcursor = "1" } }
 
 # The same wide-screen layout on a Mac, whose screens are wider than 4:3 too:
 # besides the anchors it hangs Tribes of the East's black curtains beside the
 # videos, cutscenes and dialogues (magenta there without it) and fills the
 # sides of the loading screen (else the main menu's scene shows through).
+# And the skill wheel's buttons, as on iOS.
 [macos]
-ui_mods = ["Widescreen"]
+ui_mods = ["Widescreen", "SkillWheelUI"]
 
 # The same on a Linux desktop.
 [linux]
-ui_mods = ["Widescreen"]
+ui_mods = ["Widescreen", "SkillWheelUI"]
 
 [launcher]
 title = "Heroes of Might and Magic V"

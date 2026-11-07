@@ -204,7 +204,9 @@ void platform_ui_split_ring(SDL_Window *, bool, double, double, double) {}
 void platform_ui_hand_over_lifecycle() {}
 void platform_ui_window_closing(SDL_Window *) {}
 
+#if !defined(__APPLE__) // the Mac's: sdl/native_screen_mac.mm
 void platform_ui_native_screen(SDL_Window *, const char *, void (*)(const char *)) {}
+#endif
 
 #if defined(__APPLE__)
 namespace {

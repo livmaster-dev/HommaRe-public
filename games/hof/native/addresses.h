@@ -679,3 +679,29 @@
 #define HOMM5_BIND_SECTIONS 0x0114aacc
 #define HOMM5_INPUT_CFG "input_a1.cfg"
 #define HOMM5_GLOBAL_CFG "global_a1.cfg"
+
+/* The skill wheel's hero (native/skill_wheel.c; research notes skillwheel/re-hof.md). */
+#define SW_SCREEN_STACK 0x0114ab38
+#define SW_VT_ADVENTURE 0x00fb0c94
+#define SW_SUB_ADVENTURE 0x778
+#define SW_VT_HERO 0x00fb926c
+#define SW_SUB_HERO 0x794
+#define SW_HERO_SCREEN_HERO 0x1a4
+#define SW_SCREEN_WINDOWS 0x98
+#define SW_WINDOWS_MODAL 0x1f4
+#define SW_VT_LEVELUP 0x00fbc524      /* NUI::CLevelUpBox */
+#define SW_LEVELUP_HERO 0x124
+#define SW_LEVELUP_CHOICES 0x130
+#define SW_LEVELUP_LEVEL 0x140
+#define SW_ADV_CONTROLLER 0x578
+#define SW_CTRL_RECORDS 0x24
+#define SW_RECORD_HERO 0x14
+#define SW_CTRL_PLAYER 0x3c
+#define SW_PLAYER_ID_FN 0x00984f30    /* IPlayer vt+0x2c: MOV EAX,[ECX+0x78] */
+#define SW_PLAYER_ID 0x78
+#define SW_HERO_LEVEL 0x64
+#define SW_HERO_NAME 0x6c
+#define SW_HERO_CLASS 0x88
+#define SW_HERO_SKILLS 0x90
+#define SW_SKILL_COUNT 172
+
