@@ -2,8 +2,9 @@
 under host/gpu/metal/ and in the host's own platform files: for iPadOS,
 host/sdl/platform_ui_ios.mm (see host/sdl/platform_ui.h); the Mac's trackpad,
 host/sdl/trackpad_mac.mm (sdl/trackpad_mac.h), and its native views over the game,
-host/sdl/native_screen_mac.mm (platform_ui_native_screen); and the power state the energy
-policy reads, host/energy.mm. Everything else in the host is portable C++ over
+host/sdl/native_screen_mac.mm (platform_ui_native_screen); the power state the energy
+policy reads, host/energy.mm; and the synced saves folder's file coordination,
+host/cloud_saves_apple.mm (cloud_saves.h). Everything else in the host is portable C++ over
 gpu/gpu.h, SDL3 and the platform layer."""
 import re
 import unittest
@@ -15,7 +16,7 @@ APPLE = re.compile(r"#import\b|<Metal/|<AppKit/|<Cocoa/|<AVFoundation/|<AudioToo
 
 
 PLATFORM_FILES = {"host/sdl/platform_ui_ios.mm", "host/sdl/trackpad_mac.mm", "host/sdl/native_screen_mac.mm",
-                  "host/energy.mm"}
+                  "host/energy.mm", "host/cloud_saves_apple.mm"}
 
 
 def outside_metal(path: Path) -> bool:

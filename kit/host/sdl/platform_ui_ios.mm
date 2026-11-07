@@ -8,6 +8,7 @@
 #include "../../runtime/layout.h"
 #include "../../runtime/native_seam.h"
 #include "../audio.h"
+#include "../cloud_saves.h"
 #include "../launcher/launcher_sdl.h"
 #include "../present.h"
 #include "game_config.h"
@@ -490,6 +491,7 @@ static void save_before_background() {
                           }];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
       recomp_app_background();
+      cloud_saves::flush(20.0); // within the background task's half minute
       g_saving.store(false);
       dispatch_async(dispatch_get_main_queue(), ^{
         if (task != UIBackgroundTaskInvalid) {
@@ -587,8 +589,10 @@ bool platform_ui_handle_lifecycle(const SDL_Event &e) {
         fprintf(stderr, "[ios] active again (%s): resuming audio%s\n",
                 g_app_state == AppState::Background ? "from the background" : "was inactive",
                 g_app_state == AppState::Background ? " and presentation" : "");
-        if (g_app_state == AppState::Background)
+        if (g_app_state == AppState::Background) {
             host_present_suspend(false);
+            cloud_saves::request(); // what another device saved meanwhile
+        }
         host_audio_pause(false);
         g_app_state = AppState::Active;
         host_note_app_active(1);

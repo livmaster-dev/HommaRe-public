@@ -862,6 +862,81 @@ enum LauncherCatalog {
    "pl": "Zapisy gry",
    "zh-Hans": "存档"
   },
+  "cloudSaves": {
+   "en": "iCloud Drive",
+   "ru": "iCloud Drive",
+   "cs": "iCloud Drive",
+   "de": "iCloud Drive",
+   "es": "iCloud Drive",
+   "fr": "iCloud Drive",
+   "it": "iCloud Drive",
+   "hu": "iCloud Drive",
+   "pl": "iCloud Drive",
+   "zh-Hans": "iCloud 云盘"
+  },
+  "cloudSavesOn": {
+   "en": "Sync saves",
+   "ru": "Синхронизировать сохранения",
+   "cs": "Synchronizovat uložené hry",
+   "de": "Spielstände abgleichen",
+   "es": "Sincronizar partidas",
+   "fr": "Synchroniser les sauvegardes",
+   "it": "Sincronizza i salvataggi",
+   "hu": "Mentések szinkronizálása",
+   "pl": "Synchronizuj zapisy gry",
+   "zh-Hans": "同步存档"
+  },
+  "cloudFolder": {
+   "args": [
+    "folder"
+   ],
+   "en": "Folder: {folder}",
+   "ru": "Папка: {folder}",
+   "cs": "Složka: {folder}",
+   "de": "Ordner: {folder}",
+   "es": "Carpeta: {folder}",
+   "fr": "Dossier : {folder}",
+   "it": "Cartella: {folder}",
+   "hu": "Mappa: {folder}",
+   "pl": "Folder: {folder}",
+   "zh-Hans": "文件夹：{folder}"
+  },
+  "cloudPickHint": {
+   "en": "Pick a folder in iCloud Drive, the same one on every device (for example HommaRe).",
+   "ru": "Выберите папку в iCloud Drive — одну и ту же на всех устройствах (например, HommaRe).",
+   "cs": "Vyberte složku na iCloud Drive, na všech zařízeních stejnou (například HommaRe).",
+   "de": "Wähle einen Ordner in iCloud Drive, auf jedem Gerät denselben (etwa HommaRe).",
+   "es": "Elige una carpeta de iCloud Drive, la misma en todos los dispositivos (por ejemplo, HommaRe).",
+   "fr": "Choisissez un dossier dans iCloud Drive, le même sur chaque appareil (par exemple HommaRe).",
+   "it": "Scegli una cartella in iCloud Drive, la stessa su ogni dispositivo (ad esempio HommaRe).",
+   "hu": "Válassz egy mappát az iCloud Drive-on, minden eszközön ugyanazt (például HommaRe).",
+   "pl": "Wybierz folder na iCloud Drive, ten sam na każdym urządzeniu (na przykład HommaRe).",
+   "zh-Hans": "请在 iCloud 云盘中选择一个文件夹，所有设备上选同一个（例如 HommaRe）。"
+  },
+  "cloudNoDrive": {
+   "en": "iCloud Drive is off on this Mac. Turn it on in System Settings, or choose another folder.",
+   "ru": "iCloud Drive на этом Mac выключен. Включите его в Системных настройках или выберите другую папку.",
+   "cs": "iCloud Drive je na tomto Macu vypnutý. Zapněte ho v Nastavení systému, nebo vyberte jinou složku.",
+   "de": "iCloud Drive ist auf diesem Mac aus. Schalte es in den Systemeinstellungen ein oder wähle einen anderen Ordner.",
+   "es": "iCloud Drive está desactivado en este Mac. Actívalo en Ajustes del Sistema o elige otra carpeta.",
+   "fr": "iCloud Drive est désactivé sur ce Mac. Activez-le dans Réglages Système ou choisissez un autre dossier.",
+   "it": "iCloud Drive è disattivato su questo Mac. Attivalo in Impostazioni di Sistema o scegli un'altra cartella.",
+   "hu": "Az iCloud Drive ki van kapcsolva ezen a Macen. Kapcsold be a Rendszerbeállításokban, vagy válassz másik mappát.",
+   "pl": "iCloud Drive jest wyłączony na tym Macu. Włącz go w Ustawieniach systemowych lub wybierz inny folder.",
+   "zh-Hans": "这台 Mac 上的 iCloud 云盘已关闭。请在“系统设置”中打开，或选择其他文件夹。"
+  },
+  "cloudLost": {
+   "en": "The synced folder cannot be opened. Choose it again.",
+   "ru": "Не удаётся открыть папку синхронизации. Выберите её заново.",
+   "cs": "Synchronizovanou složku nelze otevřít. Vyberte ji znovu.",
+   "de": "Der abgeglichene Ordner lässt sich nicht öffnen. Wähle ihn erneut.",
+   "es": "No se puede abrir la carpeta sincronizada. Vuelve a elegirla.",
+   "fr": "Impossible d'ouvrir le dossier synchronisé. Choisissez-le à nouveau.",
+   "it": "Impossibile aprire la cartella sincronizzata. Sceglila di nuovo.",
+   "hu": "A szinkronizált mappa nem nyitható meg. Válaszd ki újra.",
+   "pl": "Nie można otworzyć synchronizowanego folderu. Wybierz go ponownie.",
+   "zh-Hans": "无法打开同步文件夹。请重新选择。"
+  },
   "show": {
    "en": "Show",
    "ru": "Показать",

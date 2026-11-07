@@ -1,5 +1,34 @@
 # Changelog
 
+## Saves kept in step with a synced folder (iCloud Drive)
+
+- `host/cloud_saves.h`: when `RECOMP_CLOUD_SAVES_DIR` names a folder, the
+  game's saves (`Profiles/<player>/Saves/**` under the profile's
+  `Documents/My Games`) are synced with `<that folder>/<RECOMP_GAME_ID>`:
+  when the game starts (waited for up to 10 s), whenever its saves change
+  and every minute while it runs, when it ends, and on iOS when the app goes
+  to the background (in the background task) and comes back. The game never
+  works in the synced folder itself.
+- A three-way sync against the state of the last one
+  (`<profile>/cloud-saves/state.tsv`, per synced folder): a change goes the
+  other way, a deletion too; changed on both sides, the newer wins. What
+  either side loses goes to `<profile>/cloud-saves/backup/<when>/`, the
+  newest ten kept. A side whose saves are all gone, or a folder that cannot
+  be read, takes nothing away from the other. The player profile's `*.cfg`
+  (resolution, graphics) only go to a side that has none.
+- Apple (`host/cloud_saves_apple.mm`, a new platform file): every access
+  through `NSFileCoordinator`; iCloud placeholders (`.<name>.icloud`, or a
+  file with no data) are downloaded and waited on up to 8 s, else left for
+  the next sync.
+- The SwiftUI launcher (`LauncherCloudSaves.swift`): *Settings → iCloud
+  Drive → Sync saves* and *Choose*. A Mac writes straight into iCloud Drive's
+  folder (`HommaRe` there by default, or any folder chosen); iOS keeps a
+  security-scoped bookmark of the folder picked in the Files app's picker.
+  No iCloud entitlement, so ad-hoc and re-signed builds have it. Strings in
+  the ten languages.
+- `cloud_saves_tests` (label `nogame`); `CLOUD_SAVES_TESTS_PLATFORM=1` runs
+  them through the platform's side.
+
 ## Interface recipes: pictures made on the device (format 4)
 
 - A recipe (`ui_mods.cpp`, `tools/ui_recipe.py`) may make a picture from the

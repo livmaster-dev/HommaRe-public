@@ -155,6 +155,12 @@ enum L10n {
     static var installsGoTo: String { t("installsGoTo") }
     static var addFolder: String { t("addFolder") }
     static var savesFolder: String { t("savesFolder") }
+    static var cloudSaves: String { t("cloudSaves") }
+    static var cloudSavesOn: String { t("cloudSavesOn") }
+    static func cloudFolder(_ folder: String) -> String { t("cloudFolder", ["folder": folder]) }
+    static var cloudPickHint: String { t("cloudPickHint") }
+    static var cloudNoDrive: String { t("cloudNoDrive") }
+    static var cloudLost: String { t("cloudLost") }
     static var show: String { t("show") }
     static var readyToPlay: String { t("readyToPlay") }
     static var phaseCopying: String { t("phaseCopying") }
