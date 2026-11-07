@@ -1,5 +1,16 @@
 # Changelog
 
+## iOS: no keyboard notifications to the launcher's closed window
+
+- `platform_ui_window_closing(window)` (`host/sdl/platform_ui.h`), called by
+  the multi-game app before it destroys the launcher's window for a game
+  module's: on iOS it takes SDL's view controller of that window off the
+  notification center. Something in UIKit keeps that controller alive past
+  `SDL_DestroyWindow` (its `dealloc` never runs), and it answered the next
+  keyboard notification (the app going inactive hides the keyboard) by
+  reading the freed window: a crash in `-[SDL_uikitviewcontroller
+  updateKeyboard]`. Desktop and Android: nothing.
+
 ## iOS control panel on larger screens: by the game's corner, its buttons' size
 
 - On a larger screen (an iPad, a foldable iPhone opened), where the game

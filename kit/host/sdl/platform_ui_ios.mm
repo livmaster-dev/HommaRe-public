@@ -530,6 +530,15 @@ void platform_ui_hand_over_lifecycle() {
     g_lifecycle_handed_over = true;
 }
 
+void platform_ui_window_closing(SDL_Window *window) {
+    UIWindow *uiwindow = window ? (__bridge UIWindow *)SDL_GetPointerProperty(
+                                      SDL_GetWindowProperties(window), SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr)
+                                : nil;
+    UIViewController *vc = uiwindow.rootViewController;
+    if (vc) // SDL's controller: the keyboard and text-field notifications it added
+        [[NSNotificationCenter defaultCenter] removeObserver:vc];
+}
+
 bool platform_ui_handle_lifecycle(const SDL_Event &e) {
     if (g_lifecycle_handed_over)
         return false;

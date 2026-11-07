@@ -205,7 +205,10 @@ static void rtti_name(uint32_t obj, char *name, size_t size) {
     const uint32_t vt = peek32(obj);
     const uint32_t col = vt ? peek32(vt - 4u) : 0;
     const uint32_t td = col ? peek32(col + 12u) : 0;
-    if (!td || td + 8u + size > (uint32_t)GUEST_SIZE)
+    /* In 64 bits: a stray word near the top of the range (0xffffffff, which
+     * the scan in drag_client below meets) wrapped `td + 8u` to a small number
+     * and the copy read 4 GiB past the arena. */
+    if (td < 0x1000u || (uint64_t)td + 8u + size > (uint64_t)(uint32_t)GUEST_SIZE)
         return;
     memcpy(name, g_mem + td + 8u, size - 1);
     name[size - 1] = 0;
