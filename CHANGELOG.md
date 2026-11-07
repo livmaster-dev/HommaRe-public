@@ -4,6 +4,16 @@ What changed for players in each release of HommaRe. The builds are in
 [Releases](../../releases); the recompilation kit underneath keeps its own notes in
 [kit/CHANGELOG.md](kit/CHANGELOG.md).
 
+## 0.1-playable-443 (2026-11-07)
+
+- **iPhone and iPad: no more crashes while dragging** a stack, an artifact or a hero.
+  Tribes of the East closed again and again, most of all with *Touch: Native* but with
+  the cursor too: while the touch layer looked at what was being dragged it could read
+  past the game's memory.
+- **iPhone and iPad:** the app no longer closes now and then as it goes to the
+  background or loses focus (the app switcher, Control Center). The launcher's closed
+  window still answered the system keyboard and read freed memory.
+
 ## 0.1-playable-439 (2026-11-06)
 
 - **The command panel on an iPad or an opened foldable iPhone** now stands at the left,
