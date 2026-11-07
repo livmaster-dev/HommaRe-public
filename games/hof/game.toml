@@ -55,7 +55,7 @@ entry_points = []
 # (native/overrides.h) holds the FN_<addr> replacements every translated chunk
 # includes; addresses (native/addresses.h) this game's addresses, which only
 # these sources include.
-native = { header = "native/overrides.h", addresses = "native/addresses.h", sources = ["../../native/overrides.c", "../../native/scene.c", "../../native/granny.c", "../../native/lighting.c", "../../native/gpu_skin.cpp", "../../native/touch.c", "../../native/save.cpp", "../../native/camera.c", "../../native/phone_hud.c", "../../native/hof_screen.c", "../../native/horplus.c", "../../native/ui_bounds.c", "../../native/hof_paks.c", "../../native/phone_layout.c", "../../native/render_split.c", "../../native/tap_attack.c", "../../native/hotkeys.c", "../../native/hotkeys_cfg.c", "../../native/native_screens.c", "../../native/screens_custom.c", "../../native/screens_menu.c", "../../native/screens_load.c", "../../native/screens_hof.c", "../../native/screens_options.c", "../../native/screens_duel.c", "../../native/screens_question.c", "../../native/screens_escmenu.c", "../../native/screens_lan.c", "../../native/screens_ubi.c", "../../native/screens_words.c", "../../native/gs_login.c", "../../native/net_guard.c"] }
+native = { header = "native/overrides.h", addresses = "native/addresses.h", sources = ["../../native/overrides.c", "../../native/scene.c", "../../native/granny.c", "../../native/lighting.c", "../../native/gpu_skin.cpp", "../../native/touch.c", "../../native/save.cpp", "../../native/camera.c", "../../native/phone_hud.c", "../../native/hof_screen.c", "../../native/horplus.c", "../../native/ui_bounds.c", "../../native/hof_paks.c", "../../native/phone_layout.c", "../../native/render_split.c", "../../native/tap_attack.c", "../../native/hotkeys.c", "../../native/hotkeys_cfg.c", "../../native/native_screens.c", "../../native/skill_wheel.c", "../../native/screens_custom.c", "../../native/screens_menu.c", "../../native/screens_load.c", "../../native/screens_hof.c", "../../native/screens_options.c", "../../native/screens_duel.c", "../../native/screens_question.c", "../../native/screens_escmenu.c", "../../native/screens_lan.c", "../../native/screens_ubi.c", "../../native/screens_words.c", "../../native/gs_login.c", "../../native/net_guard.c"] }
 # A Direct3D 9 game: no DirectDraw lock to track, so stores skip the watch/dirty check.
 store_hooks = false
 # As in the base game: flags are followed over the jumps inside a function
@@ -235,7 +235,7 @@ portrait = false
 # the screen resolution out of the options. All are made on the
 # device from the player's install (ui-mods/<name>.recipe, kit/host/ui_mods.cpp;
 # tools/ui_recipes.py writes them).
-ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "NativeTouchUI", "MobileOptions"]
+ui_mods = ["Widescreen", "PhoneUI", "TouchUI", "NativeTouchUI", "MobileOptions", "SkillWheelUI"]
 cfg_defaults = { "profiles/default_profile/user_a1.cfg" = { gfx_resolution = "screen", ui_use_hwcursor = "1" } }
 # The English Heroes V (GOG's installer and Galaxy build) has no user_a1.cfg:
 # without one the settings above have nowhere to go and the game starts at
@@ -244,11 +244,11 @@ cfg_seeds = { "profiles/default_profile/user_a1.cfg" = "profiles/default_profile
 
 # The same wide-screen pak on a Mac (anchors, curtains, the loading screen).
 [macos]
-ui_mods = ["Widescreen"]
+ui_mods = ["Widescreen", "SkillWheelUI"]
 
 # The same on a Linux desktop.
 [linux]
-ui_mods = ["Widescreen"]
+ui_mods = ["Widescreen", "SkillWheelUI"]
 
 [launcher]
 title = "Heroes of Might and Magic V: Hammers of Fate"

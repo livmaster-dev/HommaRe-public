@@ -144,7 +144,118 @@ static void unlock(void) {
  * keeps its document. */
 enum { STALE_MS = 5000 };
 
+/* ------------------------------------------------------- the skill wheel -- */
+
+/* The skill wheel (native-screens/SkillWheel.swift): a view of the game's
+ * skills and perks by hero class, opened from the control panel's
+ * "skill-wheel" command (hotkeys_cfg.c; on the Mac, the J key, sdl/main.cpp)
+ * over the map or a hero's screen. It is no screen of the game's: the game
+ * keeps drawing under it. Asked for on the host's thread, it opens on the game
+ * thread's next draw, which reads the hero the game has in view
+ * (skill_wheel.c) into its document, or leaves it shut where the game has no
+ * wheel (a battle, a menu). The view reads the tables, texts and icons from
+ * the install's paks itself. While it is open it stands in for the screens'
+ * document, whether or not the native menus are on (iOS and the Mac: no
+ * other platform draws it), and its serials (high bit set) never meet
+ * theirs, so a screen's document under it is sent again once it closes.
+ * Under g_lock. */
+static int g_wheel_asked;
+static int g_wheel_open;
+static unsigned g_wheel_serial = 0x80000000u;
+static char g_wheel_doc[2048];
+
+static int wheel_platform(void) {
+#if defined(__APPLE__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+/* A command for the wheel, answered here on the host's thread: 1 when it was
+ * one ({"do": "panel", "id": "skill-wheel"} asks for it, {"do":
+ * "wheel_close"} or {"do": "escape"} closes it), 0 for the screens'. */
+static int wheel_command(const char *command) {
+    const int open =
+        strstr(command, "\"do\":\"panel\"") && strstr(command, "\"id\":\"skill-wheel\"");
+    const int close =
+        strstr(command, "\"do\":\"wheel_close\"") || strstr(command, "\"do\":\"escape\"");
+    if (!open && !close)
+        return 0;
+    if (open && wheel_platform()) {
+        /* The views' paks, as screens_on sets them when the menus are on. */
+        setenv("RECOMP_NATIVE_PAK_DIRS", NS_PAK_DIRS, 1);
+    }
+    lock();
+    if (open && wheel_platform() && !g_wheel_open)
+        g_wheel_asked = 1;
+    else if (close)
+        g_wheel_open = g_wheel_asked = 0;
+    unlock();
+    if (close || ns_trace())
+        fprintf(stderr, "[screens] skill wheel %s\n", open ? "asked for" : "closed");
+    return 1;
+}
+
+/* On the game thread, from the draw hook: a wheel asked for opens with the
+ * hero in view, or not at all where the game has none. */
+static void wheel_step(X86 *c) {
+    lock();
+    const int asked = g_wheel_asked;
+    g_wheel_asked = 0;
+    unlock();
+    if (!asked)
+        return;
+    /* The view's words in the game's language: from its first difficulty's
+     * name, as the screens and the control panel read it. */
+    static int lang_read;
+    if (!lang_read) {
+        Scratch s = ns_scratch(c);
+        char easy[64];
+        ns_difficulty_name(&s, 0, easy, sizeof easy);
+        if (easy[0]) {
+            ns_set_lang(easy);
+            lang_read = 1;
+        }
+    }
+    Json j = {0};
+    j_printf(&j, "{\"screen\":\"skill_wheel\",\"lang\":\"%s\"", ns_lang_code());
+    const int hero = homm5_skill_wheel_hero(&j);
+    j_lit(&j, "}");
+    const int fits = j.s && j.len < (int)sizeof g_wheel_doc;
+    lock();
+    if (hero >= 0 && fits) {
+        memcpy(g_wheel_doc, j.s, (size_t)j.len + 1);
+        g_wheel_open = 1;
+        ++g_wheel_serial;
+    }
+    unlock();
+    fprintf(stderr, "[screens] skill wheel %s: %s\n", hero < 0 ? "not here" : "opened",
+            hero < 0 ? "" : g_wheel_doc);
+    free(j.s);
+}
+
+/* The wheel's document when it is open (as recomp_screen_state returns), else
+ * -2. Under g_lock. */
+static int wheel_state(char *buf, int cap, unsigned *serial) {
+    if (!g_wheel_open)
+        return -2;
+    if (*serial == g_wheel_serial)
+        return 0;
+    const int n = (int)strlen(g_wheel_doc);
+    if (n < cap) {
+        memcpy(buf, g_wheel_doc, (size_t)n + 1);
+        *serial = g_wheel_serial;
+    }
+    return n;
+}
+
 int recomp_screen_state(char *buf, int cap, unsigned *serial) {
+    lock();
+    const int wheel = wheel_state(buf, cap, serial);
+    unlock();
+    if (wheel != -2)
+        return wheel;
     if (!screens_on())
         return -1;
     lock();
@@ -165,7 +276,9 @@ int recomp_screen_state(char *buf, int cap, unsigned *serial) {
 }
 
 void recomp_screen_command(const char *command) {
-    if (!screens_on() || !command)
+    if (!command || wheel_command(command))
+        return;
+    if (!screens_on())
         return;
     char *copy = strdup(command);
     if (!copy)
@@ -941,7 +1054,13 @@ static void drive_timed(X86 *c, const NsScreen *kind, uint32_t screen) {
     }
 }
 
+int homm5_skill_wheel_pressed(uint32_t win); /* native/skill_wheel.c */
+
 static int draw_hook(X86 *c, uint32_t part) {
+    if (!g_wheel_open && homm5_skill_wheel_pressed(part - 0x10cu)) /* the window of its draw part */
+        g_wheel_asked = 1;
+    if (g_wheel_asked)
+        wheel_step(c);
     if (SCREEN_COUNT > 0 && screens_on() && ns_trace())
         trace_top();
     if (SCREEN_COUNT == 0 || !screens_on())

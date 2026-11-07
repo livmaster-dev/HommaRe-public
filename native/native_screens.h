@@ -135,6 +135,12 @@ typedef struct {
  * box, or 0; and the popup for it, read with the box for its screen. */
 uint32_t ns_question_box(void);
 
+/* native/skill_wheel.c: the hero the skill wheel opens on, for the game's
+ * screen on top now: `,"hero":{...}` (and a level-up's `,"offer":[...]`) into
+ * j and 1; 0 for a screen with the wheel but no hero; -1 for a screen without
+ * the wheel. Game thread. */
+int homm5_skill_wheel_hero(Json *j);
+
 /* Whether native screens are on this run (the launcher's Menus, the env). */
 int ns_screens_on(void);
 

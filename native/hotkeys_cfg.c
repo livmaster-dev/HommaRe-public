@@ -307,6 +307,17 @@ static const Command COMMANDS[] = {
      0,
      {"Objectives", "Задания", "Ziele", "Objectifs", "Cele"},
      "OnJog-Scenario"},
+    /* Not a key: the skill wheel drawn natively (native_screens.c, the
+     * native-screens/SkillWheel.swift view), on the map and a hero's screen. */
+    {"skill-wheel",
+     NULL,
+     "adventure_screen hero_screen",
+     "screen",
+     "chart.pie",
+     2,
+     {"Skill wheel", "Колесо навыков", "Fertigkeitenrad", "Roue des compétences",
+      "Koło umiejętności"},
+     NULL},
     /* A battle */
     {"wait",
      "input_Combat_Wait",
@@ -388,6 +399,7 @@ static const struct {
     {"camera-home", {"Camera", "Камера", "Kamera", "Caméra", "Kamera"}},
     {"kingdom", {"Kingdom", "Королевство", "Königreich", "Royaume", "Królestwo"}},
     {"quest-log", {"Objectives", "Задания", "Ziele", "Objectifs", "Cele"}},
+    {"skill-wheel", {"Skills", "Навыки", "Fertigkeiten", "Compétences", "Umiejętności"}},
     {"wait", {"Wait", "Ждать", "Warten", "Attendre", "Czekaj"}},
     {"initiative", {"Initiative", "Инициатива", "Initiative", "Initiative", "Inicjatywa"}},
     {"autoplace", {"Arrange", "Расставить", "Aufstellen", "Placer", "Rozstaw"}},

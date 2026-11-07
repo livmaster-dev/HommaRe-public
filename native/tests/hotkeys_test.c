@@ -150,6 +150,24 @@ static void test_document_offers_the_screens_commands(void) {
           strstr(doc, "\"creature-info\"") && !strstr(doc, "\"wait\""));
 }
 
+/* The skill wheel: no key, a native view of the game's, on the map and a
+ * hero's screen, not in a battle. */
+static void test_document_offers_the_skill_wheel(void) {
+    HkBind b[64];
+    const int n = parse(BASE, b);
+    char doc[4096];
+    const char *map[] = {"adventure_screen"};
+    CHECK(hk_document(b, n, map, 1, HK_RU, 0, doc, sizeof doc) > 0);
+    CHECK(strstr(doc, "{\"id\":\"skill-wheel\",\"label\":\"Колесо навыков\",\"short\":\"Навыки\","
+                      "\"keys\":\"\",\"kind\":\"screen\",\"quick\":2,\"symbol\":\"chart.pie\"}"));
+    const char *hero[] = {"hero_screen"};
+    CHECK(hk_document(b, n, hero, 1, HK_EN, 0, doc, sizeof doc) > 0 &&
+          strstr(doc, "\"skill-wheel\""));
+    const char *battle[] = {"combat_screen"};
+    CHECK(hk_document(b, n, battle, 1, HK_EN, 0, doc, sizeof doc) > 0 &&
+          !strstr(doc, "\"skill-wheel\""));
+}
+
 static void test_document_drops_what_the_expansion_does_not_bind(void) {
     HkBind b[64];
     const int n = parse(HOF, b);
@@ -214,6 +232,7 @@ int main(void) {
     test_parse_sections_keys_and_mice();
     test_find_takes_the_first_bind_of_the_active_sections();
     test_document_offers_the_screens_commands();
+    test_document_offers_the_skill_wheel();
     test_document_drops_what_the_expansion_does_not_bind();
     test_document_none_and_too_small();
     test_two_sections_join();
