@@ -5,7 +5,6 @@
 // fills it (to save over it), and Save writes under the name typed.
 
 import SwiftUI
-import UIKit
 
 struct LoadScreen: Decodable {
     let title: String
@@ -198,7 +197,7 @@ struct LoadScreenView: View {
 /// A picture the game side wrote as raw pixels: a 32-bit width and height,
 /// then BGRA (the game's A8R8G8B8, little-endian).
 enum RawPicture {
-    static func image(atPath path: String) -> UIImage? {
+    static func image(atPath path: String) -> PlatformImage? {
         guard let data = FileManager.default.contents(atPath: path), data.count > 8 else { return nil }
         let w = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 0, as: UInt32.self) })
         let h = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 4, as: UInt32.self) })
@@ -210,6 +209,6 @@ enum RawPicture {
                                    | CGImageAlphaInfo.noneSkipFirst.rawValue),
                                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
         else { return nil }
-        return UIImage(cgImage: cg)
+        return PlatformImage.of(cg)
     }
 }

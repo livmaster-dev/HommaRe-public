@@ -15,7 +15,11 @@
 // the game starts, CustomGamePlayers.swift).
 
 import SwiftUI
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 
 public typealias ScreenCommandFn = @convention(c) (UnsafePointer<CChar>?) -> Void
 
@@ -55,6 +59,8 @@ private let documentTypes: [String: any ScreenDocument.Type] = [
     "lan_duel3": DuelScreen.self,
     // ubi-gs (screens_ubi.c): the login is a "form", the CD key a "lan_name".
     "table": TableScreen.self,
+    // Not a screen of the game's: the skill wheel over it (SkillWheel.swift).
+    "skill_wheel": SkillWheelScreen.self,
 ]
 
 /// The document the game sent last, decoded for the view of its screen.
@@ -99,7 +105,9 @@ final class ScreenStore: ObservableObject {
         guard let command, let data = try? JSONSerialization.data(withJSONObject: all),
               let text = String(data: data, encoding: .utf8) else { return }
         text.withCString { command($0) }
+        #if os(iOS)
         if feedback { UISelectionFeedbackGenerator().selectionChanged() }
+        #endif
     }
 
     /// A word of the views' own, in the game's language: Russian, English,
@@ -142,6 +150,8 @@ struct ScreenRoot: View {
 }
 
 // MARK: - The host's side
+
+#if os(iOS)
 
 private final class ScreenHost {
     static let shared = ScreenHost()
@@ -202,11 +212,90 @@ private final class ScreenHost {
     }
 }
 
+#else
+/// The Mac's: the view over the game window's content view (the SDL Metal
+/// view), its mouse and keys taken while it shows.
+private final class ScreenHost {
+    static let shared = ScreenHost()
+    let store = ScreenStore()
+    var view: NSHostingView<AnyView>?
+    private var snapshots = 0
+
+    func show(in root: NSView, state: Data, command: ScreenCommandFn?) {
+        if view == nil { Kit.warm() }
+        store.command = command
+        let before = store.screen, reopened = view?.superview == nil
+        store.load(state)
+        if let v = view, store.screen != before || reopened { snapshot(v) }
+        if let v = view {
+            if v.superview !== root {
+                v.removeFromSuperview()
+                attach(v, to: root)
+            }
+            if v.isHidden || v.alphaValue < 1 {
+                v.isHidden = false
+                NSAnimationContext.runAnimationGroup { $0.duration = 0.18; v.animator().alphaValue = 1 }
+            }
+            v.window?.makeFirstResponder(v)
+            return
+        }
+        let v = NSHostingView(rootView: AnyView(ScreenRoot().environmentObject(store)))
+        v.alphaValue = 0
+        view = v
+        attach(v, to: root)
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.18; v.animator().alphaValue = 1 }
+        v.window?.makeFirstResponder(v)
+        snapshot(v)
+    }
+
+    /// RECOMP_NATIVE_SCREENS_SNAPSHOT=<file.png>: each view as drawn, a
+    /// moment after it opens, written beside it as <file>-<screen>.png (a
+    /// check without the screen).
+    private func snapshot(_ v: NSView) {
+        guard let base = ProcessInfo.processInfo.environment["RECOMP_NATIVE_SCREENS_SNAPSHOT"], !base.isEmpty else { return }
+        snapshots += 1
+        let path = (base as NSString).deletingPathExtension + "-\(snapshots)-\(store.screen).png"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            let ok = (try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))) != nil
+            print("[screens] snapshot \(path): \(ok ? "written" : "failed")"); fflush(stdout)
+        }
+    }
+
+    func hide() {
+        guard let v = view else { return }
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.12; v.animator().alphaValue = 0 }) {
+            if v.alphaValue == 0 {
+                v.removeFromSuperview()
+            }
+        }
+        // The game's keys again.
+        if let w = v.window, let content = w.contentView { w.makeFirstResponder(content) }
+    }
+
+    private func attach(_ v: NSView, to root: NSView) {
+        v.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(v, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            v.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            v.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            v.topAnchor.constraint(equalTo: root.topAnchor),
+            v.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+    }
+}
+#endif
+
 @_cdecl("recomp_native_screens_show")
 public func recomp_native_screens_show(_ root: UnsafeMutableRawPointer?, _ state: UnsafePointer<CChar>?,
                                        _ command: ScreenCommandFn?) {
     guard let root, let state else { return }
+    #if os(iOS)
     let view = Unmanaged<UIView>.fromOpaque(root).takeUnretainedValue()
+    #else
+    let view = Unmanaged<NSView>.fromOpaque(root).takeUnretainedValue()
+    #endif
     let data = Data(bytes: state, count: strlen(state))
     ScreenHost.shared.show(in: view, state: data, command: command)
 }
