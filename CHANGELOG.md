@@ -9,7 +9,7 @@ What changed for players in each release of HommaRe. The builds are in
 - **A skill wheel,** in all three games: a *Skills* plate beside OK in the level-up
   window and a sixth bookmark under the hero screen's five, drawn and placed by the
   game like its own buttons on every device; also *Skill wheel* on the iPad and iPhone
-  command panel (the map too), or the J key on a Mac,
+  command panel on the map, or the J key on a Mac,
   shows a hero class's skills and perks as a wheel over the game: its racial skill on
   top, its skills around the middle with the chance to be offered each (Hammers of
   Fate and Tribes of the East), the perks outward from their skill, the ultimate in the
@@ -20,6 +20,8 @@ What changed for players in each release of HommaRe. The builds are in
   the wheel; pinch or double-tap to zoom, Escape or J closes it on a Mac. Everything on
   it is read from your install's own tables, texts and icons, in the game's language,
   so each game shows its own rules.
+- **The hero screen has no command panel any more** on iPad and iPhone: its *Skill
+  wheel* is the screen's own sixth bookmark now. A garrison keeps the panel's *Split*.
 
 ## 0.1-playable-443 (2026-11-07)
 

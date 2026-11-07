@@ -308,10 +308,12 @@ static const Command COMMANDS[] = {
      {"Objectives", "Задания", "Ziele", "Objectifs", "Cele"},
      "OnJog-Scenario"},
     /* Not a key: the skill wheel drawn natively (native_screens.c, the
-     * native-screens/SkillWheel.swift view), on the map and a hero's screen. */
+     * native-screens/SkillWheel.swift view), on the map. A hero's screen and
+     * the level-up box have a button of their own in the game's windows
+     * (tools/skill_wheel_ui_mod.py), and a hero's screen no panel at all. */
     {"skill-wheel",
      NULL,
-     "adventure_screen hero_screen",
+     "adventure_screen",
      "screen",
      "chart.pie",
      2,
@@ -372,10 +374,11 @@ static const Command COMMANDS[] = {
      {"Ctrl: melee attack", "Ctrl: удар вблизи", "Strg: Nahkampf", "Ctrl : corps à corps",
       "Ctrl: walka wręcz"},
      NULL},
-    /* Screens where an army's stacks are dragged */
+    /* Screens where an army's stacks are dragged: a garrison's. A hero's
+     * screen shows no panel at all. */
     {"shift-split",
      "shift",
-     "hero_screen garrison_screen",
+     "garrison_screen",
      "latch",
      "shift",
      0,

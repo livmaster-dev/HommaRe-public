@@ -150,8 +150,8 @@ static void test_document_offers_the_screens_commands(void) {
           strstr(doc, "\"creature-info\"") && !strstr(doc, "\"wait\""));
 }
 
-/* The skill wheel: no key, a native view of the game's, on the map and a
- * hero's screen, not in a battle. */
+/* The skill wheel: no key, a native view of the game's, on the map, not in a
+ * battle; a hero's screen has a button of its own and no panel at all. */
 static void test_document_offers_the_skill_wheel(void) {
     HkBind b[64];
     const int n = parse(BASE, b);
@@ -161,8 +161,7 @@ static void test_document_offers_the_skill_wheel(void) {
     CHECK(strstr(doc, "{\"id\":\"skill-wheel\",\"label\":\"Колесо навыков\",\"short\":\"Навыки\","
                       "\"keys\":\"\",\"kind\":\"screen\",\"quick\":2,\"symbol\":\"chart.pie\"}"));
     const char *hero[] = {"hero_screen"};
-    CHECK(hk_document(b, n, hero, 1, HK_EN, 0, doc, sizeof doc) > 0 &&
-          strstr(doc, "\"skill-wheel\""));
+    CHECK(hk_document(b, n, hero, 1, HK_EN, 0, doc, sizeof doc) == 0);
     const char *battle[] = {"combat_screen"};
     CHECK(hk_document(b, n, battle, 1, HK_EN, 0, doc, sizeof doc) > 0 &&
           !strstr(doc, "\"skill-wheel\""));
