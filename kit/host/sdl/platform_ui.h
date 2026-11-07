@@ -135,6 +135,14 @@ void platform_ui_split_ring(SDL_Window *window, bool visible, double x, double y
 // elsewhere nothing.
 void platform_ui_hand_over_lifecycle();
 
+// The window is about to be destroyed (the multi-game app's launcher window,
+// before a game module opens its own). iOS: its SDL view controller stops
+// listening for the keyboard. Something in UIKit can keep that controller
+// alive past SDL_DestroyWindow, and it then answered the next keyboard
+// notification (the app going inactive hides the keyboard) by reading the
+// freed window. Elsewhere nothing.
+void platform_ui_window_closing(SDL_Window *window);
+
 // The host's side of the lifecycle (main.cpp): the app is in the foreground
 // and active (1) or inactive or away (0). The iOS layer reports it from its
 // lifecycle watcher.

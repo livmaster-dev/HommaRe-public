@@ -202,6 +202,7 @@ void platform_ui_control_panel(SDL_Window *, const ControlPanel &, void (*)(int)
                                void (*)(const char *)) {}
 void platform_ui_split_ring(SDL_Window *, bool, double, double, double) {}
 void platform_ui_hand_over_lifecycle() {}
+void platform_ui_window_closing(SDL_Window *) {}
 
 void platform_ui_native_screen(SDL_Window *, const char *, void (*)(const char *)) {}
 

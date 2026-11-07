@@ -3126,6 +3126,7 @@ static int run_game_module(const launcher::NativeChoice &choice, const char *arg
     }
     g_gpu.reset();
     if (g_window) {
+        platform_ui_window_closing(g_window);
         SDL_DestroyWindow(g_window);
         g_window = nullptr;
     }
