@@ -51,17 +51,16 @@ battery when nothing moves.
 
 ## What's new
 
-**0.1-playable-421** (October 2026) · [all changes](CHANGELOG.md)
+**0.1-playable-451** (November 2026) · [all changes](CHANGELOG.md)
 
-- **German, French and Polish** GOG releases: install them from GOG.com or their
-  installers, and the native screens speak their language.
-- **Hammers of Fate's local network games** no longer crash.
-- **The original game's arithmetic on every device:** the expansions create games on
-  ubi-gs. Network games need this build on every device.
-- **More native screens:** Load and Save in network and hot-seat games, Save in the
-  expansions, their LAN lobbies and duels.
-- **Touch:** the tap-to-strike battle in Hammers of Fate and Tribes of the East, and a
-  stack splits when you drag it and hold still.
+- **Saves on all your devices** through iCloud Drive: start a campaign on the Mac and go
+  on with it on the iPhone. Off until you turn it on; see
+  [Saves on all your devices](#saves-on-all-your-devices-icloud-drive).
+- **A skill wheel** in all three games: every skill and perk of a hero's class, what the
+  hero has learnt and what it can take next, from a *Skills* plate in the level-up window
+  and a sixth bookmark on the hero screen (J on a Mac).
+- **iPhone and iPad:** no more crashes while dragging, or when the app goes to the
+  background.
 
 ## Highlights
 
@@ -210,6 +209,38 @@ with your Apple ID; turn on Developer Mode on the device), or
 > profile is chosen: open *Change Profile*, pick yours in the list and press *Select*. This
 > is the original game's behaviour, not a bug of the port.
 
+### Saves on all your devices (iCloud Drive)
+
+Your saves can follow you between the Mac, the iPad and the iPhone through iCloud Drive.
+It's off until you turn it on, and it needs nothing but iCloud Drive turned on and the
+same Apple ID on the devices.
+
+1. **On the Mac:** open the launcher's *Settings* and tick *iCloud Drive → Sync saves*.
+   The folder is *iCloud Drive › HommaRe*; the launcher makes it.
+2. **On the iPad and the iPhone you make the folder yourself, once.** iOS doesn't let
+   the app reach iCloud Drive on its own: tick *Sync saves*, and in the picker that opens
+   go to *iCloud Drive*, create a folder named `HommaRe` there (*New Folder*: in the menu
+   at the top, or touch and hold an empty spot; if the Mac has made it already, it's
+   there), select it and press *Open*. Pick the same folder on every device. *Choose*
+   changes it later.
+3. **Play.** Each game keeps its saves in a folder of its own in there (`homm5`,
+   `homm5-hof`, `homm5-toe`). They are copied when the game starts, while it runs and
+   when it ends; on the iPad and iPhone also when the app goes to the background. Give
+   iCloud a minute to bring a new save over before you start the game on the other
+   device.
+
+Good to know:
+
+- **Use the same profile name on every device.** Saves are kept per player profile.
+- **Only the saves are shared.** The game's settings, which hold each device's screen
+  resolution and graphics, stay on each device (a device that has none gets a copy once).
+- **A save changed on two devices,** or two different saves with the same name when you
+  first join two devices, keeps the newer one. Whatever the sync replaces or deletes is
+  kept in the profile's `cloud-saves/backup` folder (the last ten times something was
+  replaced). A save you delete in the game goes from the other devices too.
+- **The folder doesn't have to be iCloud Drive:** *Choose* takes any folder your devices
+  share (on a Mac, a Dropbox or Google Drive folder, for example).
+
 ## Controls
 
 ### Mac
@@ -277,6 +308,7 @@ defaults, shown in bold:
 | Silent mode *(iPad, iPhone)* | **Respect**, Ignore | Whether the silent switch mutes the game |
 | Phone interface *(iPhone)* | **Auto**, Always, Never | Larger panels and button rows instead of dial menus; Auto chooses by the window's size, so a foldable switches as it folds |
 | Game folders | | Extra places where the launcher looks for installed games |
+| iCloud Drive | Sync saves (**off**), Choose | Keeps the saves in step with a folder all your devices see ([how](#saves-on-all-your-devices-icloud-drive)) |
 
 The game's own Options menu (graphics quality, sound) works as in the original. On iPad
 and iPhone the game always draws at the screen's size, so the screen resolution is left
@@ -312,15 +344,8 @@ formats. Copy them into the profile folder (see below); this hasn't been tested 
 | Installed games | Where you chose in the launcher | Inside the app (`Games` in the Files app) |
 
 **Can my saves follow me between the Mac, the iPad and the iPhone?** Yes, through iCloud
-Drive (or any folder your devices share). In the launcher's *Settings*, tick *iCloud Drive
-→ Sync saves*. On a Mac the folder is *iCloud Drive › HommaRe*; on an iPad or iPhone pick
-that same folder in the picker. The saves are copied when a game starts, while it runs and
-when it ends (on an iPad or iPhone also when the app goes to the background); the game's
-settings, which hold each device's resolution, are not. A save changed on two devices at
-once keeps the newer one, and whatever the sync replaces or deletes is kept for a while in
-the profile's `cloud-saves/backup` folder. Saves are kept per player profile, so use the
-same profile name on every device. No Apple developer account is involved: the DMG and a
-re-signed IPA can both do it.
+Drive: see [Saves on all your devices](#saves-on-all-your-devices-icloud-drive). On an
+iPad or iPhone you create the folder yourself, once.
 
 **Hot-seat saves don't show in Load Game.** Hot-seat games are loaded from *Multiplayer →
 Hot Seat → Load*, not from the single-player list, as in the original.

@@ -4,8 +4,17 @@ What changed for players in each release of HommaRe. The builds are in
 [Releases](../../releases); the recompilation kit underneath keeps its own notes in
 [kit/CHANGELOG.md](kit/CHANGELOG.md).
 
-## Unreleased
+## 0.1-playable-451 (2026-11-07)
 
+- **Your saves on all your devices, through iCloud Drive** (off until you turn it on):
+  tick *iCloud Drive → Sync saves* in the launcher's *Settings* on each device. A Mac uses
+  *iCloud Drive › HommaRe* by itself; on an iPad or iPhone, create that folder in iCloud
+  Drive once and pick it (see [Saves on all your devices](README.md#saves-on-all-your-devices-icloud-drive)).
+  The saves are copied when a game starts, while it runs, when it ends and when the app
+  goes to the background, each game in its own folder. The game's own settings (each
+  device's resolution) stay on each device. Whatever the sync replaces or deletes is
+  kept for a while in the profile's `cloud-saves/backup` folder. It works with the DMG
+  and with the IPA signed by your own Apple ID: no developer account is involved.
 - **A skill wheel,** in all three games: a *Skills* plate beside OK in the level-up
   window and a sixth bookmark under the hero screen's five, drawn and placed by the
   game like its own buttons on every device; also *Skill wheel* on the iPad and iPhone
