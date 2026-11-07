@@ -4,6 +4,25 @@ What changed for players in each release of HommaRe. The builds are in
 [Releases](../../releases); the recompilation kit underneath keeps its own notes in
 [kit/CHANGELOG.md](kit/CHANGELOG.md).
 
+## Unreleased
+
+- **A skill wheel,** in all three games: a *Skills* plate beside OK in the level-up
+  window and a sixth bookmark under the hero screen's five, drawn and placed by the
+  game like its own buttons on every device; also *Skill wheel* on the iPad and iPhone
+  command panel on the map, or the J key on a Mac,
+  shows a hero class's skills and perks as a wheel over the game: its racial skill on
+  top, its skills around the middle with the chance to be offered each (Hammers of
+  Fate and Tribes of the East), the perks outward from their skill, the ultimate in the
+  centre. It opens on the hero in view (the map's chosen one, the hero screen's, the
+  level-up's) and rings what it has learnt in gold, with each skill's level, what it can
+  take next in green and, at a level-up, the game's offers in blue. Tap or click a skill
+  or a perk for what it does, what it needs and what it opens, with the lines drawn on
+  the wheel; pinch or double-tap to zoom, Escape or J closes it on a Mac. Everything on
+  it is read from your install's own tables, texts and icons, in the game's language,
+  so each game shows its own rules.
+- **The hero screen has no command panel any more** on iPad and iPhone: its *Skill
+  wheel* is the screen's own sixth bookmark now. A garrison keeps the panel's *Split*.
+
 ## 0.1-playable-443 (2026-11-07)
 
 - **iPhone and iPad: no more crashes while dragging** a stack, an artifact or a hero.

@@ -7,7 +7,6 @@
 
 import CoreGraphics
 import SwiftUI
-import UIKit
 
 /// A texture made resizable: its frame in the texture, the strips packed
 /// together where the game's art draws something in the middle (a gold
@@ -108,12 +107,12 @@ final class KitStore: ObservableObject {
 extension GameArt {
     /// A spec's picture: cut, packed, its middle cleared, at its scale; nil
     /// when the install lacks the texture.
-    func nine(_ spec: NineSpec) -> UIImage? {
+    func nine(_ spec: NineSpec) -> PlatformImage? {
         let key = "nine:\(spec.hashValue)"
         if let hit = cached(key) { return hit }
         guard let source = image(spec.ref)?.cgImage,
               let out = NineCut.cut(source, spec) else { return nil }
-        let image = UIImage(cgImage: out, scale: 1 / spec.ptPerPx, orientation: .up)
+        let image = PlatformImage.of(out, ptPerPx: spec.ptPerPx)
         store(image, key, cost: out.bytesPerRow * out.height)
         return image
     }
@@ -190,7 +189,7 @@ struct GameNine<Fallback: View>: View {
 
     var body: some View {
         if let image = GameArt.shared.cachedNine(spec) {
-            Image(uiImage: image)
+            Image(platformImage: image)
                 .resizable(capInsets: spec.capInsets, resizingMode: spec.tile ? .tile : .stretch)
                 .interpolation(.medium)
         } else {
@@ -206,7 +205,7 @@ struct GameNine<Fallback: View>: View {
 
 extension GameArt {
     /// A spec's picture if it was already cut (no reading on the main thread).
-    func cachedNine(_ spec: NineSpec) -> UIImage? { cached("nine:\(spec.hashValue)") }
+    func cachedNine(_ spec: NineSpec) -> PlatformImage? { cached("nine:\(spec.hashValue)") }
 }
 
 /// A framed panel: the frame, its fill under the open middle, the content

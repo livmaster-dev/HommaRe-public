@@ -358,9 +358,11 @@ elseif(ANDROID)
   set(POP_PLATFORM_UI ${HOST}/sdl/platform_ui_desktop.cpp ${HOST}/launcher/launcher_platform_android.cpp)
 else()
   set(POP_PLATFORM_UI ${HOST}/sdl/platform_ui_desktop.cpp ${HOST}/launcher/launcher_platform_desktop.cpp)
-  if(APPLE) # the trackpad's phases and inertia, from AppKit (sdl/trackpad_mac.h)
-    list(APPEND POP_PLATFORM_UI ${HOST}/sdl/trackpad_mac.mm)
-    set_source_files_properties(${HOST}/sdl/trackpad_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  if(APPLE) # the trackpad's phases and inertia, from AppKit (sdl/trackpad_mac.h),
+            # and the native views over the game's window
+    list(APPEND POP_PLATFORM_UI ${HOST}/sdl/trackpad_mac.mm ${HOST}/sdl/native_screen_mac.mm)
+    set_source_files_properties(${HOST}/sdl/trackpad_mac.mm ${HOST}/sdl/native_screen_mac.mm
+                                PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     list(APPEND FW_METAL "-framework AppKit")
   endif()
 endif()
@@ -404,13 +406,13 @@ if(TARGET recomp_gen)
             ${POP_PRESENT_SOURCES}
             ${HOST}/input.cpp ${HOST}/input_gate.cpp ${HOST}/input_touch.cpp
             ${HOST}/input_trackpad.cpp ${POP_AUDIO_SOURCES})
-  # The game's own screens drawn natively over it on iOS (sdl/platform_ui.h
-  # platform_ui_native_screen): SwiftUI sources in the game repository's
-  # native-screens/, one module, RecompScreens, linked into the app alone (a
-  # game's module calls the app's copy). Swift is there whenever the native
-  # launcher is.
+  # The game's own screens drawn natively over it on iOS, and on the Mac the
+  # views the game opens there (sdl/platform_ui.h platform_ui_native_screen):
+  # SwiftUI sources in the game repository's native-screens/, one module,
+  # RecompScreens, linked into the app alone (a game's module calls the app's
+  # copy). Swift is there whenever the native launcher is.
   file(GLOB pop_screen_sources ${RECOMP_GAME_DIR}/native-screens/*.swift)
-  if(IOS AND TARGET launcher_native AND pop_screen_sources)
+  if(APPLE AND TARGET launcher_native AND pop_screen_sources)
     add_library(native_screens STATIC ${pop_screen_sources})
     set_target_properties(native_screens PROPERTIES Swift_MODULE_NAME RecompScreens Swift_LANGUAGE_VERSION 5)
   endif()

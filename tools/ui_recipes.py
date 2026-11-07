@@ -52,6 +52,8 @@ def mods(game, toe):
              ["native_touch_ui_mod.py"] + sel),
             (recipes / "MobileOptions.recipe", "mobile/MobileOptions%s%s" % (suffix, ext),
              ["mobile_options_mod.py"] + sel),
+            (recipes / "SkillWheelUI.recipe", "skillwheel/SkillWheelUI%s%s" % (suffix, ext),
+             ["skill_wheel_ui_mod.py"] + sel),
         ]
     return out
 
@@ -85,7 +87,8 @@ def apply(recipe_path, root, made):
     over = {}
     if rec["over"]:
         over = made.get(rec["over"], {})
-    names = [f["source"] for f in rec["files"] if "text" not in f and f["source"] not in over]
+    names = [f["source"] for f in rec["files"] if "source" in f and f["source"] not in over]
+    names += [n for f in rec["files"] for n, _ in f.get("srcs", ()) if n not in over]
     files, left = ui_recipe.apply(rec, read_layers(root, rec["layers"], names), over)
     date = tuple(int(x) for x in rec["date"].replace("-", " ").replace(":", " ").split())
     made[rec["out"]] = files

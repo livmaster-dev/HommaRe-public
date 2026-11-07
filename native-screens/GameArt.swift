@@ -9,7 +9,6 @@ import Compression
 import CoreGraphics
 import Foundation
 import SwiftUI
-import UIKit
 
 /// The paks of the install the game runs from (RECOMP_GAME_ROOT, set by the
 /// host): the folders the game mounts (data/, DataLS/; HoF data/, dataa1/),
@@ -22,8 +21,8 @@ final class GameArt {
     /// Decoded pictures by reference (and crop), dropped oldest-first past
     /// 48 MB of pixels: a hero list's portraits stay, campaign art and map
     /// previews seen once do not pile up for the rest of the session.
-    private let cache: NSCache<NSString, UIImage> = {
-        let c = NSCache<NSString, UIImage>()
+    private let cache: NSCache<NSString, PlatformImage> = {
+        let c = NSCache<NSString, PlatformImage>()
         c.totalCostLimit = 48 << 20
         return c
     }()
@@ -31,16 +30,16 @@ final class GameArt {
     private var paths: [String: String] = [:]
     /// The interface pieces cut from textures (GameKit.swift): a few MB,
     /// on every screen, so never dropped.
-    private var kit: [String: UIImage] = [:]
+    private var kit: [String: PlatformImage] = [:]
     private let lock = NSLock()
 
-    func cached(_ key: String) -> UIImage? {
+    func cached(_ key: String) -> PlatformImage? {
         lock.lock()
         defer { lock.unlock() }
         return kit[key]
     }
 
-    func store(_ image: UIImage, _ key: String, cost: Int) {
+    func store(_ image: PlatformImage, _ key: String, cost: Int) {
         lock.lock()
         kit[key] = image
         lock.unlock()
@@ -139,7 +138,7 @@ final class GameArt {
 
     /// The picture, cropped to (x, y, w, h) when given; nil when the install
     /// has no such texture.
-    func image(_ ref: String, crop: (Int, Int, Int, Int)? = nil) -> UIImage? {
+    func image(_ ref: String, crop: (Int, Int, Int, Int)? = nil) -> PlatformImage? {
         let key = (crop.map { "\(ref)@\($0.0),\($0.1),\($0.2),\($0.3)" } ?? ref) as NSString
         if let hit = cache.object(forKey: key) { return hit }
         lock.lock()
@@ -153,7 +152,7 @@ final class GameArt {
         for pak in archives().reversed() {
             guard let data = pak.read(path) else { continue }
             if let cg = DDSImage.decode(data, crop: crop ?? (0, 0, Int.max, Int.max)) {
-                let image = UIImage(cgImage: cg)
+                let image = PlatformImage.of(cg)
                 cache.setObject(image, forKey: key, cost: cg.bytesPerRow * cg.height)
                 return image
             }
@@ -175,12 +174,12 @@ struct GameImage: View {
     var fill = false
     /// Tried when the install has no `ref`.
     var fallback: String? = nil
-    @State private var image: UIImage?
+    @State private var image: PlatformImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().aspectRatio(contentMode: fill ? .fill : .fit)
+                Image(platformImage: image).resizable().aspectRatio(contentMode: fill ? .fill : .fit)
             } else {
                 Image(systemName: placeholder).foregroundStyle(Theme.goldDim)
             }
@@ -203,7 +202,7 @@ struct GameBanner: View {
     var fallback: String? = nil
     var height: CGFloat
     var radius: CGFloat = 8
-    @State private var image: UIImage?
+    @State private var image: PlatformImage?
 
     var body: some View {
         Group {
@@ -211,7 +210,7 @@ struct GameBanner: View {
                 Color.clear
                     .frame(height: height)
                     .frame(maxWidth: .infinity)
-                    .overlay { Image(uiImage: image).resizable().aspectRatio(contentMode: .fill) }
+                    .overlay { Image(platformImage: image).resizable().aspectRatio(contentMode: .fill) }
                     .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             } else {
                 // Takes no room, but is a view: an empty one never loads.
@@ -231,13 +230,13 @@ struct GameBanner: View {
 /// cropped; clear until it loads or when the install lacks it.
 struct GameBackdrop: View {
     let ref: String?
-    @State private var image: UIImage?
+    @State private var image: PlatformImage?
 
     var body: some View {
         Color.clear
             .overlay {
                 if let image {
-                    Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+                    Image(platformImage: image).resizable().aspectRatio(contentMode: .fill)
                 }
             }
             .clipped()

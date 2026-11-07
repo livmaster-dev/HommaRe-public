@@ -54,7 +54,9 @@ enum { HK_EN, HK_RU, HK_DE, HK_FR, HK_PL };
  * `id` names the button's art (touch-ui/camera-panel/btn-<id>), `symbol` the
  * system symbol drawn where there is none. `kind`: "tap" presses the key with
  * its mods; "latch" holds the key until the next click in the game (or a
- * second press); "next_tap_right" makes the next tap a right click. `quick`:
+ * second press); "next_tap_right" makes the next tap a right click; "screen"
+ * opens a native view of the game's (the host sends {"do": "panel", "id": ...}
+ * to runtime/native_seam.h recomp_screen_command). `quick`:
  * pinned by default, 1 on every screen size, 2 on a large one only, 0 not.
  * A command whose action the bindings lack is left out (Hammers of Fate binds
  * no heroes' mana), and one whose own button the game shows (`onscreen`). Returns the length written (NUL-terminated), the length it

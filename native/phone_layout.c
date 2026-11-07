@@ -179,6 +179,32 @@ int homm5_window_shown(uint32_t win) {
     return 1;
 }
 
+/* For native/skill_wheel.c: a window's child of that <Name> (0 when none),
+ * and a window's own <Visible> taken down: 1 when it was up. */
+uint32_t homm5_window_child(uint32_t win, const char *name) {
+    if (!guest_ptr(win))
+        return 0;
+    const uint32_t b = rd32(win + WINDOW_CHILDREN), e = rd32(win + WINDOW_CHILDREN + 4);
+    if (!guest_ptr(b) || e < b || e - b > 4u * CHILDREN_MAX)
+        return 0;
+    for (uint32_t at = b; at < e; at += 4) {
+        const uint32_t child = rd32(at);
+        char got[NAME_MAX_];
+        desc_name(window_desc(child), got);
+        if (strcmp(got, name) == 0)
+            return child;
+    }
+    return 0;
+}
+
+int homm5_window_take_shown(uint32_t win) {
+    const uint32_t desc = window_desc(win);
+    if (!desc || !rd8(desc + DESC_VISIBLE))
+        return 0;
+    wr8(desc + DESC_VISIBLE, 0);
+    return 1;
+}
+
 static int named(uint32_t win, const char *name) {
     char got[NAME_MAX_];
     desc_name(window_desc(win), got);
