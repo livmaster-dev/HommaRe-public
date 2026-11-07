@@ -73,6 +73,15 @@ pop_test_binary(input_trackpad_tests)
 add_test(NAME input_trackpad_tests COMMAND input_trackpad_tests WORKING_DIRECTORY ${POP_ROOT})
 set_tests_properties(input_trackpad_tests PROPERTIES LABELS nogame)
 
+# The saves' sync with a synced folder (cloud_saves.h), on plain folders.
+add_executable(cloud_saves_tests ${HOST}/cloud_saves.cpp ${HOST}/tests/cloud_saves_tests.cpp)
+target_include_directories(cloud_saves_tests PRIVATE ${POP_ROOT})
+target_compile_options(cloud_saves_tests PRIVATE ${POP_WARN_WERROR})
+pop_optimize(cloud_saves_tests 1)
+pop_test_binary(cloud_saves_tests)
+add_test(NAME cloud_saves_tests COMMAND cloud_saves_tests WORKING_DIRECTORY ${POP_ROOT})
+set_tests_properties(cloud_saves_tests PROPERTIES LABELS nogame)
+
 add_executable(keypad_tests ${HOST}/keypad_layout.cpp ${HOST}/keypad_modifiers.cpp ${HOST}/tests/keypad_tests.cpp)
 target_include_directories(keypad_tests PRIVATE ${POP_ROOT})
 target_compile_options(keypad_tests PRIVATE ${POP_WARN_WERROR})
@@ -215,6 +224,14 @@ if(APPLE)
                               PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 
+# The saves kept in step with a synced folder (cloud_saves.h); Apple's side
+# coordinates with the folder's file provider.
+set(POP_CLOUD_SAVES_SOURCES ${HOST}/cloud_saves.cpp)
+if(APPLE)
+  list(APPEND POP_CLOUD_SAVES_SOURCES ${HOST}/cloud_saves_apple.mm)
+  set_source_files_properties(${HOST}/cloud_saves_apple.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+endif()
+
 # The host's platform file: desktop or iPadOS (host/sdl/platform_ui.h), and
 # the launcher's (host/launcher/launcher_sdl.h; iPadOS keeps its own in
 # platform_ui_ios.mm).
@@ -226,6 +243,7 @@ set(POP_LAUNCHER_SOURCES $<TARGET_OBJECTS:launcher_core> $<TARGET_OBJECTS:recomp
 if(APPLE AND RECOMP_NATIVE_LAUNCHER)
   add_library(launcher_native STATIC ${HOST}/launcher/apple/LauncherBridge.swift
                                      ${HOST}/launcher/apple/LauncherCatalog.swift
+                                     ${HOST}/launcher/apple/LauncherCloudSaves.swift
                                      ${HOST}/launcher/apple/LauncherGog.swift
                                      ${HOST}/launcher/apple/LauncherGogView.swift
                                      ${HOST}/launcher/apple/LauncherInstaller.swift
@@ -381,7 +399,7 @@ if(TARGET recomp_gen)
             ${HOST}/controls/controls_host.cpp ${HOST}/controls/gamepad_sdl.cpp
             ${HOST}/controls/vpad_host_api.cpp
             ${HOST}/game_path.cpp ${HOST}/present.cpp ${HOST}/text_overrides.cpp ${HOST}/ui_mods.cpp
-            ${HOST}/server_prompt.cpp
+            ${HOST}/server_prompt.cpp ${POP_CLOUD_SAVES_SOURCES}
             ${HOST}/page_overlay.cpp
             ${POP_PRESENT_SOURCES}
             ${HOST}/input.cpp ${HOST}/input_gate.cpp ${HOST}/input_touch.cpp

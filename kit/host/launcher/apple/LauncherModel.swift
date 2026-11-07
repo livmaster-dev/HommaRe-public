@@ -246,6 +246,14 @@ final class LauncherModel {
     private(set) var gpuSkin = LauncherModel.displaySetting(LauncherModel.gpuSkinKey, 0) != 2
     /// The startup videos are skipped: the profile shadows their sequence files.
     private(set) var skipIntro = LauncherModel.introSkipped()
+    /// The saves kept in step with a folder every device sees (iCloud Drive):
+    /// LauncherCloudSaves.swift, the game's host/cloud_saves.h.
+    var cloudSaves = UserDefaults.standard.bool(forKey: LauncherModel.cloudSavesKey)
+    /// That folder: iCloud Drive's HommaRe on a Mac unless the player chose
+    /// another, the one the player picked on iOS; nil when there is none.
+    var cloudFolder: URL? = LauncherModel.savedCloudFolder()
+    /// iOS: the Files app's folder picker for it is up.
+    var cloudPickerShown = false
     var notice: String? {
         // Unattended runs see the alerts in the log.
         didSet { if let notice { FileHandle.standardError.write(Data("[launcher] \(notice)\n".utf8)) } }

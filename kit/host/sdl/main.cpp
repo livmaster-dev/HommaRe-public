@@ -30,6 +30,7 @@
 #include "../game_path.h"
 #include "../launcher/launcher_sdl.h"
 #include "../launcher/native_launcher.h"
+#include "../cloud_saves.h"
 #include "../gpu/gpu_factory.h"
 #include "../input.h"
 #include "../input_gate.h"
@@ -3930,6 +3931,11 @@ int main(int argc, char **argv) {
     if (*RECOMP_ONLINE_GSCONNECT_HOST)
         server_prompt_install(host_layout().profile_dir, RECOMP_ONLINE_PROMPT_TITLE,
                               RECOMP_ONLINE_PROMPT_TEXT, RECOMP_ONLINE_DEFAULT_SERVER);
+    // The saves kept in step with a synced folder (cloud_saves.h): the launcher
+    // names it in RECOMP_CLOUD_SAVES_DIR when the player turned that on. The
+    // first sync is waited for, the game reading its saves next.
+    if (const char *cloud = recomp_env("CLOUD_SAVES_DIR"); cloud && *cloud)
+        cloud_saves::start(cloud_saves::paths_for(host_layout().profile_dir, cloud, RECOMP_GAME_ID), 10.0);
 
     // The renderer first: the presenter shares its device, so a present
     // cannot run ahead of the scene it is showing.
@@ -4019,6 +4025,7 @@ int main(int argc, char **argv) {
         host_audio_capture_begin(capture);
 
     boot_run();
+    cloud_saves::stop(20.0); // the game's last saves, before anything else can stop the process
     if (!sched_guest_threads_stopped()) {
         fprintf(stderr,
                 "presenter: guest workers outlived shutdown; refusing unsafe presenter join\n");

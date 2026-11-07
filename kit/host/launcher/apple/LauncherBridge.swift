@@ -42,6 +42,7 @@ private final class LauncherSession {
     }
 
     func finish(_ entry: GameEntry) {
+        model.handCloudSavesToGame()
         exe = strdup(entry.exe?.path ?? "")
         root = strdup(entry.root?.path ?? "")
         game = strdup(entry.id)
@@ -146,6 +147,14 @@ public func recompNativeLauncherBegin(_ window: UnsafeMutableRawPointer?, _ conf
             for one in spec.split(separator: ",") { model.logGogPlan(String(one)) }
         }
         if env["RECOMP_LAUNCHER_GOG"] == "1" { model.showGog() }
+        // RECOMP_LAUNCHER_SETTINGS=1 opens the settings (pictures of them).
+        if env["RECOMP_LAUNCHER_SETTINGS"] == "1" { model.settingsShown = true }
+        // RECOMP_LAUNCHER_CLOUD_SAVES=<folder> syncs the saves with that folder
+        // this time (LauncherCloudSaves.swift), the player's choice untouched.
+        if let dir = env["RECOMP_LAUNCHER_CLOUD_SAVES"], !dir.isEmpty {
+            model.cloudFolder = URL(fileURLWithPath: dir, isDirectory: true)
+            model.cloudSaves = true
+        }
         let dump = env["RECOMP_LAUNCHER_DUMP"] ?? ""
         let autoplay = (env["RECOMP_LAUNCHER_AUTOPLAY"] ?? "0") != "0"
         let installSetup = env["RECOMP_LAUNCHER_INSTALL"] ?? ""

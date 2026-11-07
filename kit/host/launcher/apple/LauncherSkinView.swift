@@ -1082,6 +1082,8 @@ struct SkinSettings: View {
                             label(L10n.savesFolder).padding(.top, 6)
                             mono(L10n.location(saves))
                         }
+                        label(L10n.cloudSaves).padding(.top, 6)
+                        CloudSavesRow(model: model, skin: skin, size: 20)
                     }
                 }
                 .padding(.vertical, 4)
@@ -1232,6 +1234,12 @@ struct SkinSettings: View {
                         .buttonStyle(SkinButtonStyle(skin: skin, kind: .small))
                     #endif
                 }
+            }
+            // The saves in step with iCloud Drive (LauncherCloudSaves.swift).
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                label(L10n.cloudSaves).frame(width: 220, alignment: .leading)
+                CloudSavesRow(model: model, skin: skin)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer(minLength: 0)
             HStack {

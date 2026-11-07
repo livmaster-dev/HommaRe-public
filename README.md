@@ -311,6 +311,17 @@ formats. Copy them into the profile folder (see below); this hasn't been tested 
 | Profiles and saves | `~/Library/Application Support/HommaRe/Documents/My Games/Heroes of Might and Magic V/` (the launcher's *Saves* button opens it) | Inside the app |
 | Installed games | Where you chose in the launcher | Inside the app (`Games` in the Files app) |
 
+**Can my saves follow me between the Mac, the iPad and the iPhone?** Yes, through iCloud
+Drive (or any folder your devices share). In the launcher's *Settings*, tick *iCloud Drive
+→ Sync saves*. On a Mac the folder is *iCloud Drive › HommaRe*; on an iPad or iPhone pick
+that same folder in the picker. The saves are copied when a game starts, while it runs and
+when it ends (on an iPad or iPhone also when the app goes to the background); the game's
+settings, which hold each device's resolution, are not. A save changed on two devices at
+once keeps the newer one, and whatever the sync replaces or deletes is kept for a while in
+the profile's `cloud-saves/backup` folder. Saves are kept per player profile, so use the
+same profile name on every device. No Apple developer account is involved: the DMG and a
+re-signed IPA can both do it.
+
 **Hot-seat saves don't show in Load Game.** Hot-seat games are loaded from *Multiplayer →
 Hot Seat → Load*, not from the single-player list, as in the original.
 
@@ -368,7 +379,6 @@ or peer, stay on a local network or a VPN with people you know.
 
 - GOG's other languages (Czech, Spanish, Italian, Hungarian and Chinese): their installers
   are needed to check the files.
-- iCloud saves sync
 
 There are no dates and no promises: it's ready when it's ready.
 
