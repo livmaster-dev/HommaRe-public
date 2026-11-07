@@ -1114,8 +1114,15 @@ void push_trackpad_actions(const std::vector<TrackpadAction> &actions) {
     }
 }
 
+// A native screen is up (the game's undrawn screen beneath it, or the Mac's
+// skill wheel over the game): the system keyboard is the native view's, not
+// the game's text input (sync_native_screen).
+static bool g_native_screen_up = false;
+
 [[maybe_unused]] bool on_trackpad(const TrackpadEvent &e) {
-    if (!g_window)
+    // A native view over the game (the Mac's skill wheel): its scrolls and
+    // pinches are AppKit's, the view's.
+    if (!g_window || g_native_screen_up)
         return false;
     TrackpadView v;
     float mx = 0, my = 0;
@@ -1618,6 +1625,46 @@ void audio_service_restarted() {
 }
 } // namespace
 
+// The Mac's view over the game (the skill wheel, native/native_screens.c):
+// the J key (where J is on a US keyboard, whatever the layout) asks the game
+// for it, and the game opens it where it has one (the map, a hero's screen, a
+// level-up); J goes on to the game as well, which binds nothing to it (a text
+// field still types it). While a view shows, AppKit gives the view its mouse
+// and the game gets no key press, click or wheel; Escape or J closes it.
+// True: the event is the view's.
+static bool desktop_view_event(const SDL_Event &event) {
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    const bool key = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP;
+    if (key && (event.key.mod & SDL_KMOD_GUI))
+        return false; // Command-Q and the like: the application's
+    const bool down = event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat;
+    if (!g_native_screen_up) {
+        if (down && event.key.scancode == SDL_SCANCODE_J &&
+            !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)) &&
+            !host_page_prompt_open())
+            recomp_screen_command("{\"do\":\"panel\",\"id\":\"skill-wheel\",\"key\":true}");
+        return false;
+    }
+    // Releases still reach the game: a key or a button held when the view
+    // came up is let go there.
+    switch (event.type) {
+    case SDL_EVENT_KEY_DOWN:
+        if (down &&
+            (event.key.scancode == SDL_SCANCODE_ESCAPE || event.key.scancode == SDL_SCANCODE_J))
+            recomp_screen_command("{\"do\":\"escape\"}");
+        return true;
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_WHEEL:
+        return true;
+    default:
+        return false;
+    }
+#else
+    (void)event;
+    return false;
+#endif
+}
 
 // One SDL event, translated into both of the input paths the game reads: the
 // DirectInput device state, and the Win32 message queue.
@@ -1625,6 +1672,8 @@ void handle_event(const SDL_Event &event) {
     if (platform_ui_handle_lifecycle(event))
         return;
     if (handle_editor_event(event))
+        return;
+    if (desktop_view_event(event))
         return;
     const SDL_WindowID ours = g_window ? SDL_GetWindowID(g_window) : 0;
     switch (event.type) {
@@ -2419,9 +2468,6 @@ void native_screen_sample_command(const char *command) {
 // document passed on to the platform's view whenever it changes.
 // RECOMP_NATIVE_SCREEN_SAMPLE=<file> shows that document instead, to work on
 // a view without the game's screen.
-// A native screen is up (the game's undrawn screen beneath it): the system
-// keyboard is the native view's, not the game's text input.
-static bool g_native_screen_up = false;
 
 void sync_native_screen() {
     static std::vector<char> buf(16384);
@@ -2611,6 +2657,16 @@ static void press_hotkey(const char *id) {
     for (const HotkeyCommand &h : g_hotkeys) {
         if (h.id != id)
             continue;
+        // A view of the game's own (a native screen it opens): the game is
+        // told, and its document comes back as a native screen's does.
+        if (h.kind == "screen") {
+            std::string ident;
+            for (char ch : h.id)
+                if (ch != '"' && ch != '\\')
+                    ident += ch;
+            recomp_screen_command(("{\"do\":\"panel\",\"id\":\"" + ident + "\"}").c_str());
+            return;
+        }
         std::vector<TouchAction> actions;
         if (h.kind == "latch" && h.key)
             g_touch.command_latch(h.key, &actions);

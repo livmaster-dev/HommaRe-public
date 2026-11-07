@@ -1,5 +1,38 @@
 # Changelog
 
+## Interface recipes: pictures made on the device (format 4)
+
+- A recipe (`ui_mods.cpp`, `tools/ui_recipe.py`) may make a picture from the
+  player's own: `compose <name> <w> <h>`, then `src <picture> <sha256>` for each it
+  takes from and steps in order: `blit` (a rectangle, scaled by the nearest pixel),
+  `fill` (one colour) and `lay` (a `new64` picture of the recipe over it by its
+  alpha). The result is an uncompressed 32-bit DDS without mips, as the game's
+  interface pictures are; a source of another build leaves the picture out. So a
+  mod can frame the port's own art in the game's frames without carrying any of
+  the game's pixels. Recipes of formats 1-3 read as before.
+
+## Native views on the Mac
+
+- `platform_ui_native_screen` works on the Mac too (`sdl/native_screen_mac.mm`):
+  the game repository's `native-screens/` module (`RecompScreens`) now builds for
+  macOS as well, its views over the game window's content view. UIKit and AppKit
+  meet in `native-screens/Platform.swift` of the game that has one (pictures, fonts,
+  the iOS-only modifiers); the Mac bundle carries `native-screens/fonts` as iOS's
+  does. While a view shows, the game gets no key press, click or wheel (releases
+  still go through), and the trackpad's gestures are the view's. A game's own key
+  for its view goes through `recomp_screen_command`: HommaRe's J (by scancode,
+  whatever the layout) asks for the skill wheel, and Escape or J while a view shows
+  sends `{"do": "escape"}`.
+- `RECOMP_NATIVE_SCREENS_SNAPSHOT=<file.png>` (Mac): each view, a moment after it
+  opens, into `<file>-<n>-<screen>.png`, to check a view without the screen.
+
+## Control panel: commands that open a game's native view
+
+- A command of `recomp_hotkeys_state`'s document may have the kind
+  `"screen"`: pressed, the host sends `{"do": "panel", "id": <its id>}` to
+  `recomp_screen_command` instead of a key, and the game answers with a
+  native screen's document (`recomp_screen_state`), shown as one.
+
 ## iOS: no keyboard notifications to the launcher's closed window
 
 - `platform_ui_window_closing(window)` (`host/sdl/platform_ui.h`), called by

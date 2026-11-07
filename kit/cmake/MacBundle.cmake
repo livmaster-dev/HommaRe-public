@@ -84,6 +84,15 @@ function(pop_mac_bundle target)
       message(STATUS "[macos] profile_files: ${src} is not there; ${dest} stays out")
     endif()
   endforeach()
+  # The fonts of the game's native views (native-screens/fonts/, with their
+  # licences; the Mac shows the skill wheel), registered by the views at run
+  # time; before the signature below.
+  if(TARGET native_screens AND EXISTS ${RECOMP_GAME_DIR}/native-screens/fonts)
+    add_custom_command(TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory ${RECOMP_GAME_DIR}/native-screens/fonts
+              ${pop_mac_resources}/native-screens-fonts
+      VERBATIM)
+  endif()
   set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
     ${POP_ROOT}/tools/recomp/finish_bundle.py)
   add_custom_command(TARGET ${target} POST_BUILD
