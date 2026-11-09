@@ -229,7 +229,26 @@ asks for a WebGPU device (tested in Chrome on macOS).
 The game runs on a worker; the browser's main thread owns SDL, WebGPU and the
 presenter. `RECOMP_*` switches go in the page's query string
 (`<game id>/?RECOMP_D3D9_STATS=1`). Reading a render target back is not
-supported in the browser.
+supported in the browser. The build uses WebAssembly threads, tail calls and
+WebGPU: Chrome or Edge 113 or later (Safari and Firefox once their WebGPU
+runs it). A game whose executable sits below its data (`bin/` beside `data/`)
+is imported from the folder above; `[web] ui_mods` names the interface mods
+the page makes from the imported install.
+
+`tools/web_smoke.mjs` runs a site's game in Chrome over the DevTools protocol
+(Node 22, no packages): it imports an install through the launcher page,
+starts the game, presses keys, clicks and types at given seconds, and writes
+the consoles, screenshots and timings and memory to a folder:
+
+```sh
+node tools/web_smoke.mjs --site build/web-site --game <game id> --import <install> \
+    --out /tmp/smoke --shots 20,40 --keys 30:Escape --display :97 \
+    --flag --enable-features=Vulkan --flag --use-angle=vulkan
+```
+
+Headless Chrome on Linux cannot present a WebGPU canvas (151 loses the device
+on SwiftShader and on an NVIDIA GPU alike); `--display` runs it on a virtual X
+server (`Xvfb :97 -screen 0 1600x1300x24`), where the GPU presents normally.
 
 ## Other platforms and GPU APIs
 

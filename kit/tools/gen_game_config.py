@@ -62,7 +62,10 @@ def render_header(cfg):
     lines.append("#if defined(__APPLE__) && TARGET_OS_OSX\n#define RECOMP_GAME_FIXED_GUEST_BASE %d\n#else\n"
                  "#define RECOMP_GAME_FIXED_GUEST_BASE 0\n#endif"
                  % int(cfg["translate"].get("fixed_guest_base", False)))
-    lines.append("#define RECOMP_GAME_WRITE_TRACK_PROTECT %d"
+    # No page protection in WebAssembly: the web build's stores mark instead
+    # (cmake/Translate.cmake), so its runtime tracks by them.
+    lines.append("#if defined(__EMSCRIPTEN__)\n#define RECOMP_GAME_WRITE_TRACK_PROTECT 0\n#else\n"
+                 "#define RECOMP_GAME_WRITE_TRACK_PROTECT %d\n#endif"
                  % int(cfg["translate"].get("write_track", "stores") == "protect"))
     lines.append("#define RECOMP_KIT_DIR %s" % c_string(Path(__file__).resolve().parents[1].as_posix()))
     # The on-screen controls a fresh profile starts with, and how the pad maps
@@ -179,7 +182,8 @@ def render_cmake(cfg):
         "%s|%s" % (k, (Path(cfg["dir"]) / v).resolve().as_posix())
         for k, v in sorted(cfg["macos"]["profile_files"].items())))
     # ui_mods as recipe paths (ui-mods/<name>.recipe under the game directory).
-    for section, macro in (("ios", "RECOMP_IOS_UI_MODS"), ("macos", "RECOMP_MACOS_UI_MODS")):
+    for section, macro in (("ios", "RECOMP_IOS_UI_MODS"), ("macos", "RECOMP_MACOS_UI_MODS"),
+                           ("web", "RECOMP_WEB_UI_MODS")):
         lines.append('set(%s "%s")' % (macro, ";".join(
             (Path(cfg["dir"]) / "ui-mods" / (name + ".recipe")).resolve().as_posix()
             for name in cfg[section]["ui_mods"])))

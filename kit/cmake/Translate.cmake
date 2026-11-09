@@ -55,6 +55,12 @@ if(POP_HAVE_GEN)
     target_compile_definitions(recomp_gen PRIVATE RECOMP_LEAN_CALLS=1)
   endif()
   # [translate] write_track = "protect": no per-store lazy-buffer marking.
+  # WebAssembly has no page protection to catch those stores with, so the
+  # web's translated stores mark whatever the game asks for (and the runtime
+  # tracks by them, tools/gen_game_config.py).
+  if(EMSCRIPTEN)
+    set(RECOMP_WRITE_TRACK_STORES 1)
+  endif()
   if(DEFINED RECOMP_WRITE_TRACK_STORES)
     target_compile_definitions(recomp_gen PRIVATE RECOMP_WRITE_TRACK_STORES=${RECOMP_WRITE_TRACK_STORES})
   endif()
@@ -114,6 +120,16 @@ if(POP_HAVE_GEN)
     list(APPEND POP_GEN_AUX_TARGETS ${aux_target})
     message(STATUS "Auxiliary module translation: ${dir}")
   endforeach()
+  # The web: the translation's tail calls (JUMP_FN) become return_call, which
+  # the WebAssembly backend leaves as call + return before a shared return
+  # block (tools/wasm_tail_calls.py). The archive is rewritten whenever it is.
+  if(EMSCRIPTEN)
+    foreach(gen_target recomp_gen ${POP_GEN_AUX_TARGETS})
+      add_custom_command(TARGET ${gen_target} POST_BUILD
+        COMMAND ${Python3_EXECUTABLE} ${POP_ROOT}/tools/wasm_tail_calls.py $<TARGET_FILE:${gen_target}>
+        VERBATIM)
+    endforeach()
+  endif()
   # The game's native replacements (game.toml [translate] native).
   if(RECOMP_NATIVE_HEADER AND NOT POP_TRANSLATE STREQUAL "STUB")
     target_sources(recomp_gen PRIVATE ${RECOMP_NATIVE_SOURCES})

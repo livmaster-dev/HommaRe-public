@@ -28,6 +28,13 @@ endif()
 set(SDL_GPU OFF CACHE BOOL "" FORCE)
 if(EMSCRIPTEN)
   set(SDL_PTHREADS ON CACHE BOOL "" FORCE) # the game runs on a thread of its own
+  # zlib (runtime/legacy_dlls.cpp) is Emscripten's own port, which the
+  # toolchain builds on first use; there is no system library to find.
+  if(NOT TARGET ZLIB::ZLIB)
+    add_library(ZLIB::ZLIB INTERFACE IMPORTED GLOBAL)
+    target_compile_options(ZLIB::ZLIB INTERFACE --use-port=zlib)
+    target_link_options(ZLIB::ZLIB INTERFACE --use-port=zlib)
+  endif()
 endif()
 FetchContent_Declare(SDL3
   GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
