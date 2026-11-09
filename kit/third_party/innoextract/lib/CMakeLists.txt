@@ -5,8 +5,15 @@
 #   BOOST_SRC        boost_1_89_0 (headers and libs/{filesystem,iostreams}/src)
 #   LZMA_INCLUDE     XZ Utils' src/liblzma/api (liblzma itself is built apart)
 # zlib, bzip2 and libiconv are the system's.
+#
+# With RECOMP_INNOEXTRACT_PROGRAM, innoextract's own command line instead
+# (src/cli/main.cpp), for Android, whose launcher runs it as the Linux
+# launcher runs the system's (build-android.sh). Android has no libbz2, so
+# bzip2 is compiled in from BZIP2_SRC, and Boost.Program_Options with the rest
+# of Boost (libs/program_options/src); LZMA_LIBRARY is the liblzma built apart.
 cmake_minimum_required(VERSION 3.24)
 project(recomp_innoextract LANGUAGES C CXX)
+option(RECOMP_INNOEXTRACT_PROGRAM "Build innoextract's command line, not the library" OFF)
 
 # C++20 for Boost.Filesystem's std::atomic_ref.
 set(CMAKE_CXX_STANDARD 20)
@@ -42,6 +49,36 @@ set(boost_sources
   ${BOOST_SRC}/libs/iostreams/src/bzip2.cpp
   ${BOOST_SRC}/libs/iostreams/src/file_descriptor.cpp
   ${BOOST_SRC}/libs/iostreams/src/zlib.cpp)
+
+if(RECOMP_INNOEXTRACT_PROGRAM)
+  file(GLOB program_options_sources ${BOOST_SRC}/libs/program_options/src/*.cpp)
+  list(FILTER program_options_sources EXCLUDE REGEX "winmain\\.cpp$")
+  add_library(recomp_bz2 STATIC
+    ${BZIP2_SRC}/blocksort.c ${BZIP2_SRC}/huffman.c ${BZIP2_SRC}/crctable.c ${BZIP2_SRC}/randtable.c
+    ${BZIP2_SRC}/compress.c ${BZIP2_SRC}/decompress.c ${BZIP2_SRC}/bzlib.c)
+  target_include_directories(recomp_bz2 PUBLIC ${BZIP2_SRC})
+  target_compile_options(recomp_bz2 PRIVATE -O2 -w)
+  add_executable(innoextract
+    ${src}/cli/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/release.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/process.cpp
+    ${innoextract_sources}
+    ${boost_sources}
+    ${program_options_sources})
+  target_include_directories(innoextract PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${src})
+  target_include_directories(innoextract SYSTEM PRIVATE ${BOOST_SRC} ${LZMA_INCLUDE})
+  # innoextract runs on one thread; the NDK's libc++ has no std::atomic_ref,
+  # which Boost.Filesystem otherwise guards its few shared values with.
+  target_compile_definitions(innoextract PRIVATE
+    BOOST_ALL_NO_LIB BOOST_FILESYSTEM_STATIC_LINK=1 BOOST_IOSTREAMS_STATIC_LINK=1
+    BOOST_PROGRAM_OPTIONS_STATIC_LINK=1 BOOST_FILESYSTEM_NO_DEPRECATED LZMA_API_STATIC
+    BOOST_FILESYSTEM_SINGLE_THREADED)
+  set_source_files_properties(${boost_sources} ${program_options_sources} PROPERTIES
+    COMPILE_DEFINITIONS "BOOST_FILESYSTEM_SOURCE;BOOST_IOSTREAMS_SOURCE;BOOST_PROGRAM_OPTIONS_SOURCE")
+  target_compile_options(innoextract PRIVATE -O2 -w)
+  target_link_libraries(innoextract PRIVATE ${LZMA_LIBRARY} recomp_bz2 z)
+  return()
+endif()
 
 add_library(recomp_innoextract STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/recomp_innoextract.cpp

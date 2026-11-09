@@ -153,7 +153,8 @@ Pro 13" (M5) и iPhone 15 Pro Max (iOS 27), в основном с **русск�
 | iPad и iPhone | [Установите IPA](../../releases/latest) через Sideloadly, AltStore или SideStore либо соберите сами на Mac в Xcode. |
 | Linux (x86-64) | [Соберите сами](#сборка-из-исходников); рисует через Vulkan. |
 | Linux (64-битный ARM) | [Соберите сами](#сборка-из-исходников), на самом ARM-компьютере или кросс-компиляцией на ПК с x86-64; Vulkan. Для ARM-хромбуков, ноутбуков на Snapdragon X, Asahi Linux, Raspberry Pi 5. Собирается; на железе ещё не проверялась. |
-| Windows, Android | Пока не планируется: на Windows оригинальная игра и так работает. |
+| Android, Chromebook (экспериментально) | Соберите APK сами: `tools/build_app.py --target android` (Android SDK, NDK r29 и JDK 17+ в `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`); установите `app-x86_64-debug.apk` (Chromebook на Intel) или `app-arm64-v8a-debug.apk` через `adb install`. Рисует через Vulkan. |
+| Windows | Пока не планируется: на Windows оригинальная игра и так работает. |
 
 ### Системные требования
 

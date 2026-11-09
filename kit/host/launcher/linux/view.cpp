@@ -123,7 +123,12 @@ StatusInfo status_info(const Entry &e) {
     case GameState::Interrupted:
         return {t("interrupted"), interrupted_detail(e.state.setup), theme::gold};
     default:
+#ifdef __ANDROID__
+        // The installers come to the device with the Files app, as on an iPad.
+        return {t("notFound"), t("notFoundDetail.iosInstaller"), theme::dim};
+#else
         return {t("notFound"), t("notFoundDetail.mac"), theme::dim};
+#endif
     }
 }
 
@@ -479,7 +484,7 @@ float skin_details(Ui &u, const Entry &e, float x, float y, float w, bool draw) 
     }
     const float pw = button_width(u, Kind::Large, primary);
     const float fw = button_width(u, Kind::Small, t("chooseFolder"));
-    const bool saves = !m.profile_dir().empty();
+    const bool saves = !m.profile_dir().empty() && Model::can_reveal();
     const float sw = saves ? button_width(u, Kind::Small, t("saves")) : 0;
     const Style label{Face::Label, 13, status.second};
     const Style mono{Face::Mono, 12, skin_color::ink_muted};
@@ -1066,9 +1071,9 @@ float flat_actions(Ui &u, const Entry &e, float x, float y, float w, bool draw) 
         std::function<void()> action;
     };
     std::vector<Ghost> ghosts = {{t("chooseFolder"), "folder", [&m] { m.pick_folder(); }}};
-    if (!e.root.empty())
+    if (!e.root.empty() && Model::can_reveal())
         ghosts.push_back({t("showInFinder"), "reveal", [&m] { m.reveal_selected(); }});
-    if (!m.profile_dir().empty())
+    if (!m.profile_dir().empty() && Model::can_reveal())
         ghosts.push_back({t("saves"), "saves", [&m] { m.reveal_saves(); }});
     const float pw = gold_width(u, label);
     float gw = 0;
@@ -1421,8 +1426,9 @@ float skin_settings(Ui &u, float H, bool draw) {
             u.say(x, y + (h - bh) / 2, t("savesFolder"), label);
             u.say(x, y + (h - bh) / 2 + u.line(label) + 2,
                   u.fit(location(m.profile_dir()), mono, w - bw - 14, Cut::Middle), mono);
-            skin_button(u, Kind::Small, x + w - bw, y + (h - 38) / 2, bw, t("show"), "showsaves",
-                        [&m] { m.reveal_saves(); });
+            if (Model::can_reveal())
+                skin_button(u, Kind::Small, x + w - bw, y + (h - 38) / 2, bw, t("show"), "showsaves",
+                            [&m] { m.reveal_saves(); });
         }
         y += h + 14;
     }

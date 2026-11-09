@@ -148,7 +148,13 @@ void choose_language(const std::string &code) {
 
 std::string t(const char *key, const Args &args) {
     const auto &strings = catalog().strings;
+    // The desktop's own words (a distribution's innoextract, a file manager)
+    // are not Android's, which carries its innoextract in the APK.
+#ifdef __ANDROID__
+    auto it = strings.end();
+#else
     auto it = strings.find(std::string(key) + ".linux");
+#endif
     if (it == strings.end())
         it = strings.find(key);
     if (it == strings.end())

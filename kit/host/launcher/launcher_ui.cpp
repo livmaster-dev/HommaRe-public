@@ -150,6 +150,11 @@ void Launcher::set_unplayable(const std::string &reason) {
     unplayable_ = reason;
     countdown_ = 0;
     dirty_ = true;
+    // Said first, not only when Play is pressed: on a device without the
+    // graphics the game needs (an Android device without Vulkan 1.1) the
+    // player learns why before importing gigabytes. The import stays behind it.
+    if (!reason.empty())
+        show(reason);
 }
 
 void Launcher::set_auto_play(double seconds) {
