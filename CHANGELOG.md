@@ -4,6 +4,17 @@ What changed for players in each release of HommaRe. The builds are in
 [Releases](../../releases); the recompilation kit underneath keeps its own notes in
 [kit/CHANGELOG.md](kit/CHANGELOG.md).
 
+## 0.1-playable-454 (2026-11-11)
+
+- **The Czech, Italian and Spanish GOG releases:** the launcher installs them from
+  GOG.com or from GOG's offline installers and checks every file, as it does the other
+  languages. The menus, the skill wheel and the iPad and iPhone command panel speak the
+  game's language; "Exit to Windows" and the ubi.com hint are reworded as in the others.
+- **Profile and save names with your language's letters** in the German, French,
+  Polish, Czech, Italian and Spanish releases: a name like "Hráč" or "Łukasz" was
+  refused before (the Czech game's own default name among them). The English and
+  Russian releases name things as before.
+
 ## 0.1-playable-451 (2026-11-07)
 
 - **Your saves on all your devices, through iCloud Drive** (off until you turn it on):

@@ -51,16 +51,14 @@ battery when nothing moves.
 
 ## What's new
 
-**0.1-playable-451** (November 2026) · [all changes](CHANGELOG.md)
+**0.1-playable-454** (November 2026) · [all changes](CHANGELOG.md)
 
-- **Saves on all your devices** through iCloud Drive: start a campaign on the Mac and go
-  on with it on the iPhone. Off until you turn it on; see
-  [Saves on all your devices](#saves-on-all-your-devices-icloud-drive).
-- **A skill wheel** in all three games: every skill and perk of a hero's class, what the
-  hero has learnt and what it can take next, from a *Skills* plate in the level-up window
-  and a sixth bookmark on the hero screen (J on a Mac).
-- **iPhone and iPad:** no more crashes while dragging, or when the app goes to the
-  background.
+- **Czech, Italian and Spanish:** GOG's releases in these languages install and play,
+  with the menus, the skill wheel and the command panel in the game's language.
+- **Names in your language's letters:** profiles and saves in the German, French, Polish,
+  Czech, Italian and Spanish releases can be called "Hráč" or "Łukasz".
+- Before that, in 0.1-playable-451: [saves on all your devices](#saves-on-all-your-devices-icloud-drive)
+  through iCloud Drive and a skill wheel in all three games.
 
 ## Highlights
 
