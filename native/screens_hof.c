@@ -94,9 +94,8 @@ static void hof_command(Scratch *s, uint32_t screen, const char *cmd) {
 }
 
 static void hof_document(Json *j, Scratch *s, uint32_t screen) {
-    char diff[64], a[128], b2[128], text[300];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    char a[128], b2[128], text[300];
+    ns_read_lang(s);
     uint32_t b;
     const int n = entries(screen, &b);
     int entry = (int)rd32(screen + HF_ENTRY);

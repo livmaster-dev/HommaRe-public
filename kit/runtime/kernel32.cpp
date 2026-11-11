@@ -4448,7 +4448,9 @@ const char *locale_info(uint32_t lctype) {
     case 0x0028:
         return "h:mm:ss tt"; // LOCALE_STIMEFORMAT
     case 0x1004:
-        return win32cp::acp() == 1251 ? "1251" : "1252"; // LOCALE_IDEFAULTANSICODEPAGE
+        return win32cp::acp() == 1251    ? "1251"
+               : win32cp::acp() == 65001 ? "65001"
+                                         : "1252"; // LOCALE_IDEFAULTANSICODEPAGE
     default:
         return "";
     }

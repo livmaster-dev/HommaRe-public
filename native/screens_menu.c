@@ -586,9 +586,7 @@ static const char *panel_title(Scratch *s, int index) {
 
 static void menu_document(Json *j, Scratch *s, uint32_t screen) {
     const int index = panel(screen);
-    char diff[64];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    ns_read_lang(s);
     static uint32_t captions_for;
     if (captions_for != screen) {
         captions_for = screen;
@@ -655,9 +653,8 @@ static void box_command(Scratch *s, uint32_t box, const char *cmd) {
 }
 
 static void box_document(Json *j, Scratch *s, uint32_t box) {
-    char diff[64], text[64] = "";
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    char text[64] = "";
+    ns_read_lang(s);
     const uint32_t edit = rd32(box + BOX_EDIT);
     if (ns_ptr(edit))
         ns_wstr_utf8(edit + EDIT_TEXT, text, sizeof text);

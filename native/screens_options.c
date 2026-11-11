@@ -167,9 +167,8 @@ static void options_command(Scratch *s, uint32_t screen, const char *cmd) {
 }
 
 static void options_document(Json *j, Scratch *s, uint32_t screen) {
-    char diff[64], text[256];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    char text[256];
+    ns_read_lang(s);
     uint32_t cb;
     const int ncat = categories(screen, &cb);
     j_lit(j, "{\"screen\":\"options\",");

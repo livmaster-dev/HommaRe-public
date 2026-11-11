@@ -45,7 +45,7 @@ const HkBind *hk_find(const HkBind *binds, int n, const char *action, const char
                       int nsections);
 
 /* The languages of the panel's words: the game's (native_screens.h NS_*). */
-enum { HK_EN, HK_RU, HK_DE, HK_FR, HK_PL };
+enum { HK_EN, HK_RU, HK_DE, HK_FR, HK_PL, HK_CS, HK_HU, HK_IT, HK_ES, HK_ZH, HK_LANGS };
 
 /* The panel's document for the active sections, JSON:
  *   {"screen": "<the sections, space-separated>", "lang": "ru", "commands": [

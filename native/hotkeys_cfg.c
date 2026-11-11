@@ -203,14 +203,14 @@ const HkBind *hk_find(const HkBind *binds, int n, const char *action, const char
 /* ---- The catalog ---- */
 
 typedef struct {
-    const char *id;       /* the button's art: touch-ui/camera-panel/btn-<id> */
-    const char *actions;  /* the bound actions it presses, the first one bound wins */
-    const char *sections; /* the screens it is offered on (bindsection names) */
-    const char *kind;     /* "tap", "latch" or "next_tap_right" (no action) */
-    const char *symbol;   /* the system symbol where there is no art */
-    int quick;            /* pinned by default: 1 everywhere, 2 large screens */
-    const char *label[5]; /* en, ru, de, fr, pl */
-    const char *buttons;  /* the game's own buttons for it (window <Name>s): while
+    const char *id;              /* the button's art: touch-ui/camera-panel/btn-<id> */
+    const char *actions;         /* the bound actions it presses, the first one bound wins */
+    const char *sections;        /* the screens it is offered on (bindsection names) */
+    const char *kind;            /* "tap", "latch" or "next_tap_right" (no action) */
+    const char *symbol;          /* the system symbol where there is no art */
+    int quick;                   /* pinned by default: 1 everywhere, 2 large screens */
+    const char *label[HK_LANGS]; /* en, ru, de, fr, pl, cs, hu, it, es, zh-Hans */
+    const char *buttons;         /* the game's own buttons for it (window <Name>s): while
                              one is shown, the panel leaves the command out */
 } Command;
 
@@ -228,7 +228,8 @@ static const Command COMMANDS[] = {
      "tap",
      "drop.fill",
      2,
-     {"Heroes' mana", "Мана героев", "Mana der Helden", "Mana des héros", "Mana bohaterów"},
+     {"Heroes' mana", "Мана героев", "Mana der Helden", "Mana des héros", "Mana bohaterów",
+      "Mana hrdinů", "Hősök manája", "Mana degli eroi", "Maná de los héroes", "英雄魔法值"},
      NULL},
     {"quicksave",
      "quicksave",
@@ -236,7 +237,8 @@ static const Command COMMANDS[] = {
      "tap",
      "square.and.arrow.down",
      2,
-     {"Quick save", "Быстрое сохранение", "Schnellspeichern", "Sauvegarde rapide", "Szybki zapis"},
+     {"Quick save", "Быстрое сохранение", "Schnellspeichern", "Sauvegarde rapide", "Szybki zapis",
+      "Rychlé uložení", "Gyorsmentés", "Salvataggio rapido", "Guardado rápido", "快速存档"},
      NULL},
     {"quickload",
      "quickload",
@@ -244,7 +246,8 @@ static const Command COMMANDS[] = {
      "tap",
      "square.and.arrow.up",
      0,
-     {"Quick load", "Быстрая загрузка", "Schnellladen", "Chargement rapide", "Szybki odczyt"},
+     {"Quick load", "Быстрая загрузка", "Schnellladen", "Chargement rapide", "Szybki odczyt",
+      "Rychlé načtení", "Gyorsbetöltés", "Caricamento rapido", "Carga rápida", "快速读档"},
      NULL},
     {"sleep",
      "sleep_wake_hero",
@@ -253,7 +256,8 @@ static const Command COMMANDS[] = {
      "moon.zzz",
      0,
      {"Sleep / wake", "Сон / пробуждение", "Schlafen / wecken", "Dormir / réveiller",
-      "Śpij / obudź"},
+      "Śpij / obudź", "Spát / probudit", "Alvás / ébresztés", "Dormi / sveglia",
+      "Dormir / despertar", "休息 / 唤醒"},
      NULL},
     {"dig",
      "adv_dig",
@@ -261,7 +265,7 @@ static const Command COMMANDS[] = {
      "tap",
      "hammer",
      0,
-     {"Dig", "Копать", "Graben", "Creuser", "Kop"},
+     {"Dig", "Копать", "Graben", "Creuser", "Kop", "Kopat", "Ásás", "Scava", "Cavar", "挖掘"},
      "OnJog-DigGrail"},
     {"underground",
      "flip_floor",
@@ -270,7 +274,9 @@ static const Command COMMANDS[] = {
      "square.stack.3d.down.right",
      0,
      {"Surface / underground", "Поверхность / подземелье", "Oberwelt / Unterwelt",
-      "Surface / souterrain", "Powierzchnia / podziemia"},
+      "Surface / souterrain", "Powierzchnia / podziemia", "Povrch / podzemí",
+      "Felszín / föld alatt", "Superficie / sotterraneo", "Superficie / subterráneo",
+      "地面 / 地下"},
      "OnJog-Underground"},
     {"puzzle-map",
      "input_open_puzzle_map open_puzzle_map",
@@ -279,7 +285,8 @@ static const Command COMMANDS[] = {
      "puzzlepiece",
      0,
      {"Tear of Asha map", "Карта Слезы Асхи", "Karte der Träne Ashas", "Carte de la Larme d'Asha",
-      "Mapa Łzy Ashy"},
+      "Mapa Łzy Ashy", "Mapa Ashiny slzy", "Asha Könnyének térképe", "Mappa della Lacrima di Asha",
+      "Mapa de la Lágrima de Asha", "亚莎之泪地图"},
      NULL},
     {"camera-home",
      "set_camera_default_pos",
@@ -288,7 +295,8 @@ static const Command COMMANDS[] = {
      "scope",
      0,
      {"Default camera", "Камера по умолчанию", "Standardkamera", "Caméra par défaut",
-      "Domyślna kamera"},
+      "Domyślna kamera", "Výchozí kamera", "Alapértelmezett kamera", "Visuale predefinita",
+      "Cámara por defecto", "默认镜头"},
      NULL},
     {"kingdom",
      "input_adv_show_kingdom_overview",
@@ -297,7 +305,8 @@ static const Command COMMANDS[] = {
      "crown",
      0,
      {"Kingdom overview", "Обзор королевства", "Königreichsübersicht", "Aperçu du royaume",
-      "Przegląd królestwa"},
+      "Przegląd królestwa", "Přehled království", "Királyság áttekintése", "Panoramica del regno",
+      "Vista general del reino", "王国概要"},
      NULL},
     {"quest-log",
      "input_adv_show_objectives",
@@ -305,7 +314,8 @@ static const Command COMMANDS[] = {
      "tap",
      "scroll",
      0,
-     {"Objectives", "Задания", "Ziele", "Objectifs", "Cele"},
+     {"Objectives", "Задания", "Ziele", "Objectifs", "Cele", "Úkoly", "Célok", "Obiettivi",
+      "Objetivos", "任务目标"},
      "OnJog-Scenario"},
     /* Not a key: the skill wheel drawn natively (native_screens.c, the
      * native-screens/SkillWheel.swift view), on the map. A hero's screen and
@@ -318,7 +328,8 @@ static const Command COMMANDS[] = {
      "chart.pie",
      2,
      {"Skill wheel", "Колесо навыков", "Fertigkeitenrad", "Roue des compétences",
-      "Koło umiejętności"},
+      "Koło umiejętności", "Kolo dovedností", "Ismeretek kereke", "Ruota delle capacità",
+      "Rueda de habilidades", "技能轮"},
      NULL},
     /* A battle */
     {"wait",
@@ -327,7 +338,8 @@ static const Command COMMANDS[] = {
      "tap",
      "hourglass",
      1,
-     {"Wait", "Ждать", "Warten", "Attendre", "Czekaj"},
+     {"Wait", "Ждать", "Warten", "Attendre", "Czekaj", "Čekat", "Várakozás", "Attendi", "Esperar",
+      "等待"},
      "OnJog-Wait"},
     {"initiative",
      "input_switch_atb_log",
@@ -336,7 +348,9 @@ static const Command COMMANDS[] = {
      "list.bullet",
      1,
      {"Initiative bar / log", "Шкала инициативы / журнал", "Initiativeleiste / Protokoll",
-      "Barre d'initiative / journal", "Pasek inicjatywy / dziennik"},
+      "Barre d'initiative / journal", "Pasek inicjatywy / dziennik", "Lišta iniciativy / záznam",
+      "Kezdeményezési sáv / napló", "Barra dell'iniziativa / registro",
+      "Barra de iniciativa / registro", "主动条 / 日志"},
      "LogHider OnJog-AtbToggle"},
     /* Placement before a battle: ahead of creature info, which it shares */
     {"autoplace",
@@ -346,7 +360,8 @@ static const Command COMMANDS[] = {
      "wand.and.stars",
      1,
      {"Auto-arrange", "Авторасстановка", "Automatisch aufstellen", "Placement auto",
-      "Auto-rozstawienie"},
+      "Auto-rozstawienie", "Automatické rozestavení", "Automatikus felállítás",
+      "Schieramento automatico", "Colocación automática", "自动布阵"},
      "OnJog-StartCombat"},
     {"start-combat",
      "input_start_combat",
@@ -354,7 +369,8 @@ static const Command COMMANDS[] = {
      "tap",
      "play.fill",
      1,
-     {"Start combat", "Начать бой", "Kampf beginnen", "Commencer le combat", "Rozpocznij bitwę"},
+     {"Start combat", "Начать бой", "Kampf beginnen", "Commencer le combat", "Rozpocznij bitwę",
+      "Zahájit bitvu", "Harc megkezdése", "Inizia il combattimento", "Iniciar combate", "开始战斗"},
      "OnJog-NextCreature"},
     {"creature-info",
      NULL,
@@ -363,7 +379,8 @@ static const Command COMMANDS[] = {
      "info.circle",
      1,
      {"Creature info", "Сведения о существе", "Kreaturinfo", "Infos créature",
-      "Informacje o istocie"},
+      "Informacje o istocie", "Informace o bytosti", "Lény adatai", "Informazioni sulla creatura",
+      "Información de la criatura", "生物信息"},
      NULL},
     {"ctrl-melee",
      "ctrl",
@@ -372,7 +389,8 @@ static const Command COMMANDS[] = {
      "control",
      0,
      {"Ctrl: melee attack", "Ctrl: удар вблизи", "Strg: Nahkampf", "Ctrl : corps à corps",
-      "Ctrl: walka wręcz"},
+      "Ctrl: walka wręcz", "Ctrl: útok zblízka", "Ctrl: közelharci támadás",
+      "Ctrl: attacco in mischia", "Ctrl: ataque cuerpo a cuerpo", "Ctrl：近战攻击"},
      NULL},
     /* Screens where an army's stacks are dragged: a garrison's. A hero's
      * screen shows no panel at all. */
@@ -383,33 +401,66 @@ static const Command COMMANDS[] = {
      "shift",
      0,
      {"Shift: split stack", "Shift: разделить отряд", "Umschalt: Stapel teilen",
-      "Maj : diviser la troupe", "Shift: podziel oddział"},
+      "Maj : diviser la troupe", "Shift: podziel oddział", "Shift: rozdělit oddíl",
+      "Shift: csapat megosztása", "Maiusc: dividi la truppa", "Mayús: dividir la tropa",
+      "Shift：拆分部队"},
      NULL},
 };
 
 /* What a button says under it: a word or two, the full label in its tip. */
 static const struct {
     const char *id;
-    const char *text[5]; /* en, ru, de, fr, pl */
+    const char *text[HK_LANGS]; /* as label */
 } SHORT[] = {
-    {"mana", {"Mana", "Мана", "Mana", "Mana", "Mana"}},
-    {"quicksave", {"Quicksave", "Сохранить", "Speichern", "Sauver", "Zapisz"}},
-    {"quickload", {"Quickload", "Загрузить", "Laden", "Charger", "Wczytaj"}},
-    {"sleep", {"Sleep", "Сон", "Schlaf", "Dormir", "Sen"}},
-    {"dig", {"Dig", "Копать", "Graben", "Creuser", "Kop"}},
-    {"underground", {"Underground", "Подземелье", "Unterwelt", "Souterrain", "Podziemia"}},
-    {"puzzle-map", {"Tear map", "Карта Слезы", "Tränenkarte", "Carte", "Mapa Łzy"}},
-    {"camera-home", {"Camera", "Камера", "Kamera", "Caméra", "Kamera"}},
-    {"kingdom", {"Kingdom", "Королевство", "Königreich", "Royaume", "Królestwo"}},
-    {"quest-log", {"Objectives", "Задания", "Ziele", "Objectifs", "Cele"}},
-    {"skill-wheel", {"Skills", "Навыки", "Fertigkeiten", "Compétences", "Umiejętności"}},
-    {"wait", {"Wait", "Ждать", "Warten", "Attendre", "Czekaj"}},
-    {"initiative", {"Initiative", "Инициатива", "Initiative", "Initiative", "Inicjatywa"}},
-    {"autoplace", {"Arrange", "Расставить", "Aufstellen", "Placer", "Rozstaw"}},
-    {"start-combat", {"Start", "В бой", "Start", "Combat", "Start"}},
-    {"creature-info", {"Info", "Сведения", "Info", "Infos", "Info"}},
-    {"ctrl-melee", {"Melee", "Вблизи", "Nahkampf", "Mêlée", "Wręcz"}},
-    {"shift-split", {"Split", "Делить", "Teilen", "Diviser", "Podziel"}},
+    {"mana", {"Mana", "Мана", "Mana", "Mana", "Mana", "Mana", "Mana", "Mana", "Maná", "魔法"}},
+    {"quicksave",
+     {"Quicksave", "Сохранить", "Speichern", "Sauver", "Zapisz", "Uložit", "Mentés", "Salva",
+      "Guardar", "存档"}},
+    {"quickload",
+     {"Quickload", "Загрузить", "Laden", "Charger", "Wczytaj", "Načíst", "Betöltés", "Carica",
+      "Cargar", "读档"}},
+    {"sleep",
+     {"Sleep", "Сон", "Schlaf", "Dormir", "Sen", "Spánek", "Alvás", "Dormi", "Dormir", "休息"}},
+    {"dig",
+     {"Dig", "Копать", "Graben", "Creuser", "Kop", "Kopat", "Ásás", "Scava", "Cavar", "挖掘"}},
+    {"underground",
+     {"Underground", "Подземелье", "Unterwelt", "Souterrain", "Podziemia", "Podzemí", "Föld alatt",
+      "Sottosuolo", "Subsuelo", "地下"}},
+    {"puzzle-map",
+     {"Tear map", "Карта Слезы", "Tränenkarte", "Carte", "Mapa Łzy", "Mapa slzy", "Könny-térkép",
+      "Mappa", "Mapa", "泪之图"}},
+    {"camera-home",
+     {"Camera", "Камера", "Kamera", "Caméra", "Kamera", "Kamera", "Kamera", "Visuale", "Cámara",
+      "镜头"}},
+    {"kingdom",
+     {"Kingdom", "Королевство", "Königreich", "Royaume", "Królestwo", "Království", "Királyság",
+      "Regno", "Reino", "王国"}},
+    {"quest-log",
+     {"Objectives", "Задания", "Ziele", "Objectifs", "Cele", "Úkoly", "Célok", "Obiettivi",
+      "Objetivos", "目标"}},
+    {"skill-wheel",
+     {"Skills", "Навыки", "Fertigkeiten", "Compétences", "Umiejętności", "Dovednosti", "Ismeretek",
+      "Capacità", "Habilidades", "技能"}},
+    {"wait",
+     {"Wait", "Ждать", "Warten", "Attendre", "Czekaj", "Čekat", "Várás", "Attendi", "Esperar",
+      "等待"}},
+    {"initiative",
+     {"Initiative", "Инициатива", "Initiative", "Initiative", "Inicjatywa", "Iniciativa",
+      "Kezdeményezés", "Iniziativa", "Iniciativa", "主动性"}},
+    {"autoplace",
+     {"Arrange", "Расставить", "Aufstellen", "Placer", "Rozstaw", "Rozestavit", "Felállítás",
+      "Schiera", "Colocar", "布阵"}},
+    {"start-combat",
+     {"Start", "В бой", "Start", "Combat", "Start", "Do boje", "Harcba", "Combatti", "Combatir",
+      "开战"}},
+    {"creature-info",
+     {"Info", "Сведения", "Info", "Infos", "Info", "Info", "Infó", "Info", "Info", "信息"}},
+    {"ctrl-melee",
+     {"Melee", "Вблизи", "Nahkampf", "Mêlée", "Wręcz", "Zblízka", "Közelharc", "Mischia", "Cuerpo",
+      "近战"}},
+    {"shift-split",
+     {"Split", "Делить", "Teilen", "Diviser", "Podziel", "Rozdělit", "Megosztás", "Dividi",
+      "Dividir", "拆分"}},
 };
 
 static const char *short_label(const char *id, int lang) {
@@ -492,8 +543,9 @@ const char *hk_command_buttons(int i) {
 
 int hk_document(const HkBind *binds, int n, const char *const *sections, int nsections, int lang,
                 uint32_t onscreen, char *out, int cap) {
-    static const char *const LANG[] = {"en", "ru", "de", "fr", "pl"};
-    if (lang < HK_EN || lang > HK_PL)
+    static const char *const LANG[HK_LANGS] = {"en", "ru", "de", "fr", "pl",
+                                               "cs", "hu", "it", "es", "zh-Hans"};
+    if (lang < HK_EN || lang >= HK_LANGS)
         lang = HK_EN;
     Buf b = {out, cap, 0};
     char num[16];

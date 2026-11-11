@@ -130,6 +130,13 @@ static void test_document_offers_the_screens_commands(void) {
     /* The order is the catalog's: mana before quick save before sleep. */
     CHECK(strstr(doc, "\"mana\"") < strstr(doc, "\"quicksave\"") &&
           strstr(doc, "\"quicksave\"") < strstr(doc, "\"sleep\""));
+    /* The languages after Polish: each its own words and code. */
+    len = hk_document(b, n, map, 1, HK_ZH, 0, doc, sizeof doc);
+    CHECK(len > 0 && strstr(doc, "\"lang\":\"zh-Hans\"") &&
+          strstr(doc, "\"label\":\"英雄魔法值\",\"short\":\"魔法\""));
+    len = hk_document(b, n, map, 1, HK_IT, 0, doc, sizeof doc);
+    CHECK(len > 0 && strstr(doc, "\"lang\":\"it\"") &&
+          strstr(doc, "\"label\":\"Mana degli eroi\""));
 
     const char *battle[] = {"combat_screen"};
     len = hk_document(b, n, battle, 1, HK_EN, 0, doc, sizeof doc);

@@ -206,15 +206,16 @@ static void wheel_step(X86 *c) {
     unlock();
     if (!asked)
         return;
-    /* The view's words in the game's language: from its first difficulty's
-     * name, as the screens and the control panel read it. */
+    /* The view's words in the game's language: from its difficulties'
+     * names, as the screens and the control panel read them. */
     static int lang_read;
     if (!lang_read) {
         Scratch s = ns_scratch(c);
-        char easy[64];
+        char easy[64], hard[64];
         ns_difficulty_name(&s, 0, easy, sizeof easy);
+        ns_difficulty_name(&s, 2, hard, sizeof hard);
         if (easy[0]) {
-            ns_set_lang(easy);
+            ns_set_lang(easy, hard);
             lang_read = 1;
         }
     }

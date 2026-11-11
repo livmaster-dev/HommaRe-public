@@ -858,6 +858,8 @@ void u_FlashWindowEx(X86 *c) {
 // CharLowerA(text or char): in the code page GetACP reports. A pointer
 // whose high word is zero is a single character in the low byte.
 static uint8_t lower_1252(uint8_t ch) {
+    if (win32cp::acp() == 65001) // UTF-8: its other bytes are pieces of characters
+        return ch >= 'A' && ch <= 'Z' ? (uint8_t)(ch + 0x20) : ch;
     if (win32cp::acp() == 1251) {
         if ((ch >= 'A' && ch <= 'Z') || (ch >= 0xc0 && ch <= 0xdf))
             return (uint8_t)(ch + 0x20); // A-Z, А-Я

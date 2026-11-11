@@ -4,7 +4,9 @@
 #include "game_config.h"
 #include "../platform/os.h"
 
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #ifndef RECOMP_ANSI_CODEPAGE
 #define RECOMP_ANSI_CODEPAGE 1252u
@@ -36,15 +38,75 @@ void put_utf8(std::string &out, uint32_t cp) {
     }
 }
 
+// The page in effect: RECOMP_ACP, else what choose_for_install found, else
+// the game's.
+uint32_t g_page;
+
+uint32_t page_of(uint32_t p) {
+    return p == 1251 || p == 65001 ? p : 1252u;
+}
+
+// The first of "languages" in an install's goggame-<id>.info ("zh-Hans",
+// "hu-HU"), or "".
+struct InfoSearch {
+    std::string dir, lang;
+};
+
+int scan_info(const char *name, void *user) {
+    auto *search = static_cast<InfoSearch *>(user);
+    const std::string n = name;
+    if (n.compare(0, 8, "goggame-") != 0 || n.size() < 13 ||
+        n.compare(n.size() - 5, 5, ".info") != 0)
+        return 0;
+    FILE *f = fopen((search->dir + "/" + n).c_str(), "rb");
+    if (!f)
+        return 0;
+    char buf[4096];
+    const size_t got = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[got] = 0;
+    const char *at = strstr(buf, "\"languages\"");
+    at = at ? strchr(at + 11, '"') : nullptr;
+    if (!at)
+        return 0;
+    const char *end = strchr(at + 1, '"');
+    if (end)
+        search->lang.assign(at + 1, end);
+    return end ? 1 : 0;
+}
+
 } // namespace
 
 uint32_t acp() {
-    static const uint32_t page = [] {
+    if (!g_page) {
         const char *v = recomp_env("ACP");
-        uint32_t p = v && *v ? (uint32_t)strtoul(v, nullptr, 10) : (uint32_t)RECOMP_ANSI_CODEPAGE;
-        return p == 1251 ? 1251u : 1252u;
-    }();
-    return page;
+        g_page =
+            page_of(v && *v ? (uint32_t)strtoul(v, nullptr, 10) : (uint32_t)RECOMP_ANSI_CODEPAGE);
+    }
+    return g_page;
+}
+
+void choose_for_install(const std::string &root) {
+    if (const char *v = recomp_env("ACP"); v && *v)
+        return;
+    // The install's root, or the folder above the EXE's (bin/ beside it).
+    InfoSearch search{root, {}};
+    os_listdir(root.c_str(), scan_info, &search);
+    if (search.lang.empty() && root.rfind('/') != std::string::npos && root.rfind('/') > 0) {
+        search.dir = root.substr(0, root.rfind('/'));
+        os_listdir(search.dir.c_str(), scan_info, &search);
+    }
+    const std::string &l = search.lang;
+    auto is = [&](const char *code) {
+        const size_t n = strlen(code);
+        return l.compare(0, n, code) == 0 && (l.size() == n || l[n] == '-');
+    };
+    // English keeps the game's page (a Russian release's 1251 has long named
+    // the profiles of players of the English one too); a Cyrillic language
+    // takes 1251; any other UTF-8, which spells every name the player types.
+    if (l.empty() || is("en"))
+        return;
+    g_page = is("ru") || is("uk") || is("be") || is("bg") || is("sr") ? 1251u : 65001u;
 }
 
 uint32_t resolve(uint32_t cp) {
@@ -61,12 +123,18 @@ bool supported(uint32_t cp) {
 }
 
 uint16_t to_unicode(uint32_t cp, uint8_t b) {
+    if (resolve(cp) == 65001 && b >= 0x80)
+        return 0xfffd; // a piece of a character
     if (resolve(cp) != 1251 || b < 0x80)
         return b;
     return b >= 0xc0 ? (uint16_t)(0x0410 + (b - 0xc0)) : k1251[b - 0x80];
 }
 
 bool from_unicode(uint32_t cp, uint16_t w, uint8_t *b) {
+    if (resolve(cp) == 65001) { // one byte is ASCII only
+        *b = (uint8_t)w;
+        return w < 0x80;
+    }
     if (resolve(cp) != 1251) {
         if (w >= 256)
             return false;
