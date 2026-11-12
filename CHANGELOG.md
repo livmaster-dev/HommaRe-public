@@ -4,6 +4,13 @@ What changed for players in each release of HommaRe. The builds are in
 [Releases](../../releases); the recompilation kit underneath keeps its own notes in
 [kit/CHANGELOG.md](kit/CHANGELOG.md).
 
+## 0.1-playable-457 (2026-11-12)
+
+- **The launcher's settings fit their page on an opened foldable iPhone:** the list had
+  outgrown the page there, with the language row drawn above it and the iCloud folder
+  and *Done* under it. The settings now scroll inside the page; the title and *Done*
+  stay in place.
+
 ## 0.1-playable-454 (2026-11-11)
 
 - **The Czech, Italian and Spanish GOG releases:** the launcher installs them from
