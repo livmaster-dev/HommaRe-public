@@ -1127,120 +1127,129 @@ struct SkinSettings: View {
                 .font(SkinFont.menu(40))
                 .foregroundStyle(SkinColor.navy)
                 .padding(.bottom, 4)
-            row(L10n.languageLabel) {
-                SkinLanguageMenu(model: model)
-            }
-            SkinDivider().padding(.vertical, 6)
-            // The game's pacing (mods/settings_file.h): read when it starts.
-            row(L10n.frameLimit) {
-                choices([L10n.frameLimitGame, "40", "60", "120"], model.frameLimit, model.setFrameLimit)
-            }
-            row(L10n.energySaver) {
-                choices([L10n.auto, L10n.always, L10n.never], model.energySaver, model.setEnergySaver)
-            }
-            row(L10n.idleFrames) {
-                choices([L10n.auto, L10n.on, L10n.off], model.idleFrames, model.setIdleFrames)
-            }
-            // On a Mac a choice under the native size draws smaller and MetalFX
-            // upscales it (d3d9_metal.mm wanted_scale); automatic supersamples.
-            row(L10n.renderQuality) {
-                choices(SkinSettings.renderChoices, model.renderQuality, model.setRenderQuality)
-            }
-            row(L10n.uiBounds) {
-                choices([L10n.uiBoundsScreen, "21:9", "16:9", "4:3"], model.uiBounds, model.setUiBounds)
-            }
-            row(L10n.startupVideos) {
-                choices([L10n.showVideos, L10n.skipVideos], model.skipIntro ? 1 : 0) { model.setSkipIntro($0 == 1) }
-            }
-            // Apple's Metal HUD over the game, from the next start (sdl/main.cpp).
-            row(L10n.metalHud) {
-                SkinCheck(skin: skin, title: L10n.metalHudShow, on: model.metalHud) { model.setMetalHud(!model.metalHud) }
-                if model.metalHudPending {
-                    Text(L10n.nextStart).font(SkinFont.text(14)).foregroundStyle(SkinColor.inkMuted)
-                }
-            }
-            // Animated models on the GPU (native/gpu_skin.cpp), read when the game starts.
-            row(L10n.gpuSkin) {
-                SkinCheck(skin: skin, title: L10n.gpuSkinOn, on: model.gpuSkin) { model.setGpuSkin(!model.gpuSkin) }
-            }
-            #if os(iOS)
-            row(L10n.cameraButtons) {
-                choices([L10n.showVideos, L10n.hideButtons], model.cameraButtons ? 0 : 1) { model.setCameraButtons($0 == 0) }
-            }
-            row(L10n.commandPanel) {
-                choices([L10n.showVideos, L10n.hideButtons], model.commandPanel ? 0 : 1) { model.setCommandPanel($0 == 0) }
-            }
-            row(L10n.battleCells) {
-                choices([L10n.off, L10n.on], model.battleCells ? 1 : 0) { model.setBattleCells($0 == 1) }
-            }
-            row(L10n.touchMode) {
-                choices([L10n.touchCursor, L10n.touchNative], model.nativeTouch ? 1 : 0) { model.setNativeTouch($0 == 1) }
-            }
-            row(L10n.silentMode) {
-                choices([L10n.respect, L10n.ignore], model.ignoreSilentMode ? 1 : 0) { model.setIgnoreSilentMode($0 == 1) }
-            }
-            if SkinSettings.phoneDevice {
-                row(L10n.phoneInterface) {
-                    choices([L10n.auto, L10n.always, L10n.never], Self.phoneChoice(model.phoneInterface)) {
-                        model.setPhoneInterface(Self.phoneSetting($0))
+            // Scrolled where the rows outgrow the page (an opened foldable iPhone):
+            // fixed in place they ran over the page's top and bottom edges and
+            // pushed Done under it.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    row(L10n.languageLabel) {
+                        SkinLanguageMenu(model: model)
                     }
-                }
-            }
-            // The game's menus drawn natively, from the game's next start.
-            row(L10n.menus) {
-                choices([L10n.menusNative, L10n.menusGame], model.nativeMenus ? 0 : 1) { model.setNativeMenus($0 == 0) }
-            }
-            #else
-            // Two fingers on a Mac trackpad over the 3D map (sdl/main.cpp install_trackpad).
-            row(L10n.trackpad) {
-                choices([L10n.trackpadHeight, L10n.trackpadTablet, L10n.trackpadGame],
-                        model.trackpadCamera, model.setTrackpadCamera)
-            }
-            #endif
-            SkinDivider().padding(.vertical, 6)
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    label(L10n.gameFolders)
-                    let roots = model.rememberedRoots
-                    if roots.isEmpty {
-                        Text(L10n.noFolders).font(SkinFont.text(14)).foregroundStyle(SkinColor.inkMuted)
+                    SkinDivider().padding(.vertical, 6)
+                    // The game's pacing (mods/settings_file.h): read when it starts.
+                    row(L10n.frameLimit) {
+                        choices([L10n.frameLimitGame, "40", "60", "120"], model.frameLimit, model.setFrameLimit)
                     }
-                    ForEach(roots.prefix(4), id: \.path) { mono(L10n.location($0)) }
-                    if let base = LauncherModel.importBase() {
-                        Text("\(L10n.installsGoTo): \(L10n.location(base))")
-                            .font(SkinFont.text(13))
-                            .foregroundStyle(SkinColor.inkMuted)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .padding(.top, 2)
+                    row(L10n.energySaver) {
+                        choices([L10n.auto, L10n.always, L10n.never], model.energySaver, model.setEnergySaver)
                     }
-                }
-                Spacer(minLength: 0)
-                #if os(macOS)
-                Button(L10n.addFolder) { model.pickFolder() }
-                    .buttonStyle(SkinButtonStyle(skin: skin, kind: .small))
-                #endif
-            }
-            if let saves = model.profileDir {
-                SkinDivider().padding(.vertical, 6)
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        label(L10n.savesFolder)
-                        mono(L10n.location(saves))
+                    row(L10n.idleFrames) {
+                        choices([L10n.auto, L10n.on, L10n.off], model.idleFrames, model.setIdleFrames)
                     }
-                    Spacer(minLength: 0)
-                    #if os(macOS)
-                    Button(L10n.show) { model.revealSaves() }
-                        .buttonStyle(SkinButtonStyle(skin: skin, kind: .small))
+                    // On a Mac a choice under the native size draws smaller and MetalFX
+                    // upscales it (d3d9_metal.mm wanted_scale); automatic supersamples.
+                    row(L10n.renderQuality) {
+                        choices(SkinSettings.renderChoices, model.renderQuality, model.setRenderQuality)
+                    }
+                    row(L10n.uiBounds) {
+                        choices([L10n.uiBoundsScreen, "21:9", "16:9", "4:3"], model.uiBounds, model.setUiBounds)
+                    }
+                    row(L10n.startupVideos) {
+                        choices([L10n.showVideos, L10n.skipVideos], model.skipIntro ? 1 : 0) { model.setSkipIntro($0 == 1) }
+                    }
+                    // Apple's Metal HUD over the game, from the next start (sdl/main.cpp).
+                    row(L10n.metalHud) {
+                        SkinCheck(skin: skin, title: L10n.metalHudShow, on: model.metalHud) { model.setMetalHud(!model.metalHud) }
+                        if model.metalHudPending {
+                            Text(L10n.nextStart).font(SkinFont.text(14)).foregroundStyle(SkinColor.inkMuted)
+                        }
+                    }
+                    // Animated models on the GPU (native/gpu_skin.cpp), read when the game starts.
+                    row(L10n.gpuSkin) {
+                        SkinCheck(skin: skin, title: L10n.gpuSkinOn, on: model.gpuSkin) { model.setGpuSkin(!model.gpuSkin) }
+                    }
+                    #if os(iOS)
+                    row(L10n.cameraButtons) {
+                        choices([L10n.showVideos, L10n.hideButtons], model.cameraButtons ? 0 : 1) { model.setCameraButtons($0 == 0) }
+                    }
+                    row(L10n.commandPanel) {
+                        choices([L10n.showVideos, L10n.hideButtons], model.commandPanel ? 0 : 1) { model.setCommandPanel($0 == 0) }
+                    }
+                    row(L10n.battleCells) {
+                        choices([L10n.off, L10n.on], model.battleCells ? 1 : 0) { model.setBattleCells($0 == 1) }
+                    }
+                    row(L10n.touchMode) {
+                        choices([L10n.touchCursor, L10n.touchNative], model.nativeTouch ? 1 : 0) { model.setNativeTouch($0 == 1) }
+                    }
+                    row(L10n.silentMode) {
+                        choices([L10n.respect, L10n.ignore], model.ignoreSilentMode ? 1 : 0) { model.setIgnoreSilentMode($0 == 1) }
+                    }
+                    if SkinSettings.phoneDevice {
+                        row(L10n.phoneInterface) {
+                            choices([L10n.auto, L10n.always, L10n.never], Self.phoneChoice(model.phoneInterface)) {
+                                model.setPhoneInterface(Self.phoneSetting($0))
+                            }
+                        }
+                    }
+                    // The game's menus drawn natively, from the game's next start.
+                    row(L10n.menus) {
+                        choices([L10n.menusNative, L10n.menusGame], model.nativeMenus ? 0 : 1) { model.setNativeMenus($0 == 0) }
+                    }
+                    #else
+                    // Two fingers on a Mac trackpad over the 3D map (sdl/main.cpp install_trackpad).
+                    row(L10n.trackpad) {
+                        choices([L10n.trackpadHeight, L10n.trackpadTablet, L10n.trackpadGame],
+                                model.trackpadCamera, model.setTrackpadCamera)
+                    }
                     #endif
+                    SkinDivider().padding(.vertical, 6)
+                    HStack(alignment: .top, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            label(L10n.gameFolders)
+                            let roots = model.rememberedRoots
+                            if roots.isEmpty {
+                                Text(L10n.noFolders).font(SkinFont.text(14)).foregroundStyle(SkinColor.inkMuted)
+                            }
+                            ForEach(roots.prefix(4), id: \.path) { mono(L10n.location($0)) }
+                            if let base = LauncherModel.importBase() {
+                                Text("\(L10n.installsGoTo): \(L10n.location(base))")
+                                    .font(SkinFont.text(13))
+                                    .foregroundStyle(SkinColor.inkMuted)
+                                    .lineLimit(2)
+                                    .truncationMode(.middle)
+                                    .padding(.top, 2)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        #if os(macOS)
+                        Button(L10n.addFolder) { model.pickFolder() }
+                            .buttonStyle(SkinButtonStyle(skin: skin, kind: .small))
+                        #endif
+                    }
+                    if let saves = model.profileDir {
+                        SkinDivider().padding(.vertical, 6)
+                        HStack(alignment: .center, spacing: 14) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                label(L10n.savesFolder)
+                                mono(L10n.location(saves))
+                            }
+                            Spacer(minLength: 0)
+                            #if os(macOS)
+                            Button(L10n.show) { model.revealSaves() }
+                                .buttonStyle(SkinButtonStyle(skin: skin, kind: .small))
+                            #endif
+                        }
+                    }
+                    // The saves in step with iCloud Drive (LauncherCloudSaves.swift).
+                    HStack(alignment: .firstTextBaseline, spacing: 16) {
+                        label(L10n.cloudSaves).frame(width: 220, alignment: .leading)
+                        CloudSavesRow(model: model, skin: skin)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // The saves in step with iCloud Drive (LauncherCloudSaves.swift).
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                label(L10n.cloudSaves).frame(width: 220, alignment: .leading)
-                CloudSavesRow(model: model, skin: skin)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            .scrollBounceBehavior(.basedOnSize)
             Spacer(minLength: 0)
             HStack {
                 Spacer()

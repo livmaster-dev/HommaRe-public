@@ -51,8 +51,10 @@ battery when nothing moves.
 
 ## What's new
 
-**0.1-playable-454** (November 2026) · [all changes](CHANGELOG.md)
+**0.1-playable-457** (November 2026) · [all changes](CHANGELOG.md)
 
+- **Opened foldable iPhone:** the launcher's settings no longer run over the edges of
+  their page; they scroll inside it.
 - **Czech, Italian and Spanish:** GOG's releases in these languages install and play,
   with the menus, the skill wheel and the command panel in the game's language.
 - **Names in your language's letters:** profiles and saves in the German, French, Polish,
