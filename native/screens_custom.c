@@ -672,7 +672,7 @@ static void create_document(Json *j, Scratch *s, uint32_t screen) {
     char diff[8][64];
     for (int i = 0; i < 4; ++i)
         ns_difficulty_name(s, i, diff[i], sizeof diff[i]);
-    ns_set_lang(diff[0]);
+    ns_set_lang(diff[0], diff[2]);
 
     j_lit(j, "{");
     j_kv_str(j, "screen", g_hs == 2 ? "mp_create" : g_hs ? "hotseat_create" : "custom_create");
@@ -1290,9 +1290,7 @@ static void wait_document(Json *j, Scratch *s, uint32_t screen) {
     const uint32_t b = rd32(rows_of(screen)), e = rd32(rows_of(screen) + 4);
     const int n = ns_ptr(b) && e >= b && e - b <= 4u * 8u ? (int)((e - b) / 4u) : 0;
     const int locked = ns_ptr(ct) && rd8(ct + CT_LOCKED);
-    char diff[64];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    ns_read_lang(s);
 
     j_lit(j, "{");
     j_kv_str(j, "screen", g_hs ? "hotseat_players" : "custom_players");
@@ -1627,9 +1625,7 @@ static void mp_wait_document(Json *j, Scratch *s, uint32_t screen) {
     const uint32_t b = rd32(rows_of(screen)), e = rd32(rows_of(screen) + 4);
     const int n = ns_ptr(b) && e >= b && e - b <= 4u * 8u ? (int)((e - b) / 4u) : 0;
     const int local = mp_local_slot(s, screen, n);
-    char diff[64];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    ns_read_lang(s);
 
     j_lit(j, "{\"screen\":\"mp_players\",");
     j_kv_str(j, "lang", ns_lang_code());

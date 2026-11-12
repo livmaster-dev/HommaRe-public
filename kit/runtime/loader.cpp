@@ -19,6 +19,7 @@ __attribute__((weak)) const uint32_t recomp_data_seed_count = 0;
 #include "imports.h"
 #include "guest.h"
 #include "win32.h"
+#include "codepage.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -636,6 +637,7 @@ bool loader_load(const char *exe_path) {
             }
         }
         win32_init(dir, sub);
+        win32cp::choose_for_install(dir);
     }
 
     // TLS directory (data directory 9). Reserve after win32_init, which clears

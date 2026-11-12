@@ -244,9 +244,7 @@ static void message(Scratch *s, uint32_t screen, uint32_t fn) {
 }
 
 static int lang_ru(Scratch *s) {
-    char diff[64];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    return ns_set_lang(diff);
+    return ns_read_lang(s);
 }
 
 /* The game's chat log, the latest lines ("sender: text"). */

@@ -39,13 +39,15 @@ void ns_cmd_str(const char *cmd, const char *key, char *out, size_t cap);
 int ns_cmd_int(const char *cmd, const char *key, int fallback);
 
 /* The views' own words in the game's language (screens_words.c), set by the
- * screen being read from its first difficulty's name: ns_set_lang returns
- * ns_ru, ns_lang_code the view's "lang". German, French and Polish come from
- * the words' table, else English. */
-enum { NS_EN, NS_RU, NS_DE, NS_FR, NS_PL };
+ * screen being read from its difficulties' names (ns_read_lang, below):
+ * ns_set_lang returns ns_ru, ns_lang_code the view's "lang". The languages
+ * after Russian come from the words' table, else English. */
+enum { NS_EN, NS_RU, NS_DE, NS_FR, NS_PL, NS_CS, NS_HU, NS_IT, NS_ES, NS_ZH, NS_LANGS };
 extern int ns_lang;
 extern int ns_ru;
-int ns_set_lang(const char *easy);
+/* The first difficulty's name tells the language but Italian's from French
+ * ("Facile" both); the third's ("Dura", "Difficile") tells those two. */
+int ns_set_lang(const char *easy, const char *hard);
 const char *ns_lang_code(void);
 const char *ns_tr(const char *ru, const char *en);
 
@@ -81,6 +83,8 @@ void ns_react_as(Scratch *s, uint32_t reactions, uint32_t handler, const char *s
                  const char *name);
 /* Difficulty `index`'s name (0 the easiest). */
 void ns_difficulty_name(Scratch *s, int index, char *out, size_t cap);
+/* ns_set_lang from the game's own difficulty names; returns ns_ru. */
+int ns_read_lang(Scratch *s);
 /* A text file of the game by its path ("/UI/MPWait/PlayersList/Item/bonus0.txt"),
  * as its windows show it; read once, "" when there is none. */
 const char *ns_game_text(Scratch *s, const char *path);

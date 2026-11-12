@@ -265,9 +265,8 @@ static int duel_choice(uint32_t view) {
 }
 
 static void duel_document(Json *j, Scratch *s, uint32_t screen) {
-    char diff[64], text[256];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    char text[256];
+    ns_read_lang(s);
     const int turn = turn_of(screen);
     j_lit(j, "{");
     j_kv_str(j, "screen", g_triple ? "duel3" : "duel");

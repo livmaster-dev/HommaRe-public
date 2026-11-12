@@ -186,9 +186,7 @@ static void edit_text(uint32_t edit, char *out, size_t cap) {
 }
 
 static int lang_ru(Scratch *s) {
-    char diff[64];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    return ns_set_lang(diff);
+    return ns_read_lang(s);
 }
 
 /* A wait box a screen keeps (the box's +0xf8), checked by the box's vtable. */

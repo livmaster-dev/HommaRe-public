@@ -22,7 +22,9 @@ entry_point = 0x009fd7c3
 # The game runs from bin/ and reads ..\data; original/ links to a flattened
 # view (bin/ files beside data/, profiles/...) so ".." at the root clamps to it.
 guest_root = 'C:\Heroes5'
-# The Russian release: profile and save names are ANSI in Windows-1251.
+# The Russian release: profile and save names are ANSI in Windows-1251 (the
+# English one too). A GOG install in another language gets UTF-8 instead, by
+# the language its goggame-<id>.info names (kit/runtime/codepage.h).
 ansi_codepage = 1251
 developer_exe = "original/H5_Game.exe"
 windows_version = "5.1.2600"
@@ -169,22 +171,51 @@ files = [
 "<body><color_default>If you have forgotten your password or need to manage your account use the <color_bright>Account <color_default>button." = "<body><color_bright>Not your Ubisoft login!<color_default> Make up a name and password for this ubi-gs server."
 # The Russian install's hint the same way, in its own words, before the line below adds the English one.
 "<body><color_default>Если вы забыли свой пароль или хотите изменить личные данные, нажмите кнопку <color_bright>Профиль<color_default>." = "<body><color_bright>Это не ваш логин Ubisoft!<color_default> Придумайте имя и пароль для этого сервера ubi-gs."
-# The German, French and Polish installs' hints the same way.
+# The other installs' hints the same way.
 "<body><color_default>Falls Ihr Euer Passwort vergessen habt oder Euer Konto verwalten müsst, benutzt die <color_default>Schaltfläche <color_bright>Konto." = "<body><color_bright>Nicht Euer Ubisoft-Login!<color_default> Denkt Euch einen Namen und ein Passwort für diesen ubi-gs-Server aus."
 "<body><color_default>Si vous avez oublié votre mot de passe ou que vous désirez gérer votre compte, utilisez le bouton <color_bright>Compte<color_default>." = "<body><color_bright>Ce n’est pas votre identifiant Ubisoft !<color_default> Choisissez un nom et un mot de passe pour ce serveur ubi-gs."
 "<body><color_default>Jeśli zapomniałeś hasła lub potrzebujesz dokonać zmian na koncie naciśnij przycisk <color_bright>konto<color_default>." = "<body><color_bright>To nie jest twój login Ubisoft!<color_default> Wymyśl nazwę i hasło dla tego serwera ubi-gs."
+"<body><color_default>Pokud jsi zapomněl své heslo nebo potřebuješ upravit svůj účet, použij tlačítko <color_bright>Účet<color_default>." = "<body><color_bright>Toto není tvé přihlášení k Ubisoftu!<color_default> Vymysli si jméno a heslo pro tento server ubi-gs."
+"<body><color_default>Ha elfelejtetted, jelszavadat, vagy fiókodat szeretnéd kezelni, használd a <color_bright>Fiók<color_default> gombot." = "<body><color_bright>Ez nem a Ubisoft-belépésed!<color_default> Találj ki egy nevet és jelszót ehhez az ubi-gs szerverhez."
+"<body><color_default>Se hai scordato la password o devi gestire il tuo account, usa il pulsante <color_bright>Account <color_default>." = "<body><color_bright>Non è il tuo login Ubisoft!<color_default> Scegli un nome e una password per questo server ubi-gs."
+"<body><color_default>Si has olvidado tu contraseña o necesitas gestionar tu cuenta, utiliza el botón <color_bright>Cuenta<color_default>." = "<body><color_bright>¡No es tu cuenta de Ubisoft!<color_default> Inventa un nombre y una contraseña para este servidor ubi-gs."
+"<body><color_default>如果忘记密码或需要管理帐户，请使用<color_bright>帐户<color_default>按钮。" = "<body><color_bright>这不是你的 Ubisoft 账户！<color_default>请为这个 ubi-gs 服务器另设名字和密码。"
 "<body><color_default>" = "<body><color_bright>Not your Ubisoft login!<color_default> Make up a name and password for this ubi-gs server.<br><color_default>"
 "в Windows" = "в систему"
 "to Windows" = "to Desktop"
 "zu Windows" = "zum Desktop"
 "vers Windows" = "vers le bureau"
 "sous Windows" = "au bureau"
+# Czech before the Polish "do Windows" below, which would make it Polish.
+"Odejít do Windows" = "Odejít na plochu"
+"odejít do Windows" = "odejít na plochu"
+"Návrat do Windows" = "Návrat na plochu"
+"vrátit se do Windows" = "vrátit se na plochu"
+"vrátí se zpět do Windows" = "vrátí se zpět na plochu"
 "do Windows" = "do pulpitu"
+"a Windowsba" = "az asztalra"
+"a Windows-ba" = "az asztalra"
+"Torna a Windows" = "Torna al desktop"
+"torna a Windows" = "torna al desktop"
+"torna a Windws" = "torna al desktop"
+"Salir a Windows" = "Salir al escritorio"
+"salir a Windows" = "salir al escritorio"
+"Regresar a Windows" = "Regresar al escritorio"
+"regresar a Windows" = "regresar al escritorio"
+"regresa a Windows" = "regresa al escritorio"
+"返回Windows" = "返回桌面"
+"退至Windows" = "退至桌面"
 "<VolumeBase>1</VolumeBase>" = "<VolumeBase>0.25</VolumeBase>"
 "via ubi.com website" = "through a ubi-gs community server"
 "auf dem ubi.com-Server" = "auf einem ubi-gs-Community-Server"
 "via le site ubi.com" = "via un serveur communautaire ubi-gs"
 "korzystając ze strony ubi.com" = "korzystając z serwera społeczności ubi-gs"
+"prostřednictvím stránky ubi.com" = "prostřednictvím komunitního serveru ubi-gs"
+"az ubi.com-on keresztül" = "egy ubi-gs közösségi szerveren keresztül"
+"az ubi.com honlapon" = "egy ubi-gs közösségi szerveren"
+"attraverso ubi.com" = "attraverso un server della comunità ubi-gs"
+"a través del sitio web ubi.com" = "a través de un servidor de la comunidad ubi-gs"
+"通过ubi.com" = "通过 ubi-gs 社区服务器"
 "Ubi.com" = "ubi-gs"
 "ubi.com" = "ubi-gs"
 "UBI.com" = "ubi-gs"

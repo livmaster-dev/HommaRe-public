@@ -2,9 +2,11 @@
 // conversions use, and how ANSI file names map onto the host's UTF-8 ones.
 //
 // The code page is the game's (game.toml [game] ansi_codepage, 1252 unless the
-// release was localised for another; RECOMP_ACP overrides it for a run). 1252
-// keeps the kit's long-standing Latin-1 behaviour byte for byte; 1251 is the
-// Cyrillic table a Russian release names its profiles and saves in.
+// release was localised for another; RECOMP_ACP overrides it for a run), or
+// the install's (choose_for_install). 1252 keeps the kit's long-standing
+// Latin-1 behaviour byte for byte; 1251 is the Cyrillic table a Russian release
+// names its profiles and saves in; 65001 (UTF-8) spells any name, which the
+// host's file names already are.
 #pragma once
 
 #include <cstdint>
@@ -12,8 +14,13 @@
 
 namespace win32cp {
 
-// The ANSI code page in effect (1251 or 1252).
+// The ANSI code page in effect (1251, 1252 or 65001).
 uint32_t acp();
+// Before the game runs: the page for the install at `root` by the language
+// its goggame-<id>.info names (a GOG release; none: the game's page). English
+// keeps the game's, a Cyrillic language takes 1251, any other UTF-8. RECOMP_ACP
+// still wins.
+void choose_for_install(const std::string &root);
 // A code page argument as the conversion functions take it: CP_ACP (0) and
 // CP_THREAD_ACP (3) are the ANSI page, CP_OEMCP (1) and CP_MACCP (2) Latin-1.
 uint32_t resolve(uint32_t cp);

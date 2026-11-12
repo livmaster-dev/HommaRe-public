@@ -48,8 +48,8 @@
 #define GUEST_DEFAULT_PROFILE "C:\\Heroes5\\profiles\\default_profile\\"
 
 /* native/screens_words.c: the game's language, NS_* = HK_*; ns_set_lang tells
- * it from the first difficulty's name, as native_screens.c reads it. */
-int ns_set_lang(const char *easy);
+ * it from the difficulties' names, as native_screens.c reads them. */
+int ns_set_lang(const char *easy, const char *hard);
 void ns_difficulty_name(Scratch *s, int index, char *out, size_t cap);
 
 static int g_trace = -1;
@@ -157,10 +157,11 @@ void homm5_hotkeys_frame(X86 *c) {
         return;
     last_ask = frame;
     Scratch s = ns_scratch(c);
-    char easy[64];
+    char easy[64], hard[64];
     ns_difficulty_name(&s, 0, easy, sizeof easy);
+    ns_difficulty_name(&s, 2, hard, sizeof hard);
     if (easy[0])
-        ns_set_lang(easy);
+        ns_set_lang(easy, hard);
     done = easy[0] || ++asked >= 10;
     if (g_trace)
         fprintf(stderr, "[hotkeys] language from \"%s\": %d\n", easy, ns_lang);

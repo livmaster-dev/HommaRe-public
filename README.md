@@ -51,16 +51,14 @@ battery when nothing moves.
 
 ## What's new
 
-**0.1-playable-451** (November 2026) · [all changes](CHANGELOG.md)
+**0.1-playable-454** (November 2026) · [all changes](CHANGELOG.md)
 
-- **Saves on all your devices** through iCloud Drive: start a campaign on the Mac and go
-  on with it on the iPhone. Off until you turn it on; see
-  [Saves on all your devices](#saves-on-all-your-devices-icloud-drive).
-- **A skill wheel** in all three games: every skill and perk of a hero's class, what the
-  hero has learnt and what it can take next, from a *Skills* plate in the level-up window
-  and a sixth bookmark on the hero screen (J on a Mac).
-- **iPhone and iPad:** no more crashes while dragging, or when the app goes to the
-  background.
+- **Czech, Italian and Spanish:** GOG's releases in these languages install and play,
+  with the menus, the skill wheel and the command panel in the game's language.
+- **Names in your language's letters:** profiles and saves in the German, French, Polish,
+  Czech, Italian and Spanish releases can be called "Hráč" or "Łukasz".
+- Before that, in 0.1-playable-451: [saves on all your devices](#saves-on-all-your-devices-icloud-drive)
+  through iCloud Drive and a skill wheel in all three games.
 
 ## Highlights
 
@@ -75,8 +73,8 @@ battery when nothing moves.
   ten languages of GOG's installers (English, Russian, Czech, German, Spanish, French,
   Italian, Hungarian, Polish and Simplified Chinese) and stands upright on an iPhone.
 - **Downloads from your GOG.com library, on every device.** Sign in to GOG in the
-  launcher and it downloads the games you own, in English, Russian, German, French or
-  Polish, checks every file's SHA-256 and resumes a stopped download. No installer files and no Files app needed.
+  launcher and it downloads the games you own, in English, Russian, German, French,
+  Polish, Czech, Italian or Spanish, checks every file's SHA-256 and resumes a stopped download. No installer files and no Files app needed.
 - **Installs from your GOG installers, on every device.** Give the launcher GOG's offline
   installer: the `.exe`, the `.bin`, the folder they are in, or several at once; on a Mac
   you can also drop them onto the window. It unpacks only what the game needs, checks
@@ -321,9 +319,9 @@ You install the game from your own GOG copy, and every file is checked.
 
 **Which version do I need?** The GOG releases: *Heroes of Might and Magic V* 2.1 (which
 contains the original game 1.60 and Hammers of Fate 2.1) and *Tribes of the East* 3.1,
-in English, Russian, German, French or Polish. The launcher checks each game's executable
-by its SHA-256 and says if it doesn't match. GOG's other languages, disc versions and other
-stores haven't been tested.
+in English, Russian, German, French, Polish, Czech, Italian or Spanish. The launcher checks
+each game's executable by its SHA-256 and says if it doesn't match. GOG's Hungarian and
+Chinese releases, disc versions and other stores haven't been tested.
 
 **Is this an emulator? Does it use Wine?** No. It's a static recompilation: the game's
 x86 code was translated ahead of time into C and compiled for arm64. A runtime written for
@@ -402,8 +400,8 @@ or peer, stay on a local network or a VPN with people you know.
 
 ## What's next
 
-- GOG's other languages (Czech, Spanish, Italian, Hungarian and Chinese): their installers
-  are needed to check the files.
+- GOG's Hungarian and Chinese releases: GOG ships their base game without the 1.4–1.6
+  data, which the interface mods are made for.
 
 There are no dates and no promises: it's ready when it's ready.
 

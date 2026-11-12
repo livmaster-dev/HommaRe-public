@@ -252,9 +252,8 @@ static const char *picture(uint32_t hdr) {
 }
 
 static void load_document(Json *j, Scratch *s, uint32_t screen) {
-    char diff[64], text[1024];
-    ns_difficulty_name(s, 0, diff, sizeof diff);
-    ns_set_lang(diff);
+    char text[1024];
+    ns_read_lang(s);
     uint32_t b;
     const int n = headers(screen, &b);
     const uint32_t chosen = chosen_header(screen);

@@ -3469,14 +3469,17 @@ static void apply_cfg_defaults(const std::string &exe) {
             host_display_screen_mode(dw, dh, std::min(dw, dh), &w, &h);
             value = std::to_string(w) + "x" + std::to_string(h);
         }
+        // A file neither the install nor a seed has (the Hungarian Heroes V
+        // ships no user.cfg) is made with these lines alone: the game takes its
+        // defaults for the rest, as it would before writing one.
         FILE *f = fopen(path.c_str(), "rb");
-        if (!f)
-            continue;
         std::string text;
-        char buf[4096];
-        for (size_t n; (n = fread(buf, 1, sizeof buf, f)) > 0;)
-            text.append(buf, n);
-        fclose(f);
+        if (f) {
+            char buf[4096];
+            for (size_t n; (n = fread(buf, 1, sizeof buf, f)) > 0;)
+                text.append(buf, n);
+            fclose(f);
+        }
         const std::string want = "setvar " + key + " = " + value;
         std::string out;
         bool found = false, changed = false;
