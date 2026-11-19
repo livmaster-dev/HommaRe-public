@@ -12,7 +12,9 @@
 //     there. So a channel keeps its own byte cursor rather than asking the
 //     player, which knows nothing once it is stopped.
 //   * Pan is an attenuation of one channel, not a position (see audio.h). It
-//     is applied to the samples, which is also what lets it be exact.
+//     is a gain the player applies as it renders, like the volume, so a pan
+//     change is live and costs nothing: FMOD pans every 3D sound again
+//     whenever the camera moves.
 //   * SetFrequency takes effect immediately, mid-sound. A rate change
 //     re-schedules the rest of the buffer at the new rate from the cursor it
 //     had reached. The sound continues; it just continues faster.
@@ -166,11 +168,12 @@ void trace(const char *fmt, ...) {
 
 // --- the players -------------------------------------------------------------
 //
-// A segment is one scheduled buffer: stereo floats at its own rate with the
-// pan already applied. A player plays its segments in order, resampling each
-// to the render rate with a six-tap Lanczos kernel. Band-limited
-// interpolation of a signal already at full scale lands above it - which is
-// what the clipper is for, and what its test measures.
+// A segment is one scheduled buffer: floats at its own rate. The pan is the
+// player's, applied as it renders, so a pan change touches no samples. A
+// player plays its segments in order, resampling each to the render rate with
+// a six-tap Lanczos kernel. Band-limited interpolation of a signal already at
+// full scale lands above it - which is what the clipper is for, and what its
+// test measures.
 struct Segment {
     std::vector<float> l, r, extra[4];
     unsigned channels = 2;
@@ -194,8 +197,16 @@ struct Player {
     double pos = 0;    // within the front segment, in its frames
     double played = 0; // frames rendered since play(), at the source rates
     float volume = 1.0f;
+    // The pan's gains on the front pair, live like the volume. They used to be baked into the
+    // segment, so every pan change decoded the rest of the sound again on the caller's thread: an
+    // FMOD 3D sound gets a new pan whenever the camera moves, and on the adventure map's ambient
+    // loops that was most of the game thread's frame (60 ms frames while scrolling, ToE, M4).
+    float pan_l = 1.0f, pan_r = 1.0f;
     bool playing = false;
 };
+void set_player_pan(Player &p, int32_t pan_mb) {
+    host_audio_pan_gains(pan_mb, &p.pan_l, &p.pan_r);
+}
 
 std::mutex g_render_mutex;
 std::map<int32_t, Player> g_players; // render mutex
@@ -249,7 +260,10 @@ void render_player(int32_t id, Player &p, float *const *out, uint32_t frames) {
         }
         float values[6] = {};
         sample_at(s, p.pos, values);
-        for (unsigned c = 0; c < s.channels; ++c)
+        // Pan applies only to the front pair, matching the DirectSound behaviour.
+        out[0][i] += values[0] * p.volume * p.pan_l;
+        out[1][i] += values[1] * p.volume * p.pan_r;
+        for (unsigned c = 2; c < s.channels; ++c)
             out[c][i] += values[c] * p.volume;
         const double step = double(s.rate) / g_render_rate;
         p.pos += step;
@@ -553,10 +567,9 @@ uint32_t align_down(uint32_t bytes, uint32_t frame) {
     return frame ? bytes - (bytes % frame) : bytes;
 }
 
-// Decode a scheduled buffer without losing channel layout. Pan applies only
-// to the front pair, matching the existing mono/stereo DirectSound behavior.
-uint32_t decode_segment(Segment &s, const void *pcm, uint32_t bytes, int bits, int channels,
-                        int32_t pan) {
+// Decode a scheduled buffer without losing channel layout. The pan is the
+// player's (render_player), not the samples'.
+uint32_t decode_segment(Segment &s, const void *pcm, uint32_t bytes, int bits, int channels) {
     const uint32_t frames = bytes / host_audio_frame_bytes(bits, channels);
     s.channels = channels == 6 ? 6 : 2;
     float *planes[6] = {};
@@ -565,12 +578,6 @@ uint32_t decode_segment(Segment &s, const void *pcm, uint32_t bytes, int bits, i
         planes[c] = s.plane(c).data();
     }
     const uint32_t written = host_audio_decode_planes(pcm, bytes, bits, channels, planes, frames);
-    float lg = 1, rg = 1;
-    host_audio_pan_gains(pan, &lg, &rg);
-    for (uint32_t i = 0; i < written; ++i) {
-        s.l[i] *= lg;
-        s.r[i] *= rg;
-    }
     for (unsigned c = 0; c < s.channels; ++c)
         s.plane(c).resize(written);
     return written;
@@ -581,7 +588,7 @@ std::shared_ptr<Segment> make_segment(const Channel &ch, uint32_t from, uint32_t
         return nullptr;
     auto s = std::make_shared<Segment>();
     s->rate = ch.rate ? ch.rate : ch.base_rate;
-    return decode_segment(*s, ch.pcm.data() + from, to - from, ch.bits, ch.channels, ch.pan_mb)
+    return decode_segment(*s, ch.pcm.data() + from, to - from, ch.bits, ch.channels)
                ? s
                : nullptr;
 }
@@ -596,6 +603,7 @@ struct Job {
     std::shared_ptr<Segment> whole; // non-null: loop this after the head
     bool head_loops = false;
     float volume = 1.0f;
+    int32_t pan_mb = 0;
     uint32_t from = 0, to = 0; // for the stand-in ops
     bool loop = false;
 };
@@ -620,6 +628,7 @@ Job plan_locked(int32_t id, Channel &ch, uint32_t from) {
     job.id = id;
     job.generation = ch.generation;
     job.volume = host_audio_gain_from_millibels(ch.volume_mb);
+    job.pan_mb = ch.pan_mb;
     job.from = from;
     job.to = total;
     job.loop = ch.loop;
@@ -664,6 +673,7 @@ void perform(const Job &job) {
         p.pos = 0;
         p.played = 0;
         p.volume = job.volume;
+        set_player_pan(p, job.pan_mb);
         job.head->loop = job.head_loops;
         job.head->completion = job.whole || job.head_loops ? 0 : 1;
         job.head->generation = job.generation;
@@ -939,6 +949,7 @@ extern "C" int32_t host_audio_write(int32_t id, const void *pcm, uint32_t offset
     std::shared_ptr<Segment> ring, head;
     uint32_t accepted = 0;
     float volume = 1.0f;
+    int32_t pan_mb = 0;
     {
         DataLock held;
         Channel *channel = channel_for(id, false);
@@ -999,6 +1010,7 @@ extern "C" int32_t host_audio_write(int32_t id, const void *pcm, uint32_t offset
             schedule_ring = true;
             ring = channel->ring;
             volume = host_audio_gain_from_millibels(channel->volume_mb);
+            pan_mb = channel->pan_mb;
         } else {
             // The ordinary case, and the whole point: samples straight into
             // the segment the player is looping. No player call, no seam.
@@ -1011,7 +1023,7 @@ extern "C" int32_t host_audio_write(int32_t id, const void *pcm, uint32_t offset
                 return 0;
             Segment incoming;
             uint32_t written = decode_segment(incoming, pcm, accepted, channel->bits,
-                                              channel->channels, channel->pan_mb);
+                                              channel->channels);
             const auto &nl = incoming.l, &nr = incoming.r;
             // Where the samples change is a step, and a step of any size is a
             // click. When the run has landed on top of the play head the old
@@ -1110,6 +1122,7 @@ extern "C" int32_t host_audio_write(int32_t id, const void *pcm, uint32_t offset
             p.pos = 0;
             p.played = 0;
             p.volume = volume;
+            set_player_pan(p, pan_mb);
             if (head) {
                 head->loop = false;
                 head->completion = 0;
@@ -1262,7 +1275,7 @@ extern "C" int32_t host_audio_queue(int32_t id, const void *pcm, uint32_t bytes)
             buffer = std::make_shared<Segment>();
             buffer->rate = channel->rate ? channel->rate : channel->base_rate;
             uint32_t written = decode_segment(*buffer, pcm, accepted, channel->bits,
-                                              channel->channels, channel->pan_mb);
+                                              channel->channels);
             buffer->completion = 2;
             buffer->bytes = accepted;
             if (!written)
@@ -1691,10 +1704,10 @@ extern "C" void host_audio_set_volume(int32_t id, int32_t volume) {
     g_players[id].volume = gain;
 }
 
-// Pan and frequency both live in the samples or in the segment's rate, so a
-// live change re-schedules the rest of the sound from where it had reached.
-// The sound does not restart. The player time is read, and the new
-// scheduling is performed, with the lock released.
+// The frequency lives in the segment's rate, so a live change re-schedules the
+// rest of the sound from where it had reached. The sound does not restart. The
+// player time is read, and the new scheduling is performed, with the lock
+// released.
 // `apply` changes the channel and says whether what is sounding has to be
 // redone. It must not say so through ch.playing: that is the channel's own
 // state, and a voice marked stopped there reads as finished to the guest (an
@@ -1730,13 +1743,22 @@ template <class Apply> static void reschedule_from_current(int32_t id, Apply app
     perform(job);
 }
 
+// Live, like the volume: the player applies it as it renders, so nothing is
+// decoded or rescheduled and the sound goes on from where it is.
 extern "C" void host_audio_set_pan(int32_t id, int32_t pan) {
     std::lock_guard<std::mutex> api(g_api_mutex);
-    reschedule_from_current(id, [pan](Channel &ch) {
-        const bool changed = ch.pan_mb != pan;
-        ch.pan_mb = pan;
-        return changed;
-    });
+    {
+        DataLock held;
+        Channel *channel = channel_for(id, true);
+        if (!channel || channel->pan_mb == pan)
+            return;
+        channel->pan_mb = pan;
+    }
+    audio_check_unlocked("setting a player's pan");
+    if (g_ops)
+        return;
+    std::lock_guard<std::mutex> render(g_render_mutex);
+    set_player_pan(g_players[id], pan);
 }
 
 extern "C" void host_audio_set_frequency(int32_t id, uint32_t hz) {
