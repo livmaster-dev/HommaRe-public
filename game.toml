@@ -66,6 +66,10 @@ store_hooks = false
 flag_liveness = "cfg"
 # The eight registers live in C locals inside each translated body.
 reg_cache = true
+# The six arithmetic flags in C locals as well, stored to the context only at
+# calls, returns and the helpers that read them, and only when changed (2026-11-19,
+# translate.py cache_flags). Off until a map benchmark and the Unicorn run say so.
+flag_cache = false
 # Stores into the renderer's lazy vertex buffers are caught by page protection
 # (dx/d3d9.cpp), so the translated stores carry no tracking compare: that
 # compare, two global loads after every store, was a fifth of the zoomed-out

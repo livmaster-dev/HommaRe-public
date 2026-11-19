@@ -65,6 +65,8 @@ store_hooks = false
 # in C locals inside each translated body.
 flag_liveness = "cfg"
 reg_cache = true
+# As in the base game: flags in locals, off until measured.
+flag_cache = false
 # As in the base game (game.toml there): lazy buffers by page protection, guest
 # memory at a fixed address (macOS), and the CALL continuation hint for RET.
 write_track = "protect"

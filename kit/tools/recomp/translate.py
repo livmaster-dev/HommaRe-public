@@ -56,6 +56,13 @@ FLAG_LIVENESS = "block"
 # them. Locals are not reloaded after every guest store, which may alias the
 # context as far as the C compiler knows.
 REG_CACHE = False
+# game.toml [translate] flag_cache: keep the six arithmetic flags in C locals
+# inside each function body too (cache_flags), stored to the context only
+# where something else can read them and only when changed since the last
+# store, and read again after anything that may write them. With the flags in
+# the context every flag store is a memory store the C compiler must keep,
+# since a guest store may alias the context; a local it drops when dead.
+FLAG_CACHE = False
 # game.toml [translate] ret_hint: each CALL stores its continuation in
 # c->ret_expect, each function takes it on entry, and a RET that pops it back
 # returns without recomp_return's continuation lookup (runtime/x86.h).
@@ -100,8 +107,9 @@ def configure_module(cfg, key):
     global RESUMABLE_STACKS, FLAG_LIVENESS
     RESUMABLE_STACKS = cfg["translate"].get("resumable_stacks", False)
     FLAG_LIVENESS = cfg["translate"].get("flag_liveness", "block")
-    global REG_CACHE, RET_HINT
+    global REG_CACHE, RET_HINT, FLAG_CACHE
     REG_CACHE = bool(cfg["translate"].get("reg_cache", False))
+    FLAG_CACHE = bool(cfg["translate"].get("flag_cache", False))
     RET_HINT = bool(cfg["translate"].get("ret_hint", False))
     mods = {m["key"]: m for m in cfg.get("aux_modules", [])}
     if key not in mods:
@@ -158,8 +166,9 @@ def configure(cfg):
     global RESUMABLE_STACKS, FLAG_LIVENESS
     RESUMABLE_STACKS = cfg["translate"].get("resumable_stacks", False)
     FLAG_LIVENESS = cfg["translate"].get("flag_liveness", "block")
-    global REG_CACHE, RET_HINT
+    global REG_CACHE, RET_HINT, FLAG_CACHE
     REG_CACHE = bool(cfg["translate"].get("reg_cache", False))
+    FLAG_CACHE = bool(cfg["translate"].get("flag_cache", False))
     RET_HINT = bool(cfg["translate"].get("ret_hint", False))
     EXTRA_ENTRY_POINTS = frozenset(int(a) for a in cfg["translate"].get("entry_points", ()))
     global DATA_RANGES
@@ -914,6 +923,215 @@ def cache_registers(out, prologue):
         if reload and not re.search(r"\breturn;\s*(/\*.*\*/)?$", stripped):
             rewritten.append(indent + " ".join("r%d_ = c->r[%d];" % (r, r) for r in reload))
     decl = "    uint32_t " + ", ".join("r%d_ = c->r[%d]" % (r, r) for r in sorted(used)) + ";"
+    return [out[0], decl] + out[1:prologue] + rewritten
+
+
+# ------------------------------------------------------------ flag cache --
+
+#: Helpers that take the context but never read or write the six arithmetic
+#: flags (runtime/x86.h). FCOM and FUCOM report into the FPU status word, not
+#: EFLAGS; FCOMI, FUCOMI and COMISS/COMISD (recomp_comis) do write EFLAGS and
+#: are in FLAG_HELPERS instead. test_translate_flags.py checks both tables
+#: against x86.h.
+FLAG_FREE_HELPERS = frozenset((
+    "ST", "xmm_f32", "xmm_set_f32", "xmm_f64", "xmm_set_f64", "fdrop", "fset", "fpop",
+    "fx87", "fx87_exact", "fto_float", "fto_i16", "fto_i32", "fto_i64",
+    "fpush", "fpush_st", "fpush_int", "fcopy", "fxch", "fstsw", "fcom", "fucom", "fdivz",
+    "fround_cw", "x87_set_cw", "fist_i16", "fist_i32", "fist_i64", "fistt_i32", "fistt_i64"))
+_SHIFT_FLAGS = frozenset(("cf", "of", "pf", "sf", "zf"))
+_MUL_FLAGS = frozenset(("cf", "of"))
+_SAHF_FLAGS = frozenset(("cf", "pf", "af", "zf", "sf"))
+#: Helpers that read or write some flags in the context, as (stored before the
+#: call, read again after it). A helper that reads a flag, or may leave one
+#: alone (a shift by a zero count), needs it stored first; one that always
+#: writes a flag only needs it read back.
+FLAG_HELPERS = {
+    "recomp_comis": (NO_FLAGS, ALL_FLAGS),
+    "fcomi": (NO_FLAGS, ALL_FLAGS), "fucomi": (NO_FLAGS, ALL_FLAGS),
+    "x86_get_eflags": (ALL_FLAGS, NO_FLAGS),
+    "x86_set_eflags": (NO_FLAGS, ALL_FLAGS),
+    "x86_sahf": (NO_FLAGS, _SAHF_FLAGS),
+    "shld32_f": (_SHIFT_FLAGS, _SHIFT_FLAGS), "shrd32_f": (_SHIFT_FLAGS, _SHIFT_FLAGS),
+    "mul8": (NO_FLAGS, _MUL_FLAGS), "mul16": (NO_FLAGS, _MUL_FLAGS),
+    "mul32": (NO_FLAGS, _MUL_FLAGS), "imul8": (NO_FLAGS, _MUL_FLAGS),
+    "imul16": (NO_FLAGS, _MUL_FLAGS), "imul32": (NO_FLAGS, _MUL_FLAGS),
+    "imul2_16_f": (NO_FLAGS, _MUL_FLAGS), "imul2_32_f": (NO_FLAGS, _MUL_FLAGS),
+    "bsr32_f": (NO_FLAGS, frozenset(("zf",))), "bsf32_f": (NO_FLAGS, frozenset(("zf",))),
+}
+FLAG_ORDER = ("cf", "zf", "sf", "of", "pf", "af")
+_FLAG_REF = re.compile(r"c->eflags_(cf|zf|sf|of|pf|af)\b")
+_FLAG_WRITE = re.compile(
+    r"(?:\+\+|--)\s*c->eflags_(cf|zf|sf|of|pf|af)\b"
+    r"|c->eflags_(cf|zf|sf|of|pf|af)\s*(?:=(?!=)|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=|\+\+|--)")
+_BARE_CTX = re.compile(r"(?<![\w.>])c\b(?!\s*->)")
+_COMMENT = re.compile(r"/\*.*?\*/")
+# A macro may use the context without naming it: only these are known not to
+# (ST takes it as an argument; the call macros are observers anyway).
+_UPPER_CALL = re.compile(r"\b([A-Z][A-Z0-9_]+)\s*\(")
+_KNOWN_MACROS = frozenset(("ST", "CALL_FN", "CALL_IND", "JUMP_FN", "FN"))
+_RETURN = re.compile(r"\breturn\b")
+# A line whose last statement is an unconditional return (not `if (x) return;`).
+_ENDS_RETURNING = re.compile(r"(?:^|[;{}]\s*)return;$")
+_GOTO = re.compile(r"\bgoto\s+L_([0-9a-f]{8})\s*;")
+_LABEL_DEF = re.compile(r"^L_([0-9a-f]{8}):")
+_LABEL_ANY = re.compile(r"\bL_([0-9a-f]{8})\b")
+
+
+def flag_helper_flags(name):
+    """(stored before, read again after) for a context-taking helper, or None
+    when nothing says it leaves any flag alone (a translated function, a
+    runtime service)."""
+    if name in FLAG_FREE_HELPERS:
+        return (NO_FLAGS, NO_FLAGS)
+    if REG_FREE_HELPER_RE.match(name):
+        return (_SHIFT_FLAGS, _SHIFT_FLAGS)
+    return FLAG_HELPERS.get(name)
+
+
+def cache_flags(out, prologue):
+    """FLAG_CACHE: rewrite one function's lines (out[:prologue] is its opening
+    and dispatch) so c->eflags_cf/zf/sf/of/pf/af live in locals fcf_ ... faf_.
+
+    A line through which something outside the function may see the flags - a
+    call to a translated function or a runtime service, a helper that reads
+    or writes them (FLAG_HELPERS), a return, an indirect jump - keeps the
+    context form for its own flag references. Before it, the flags it may read
+    are stored, but only those a path from the last store or reload can have
+    changed ("dirty"); after it, the flags it may write are read again. The
+    dirty sets come from a forward pass over the lines: a goto carries its set
+    to its label, an if or switch block joins the path that skipped it, and a
+    label named other than by a goto starts with every flag dirty.
+
+    Returns None, leaving the function as it was, where that cannot be done
+    safely: setjmp and SEH frames, a flag whose address is taken, a C loop or
+    an else, a label inside a block, and the placements cache_registers
+    refuses (an observing line that also jumps, opens a block or starts with
+    else, a closing brace, case or default)."""
+    head, body = out[:prologue], out[prologue:]
+    text = "\n".join(body)
+    if ("setjmp" in text or "seh_" in text or "seh_mark_" in "\n".join(head)
+            or "&c->eflags" in text):
+        return None
+    cached = frozenset(_FLAG_REF.findall(text))
+    if not cached:
+        return None
+    n = len(body)
+    codes = [_COMMENT.sub("", line).strip() for line in body]
+    spill_at = []        # flags stored before each line, if dirty
+    reload_at = []       # flags read again after each line
+    writes = []          # flags a plain line assigns
+    gotos = []
+    label_at = []
+    # Blocks each line opens less those it closes. The generated code has no
+    # braces in strings or characters, and comments are already gone.
+    braces = [code.count("{") - code.count("}") for code in codes]
+    for code in codes:
+        refs = frozenset(_FLAG_REF.findall(code))
+        spill, reload = NO_FLAGS, NO_FLAGS
+        if (_MACRO_CALL.search(code) or _RETURN.search(code)
+                or any(m not in _KNOWN_MACROS for m in _UPPER_CALL.findall(code))
+                or len(_BARE_CTX.findall(code)) > len(_CTX_CALL.findall(code))):
+            spill = reload = ALL_FLAGS   # the context reaches something unnamed
+        else:
+            for name in _CTX_CALL.findall(code):
+                f = flag_helper_flags(name)
+                if f is None:
+                    spill = reload = ALL_FLAGS
+                    break
+                spill, reload = spill | f[0], reload | f[1]
+        if spill or reload:
+            spill_at.append((spill | refs) & cached)
+            reload_at.append((reload | refs) & cached)
+            writes.append(NO_FLAGS)
+        else:
+            spill_at.append(NO_FLAGS)
+            reload_at.append(NO_FLAGS)
+            writes.append(frozenset(a or b for a, b in _FLAG_WRITE.findall(code)) & cached)
+        gotos.append(_GOTO.findall(code))
+        m = _LABEL_DEF.match(code)
+        label_at.append(m.group(1) if m else None)
+    # A label named other than by a goto in this body (a pushed return
+    # address, say) can be reached from anywhere: it starts fully dirty.
+    label_in = {}
+    for code in codes:
+        for lab in _LABEL_ANY.findall(_LABEL_DEF.sub("", _GOTO.sub("", code))):
+            label_in[lab] = set(cached)
+    before = [NO_FLAGS] * n
+    while True:
+        changed = False
+        dirty = set()
+        stack = []
+        for i in range(n):
+            code = codes[i]
+            if label_at[i] is not None:
+                if stack:
+                    return None
+                dirty |= label_in.setdefault(label_at[i], set())
+            if code.startswith(("case ", "default")):
+                if not stack or stack[-1][0] != "cond":
+                    return None
+                dirty |= stack[-1][1]        # entered from the switch
+            before[i] = frozenset(dirty)
+            if spill_at[i] or reload_at[i]:
+                dirty -= spill_at[i]         # stored before the line
+                dirty -= reload_at[i]        # read again after it
+            else:
+                dirty |= writes[i]
+            for target in gotos[i]:
+                want = label_in.setdefault(target, set())
+                if not dirty <= want:
+                    want |= dirty
+                    changed = True
+            net = braces[i]
+            if net == -1 and code.endswith("}") and (code == "}" or not code.startswith("}")):
+                # `}` alone, or a statement that closes its block: after the
+                # line's own effects, the block ends here.
+                if "else" in code or not stack:
+                    return None
+                kind, other = stack.pop()
+                if kind == "cond":
+                    dirty |= other           # the path that skipped the block
+            elif net == 1 and "else" not in code and not code.startswith("}"):
+                if code.startswith("{"):
+                    stack.append(("block", None))
+                elif code.startswith(("if ", "if(", "switch ", "switch(")) and code.endswith("{"):
+                    stack.append(("cond", set(dirty)))
+                else:
+                    return None              # a loop, a do: not modelled
+            elif net != 0 or (code.startswith("}") and code != "}"):
+                return None                  # an else, a do-while's end
+        if stack:
+            return None
+        if not changed:
+            break
+    rewritten = []
+    for i, line in enumerate(body):
+        if not (spill_at[i] or reload_at[i]):
+            rewritten.append(_FLAG_REF.sub(lambda m: "f%s_" % m.group(1), line)
+                             if writes[i] or "c->eflags_" in line else line)
+            continue
+        code = codes[i]
+        spill = [f for f in FLAG_ORDER if f in spill_at[i] and f in before[i]]
+        reload = [f for f in FLAG_ORDER if f in reload_at[i]]
+        indent = line[:len(line) - len(line.lstrip())]
+        pre = " ".join("c->eflags_%s = f%s_;" % (f, f) for f in spill)
+        # A jump-table arm that leaves the function (`default: c->eip = ...;
+        # recomp_jump(c, t_); return;`, `case ...: JUMP_FN(...);`): the store
+        # goes after its label, and nothing follows it to reload for.
+        if (code.startswith(("case ", "default")) and "goto " not in code
+                and (code.endswith("return;") or "JUMP_FN(" in code)):
+            label, rest = line.strip().split(":", 1)
+            rewritten.append(indent + label + ":" + (" " + pre if pre else "") + rest)
+            continue
+        if "goto " in code or code.startswith(("else", "}", "case ", "default")):
+            return None   # the store or the reload would land where control does not pass
+        if code.endswith("{"):
+            return None   # the reload would land inside the block the line opens
+        rewritten.append(indent + pre + " " + line.strip() if pre else line)
+        if reload and not _ENDS_RETURNING.search(code):
+            rewritten.append(indent + " ".join("f%s_ = c->eflags_%s;" % (f, f) for f in reload))
+    decl = "    uint32_t " + ", ".join("f%s_ = c->eflags_%s" % (f, f)
+                                       for f in FLAG_ORDER if f in cached) + ";"
     return [out[0], decl] + out[1:prologue] + rewritten
 
 
@@ -3014,9 +3232,18 @@ class Translator(object):
             cached = cache_registers(out, prologue)
             if cached is not None:
                 out = cached
+                prologue += 1            # its declaration
                 self.stats["_reg_cache"] += 1
             else:
                 self.stats["_reg_cache_skipped"] += 1
+        if FLAG_CACHE:
+            cached = cache_flags(out, prologue)
+            if cached is not None:
+                out = cached
+                prologue += 1
+                self.stats["_flag_cache"] += 1
+            else:
+                self.stats["_flag_cache_skipped"] += 1
         out.append("}")
         if entries:
             out.append("void fn_%08x(X86 *c) { body_%08x(c, 0u); }" % (fn.addr, fn.addr))
@@ -6123,11 +6350,13 @@ def main():
         lines = [l for l in body[1:] if l.strip()]
         # Host-only ownership bookkeeping does not execute a guest instruction
         # or modify its CPU. The first guest operation must still reach ADDR.
-        # REG_CACHE: loading the register locals does not touch the guest;
+        # REG_CACHE: loading the register locals does not touch the guest,
+        # nor does copying the flags (FLAG_CACHE);
         # RET_HINT: nor does taking the caller's continuation. They come in
         # whichever order the passes put them.
         while lines and (lines[0].strip() == "uint64_t seh_mark_ = recomp_seh_frame_mark(c);"
                          or (lines[0].strip().startswith("uint32_t r") and "= c->r[" in lines[0])
+                         or (lines[0].strip().startswith("uint32_t f") and "= c->eflags_" in lines[0])
                          or lines[0].strip() == "const uint32_t ret_exp_ = c->ret_expect;"):
             lines = lines[1:]
         if not lines:

@@ -12,7 +12,8 @@ arithmetic flags and the scratch memory both sides wrote must agree.
 No game is needed: the cases are their own machine code.  A translator that
 cannot emit a case fails that case's test with the translator's error, and
 the remaining cases still build and run.  clang must be on PATH (a skip
-otherwise)."""
+otherwise).  Every case runs twice: with the guest registers and flags in the
+context, and with game.toml's reg_cache and flag_cache on (CACHE_MODES)."""
 
 import ctypes as C
 import os
@@ -936,10 +937,26 @@ class Native(object):
         C.memset(C.addressof(self.mem.contents) + addr, 0, n)
 
 
-@pytest.fixture(scope="module")
-def built():
+#: How the translated bodies keep the guest state: "context" (registers and
+#: flags in struct X86, as with reg_cache and flag_cache off) or "cached"
+#: (game.toml reg_cache and flag_cache on: both in C locals, stored at calls
+#: and returns). Each mode is its own library and its own run of every case.
+CACHE_MODES = ("context", "cached")
+
+
+@pytest.fixture(scope="module", params=CACHE_MODES)
+def built(request):
     """Translate every case, compile the ones that translated into one shared
     library with the harness, and return (Native, {case name: error})."""
+    saved = T.REG_CACHE, T.FLAG_CACHE
+    T.REG_CACHE = T.FLAG_CACHE = request.param == "cached"
+    try:
+        return build_cases()
+    finally:
+        T.REG_CACHE, T.FLAG_CACHE = saved
+
+
+def build_cases():
     clang = shutil.which("clang")
     if clang is None:
         pytest.skip("clang is not on PATH")
