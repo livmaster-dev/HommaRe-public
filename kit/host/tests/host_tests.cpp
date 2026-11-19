@@ -3258,6 +3258,133 @@ static void test_audio_ring_and_clock() {
 // the report from that run was that most of the effects were not heard. The
 // two questions this asks are whether the second sound is audible from its
 // own onset and whether the first is really gone afterwards.
+// A pan change is a gain the player applies as it renders: it takes effect at
+// once, the sound goes on from where it was, and it reaches a play that starts
+// with a pan and a stream's later chunks. It used to be baked into the samples,
+// so every change decoded the rest of the sound again on the game thread, and
+// FMOD pans every 3D sound again whenever the camera moves.
+static void test_audio_pan_is_live() {
+    {
+        // Through the player stand-ins: sixty pan changes on a looping sound,
+        // as many frames of a moving camera, schedule nothing again. A
+        // frequency change still does, which says the stand-ins are watching.
+        HostAudioNodeOps ops = {fake_stop, fake_play, fake_schedule, fake_queue};
+        host_audio_set_node_ops(&ops);
+        g_fake_stops = g_fake_plays = g_fake_schedules = 0;
+        g_fake_pending = 0;
+        std::vector<uint8_t> loop(22050 * 4, 0);
+        HostAudioPlay lp;
+        memset(&lp, 0, sizeof lp);
+        lp.channel = 40;
+        lp.pcm = loop.data();
+        lp.bytes = (uint32_t)loop.size();
+        lp.sample_rate = 22050;
+        lp.channels = 2;
+        lp.bits = 16;
+        lp.loop = 1;
+        host_audio_play(&lp);
+        const int stops = g_fake_stops, schedules = g_fake_schedules, plays = g_fake_plays;
+        CHECK_EQ(schedules, 1);
+        for (int frame = 0; frame < 60; ++frame)
+            host_audio_set_pan(40, (frame % 2 ? 1 : -1) * (100 + frame * 10));
+        CHECK_EQ(g_fake_schedules, schedules);
+        CHECK_EQ(g_fake_stops, stops);
+        CHECK_EQ(g_fake_plays, plays);
+        host_audio_set_frequency(40, 30000);
+        CHECK(g_fake_schedules > schedules);
+        host_audio_stop(40);
+        host_audio_set_pan(40, 0);
+        host_audio_set_node_ops(nullptr);
+    }
+    const double rate = 48000.0;
+    if (!host_audio_offline_begin(rate, 4096)) {
+        printf("  (this machine has no audio engine, so the pan is not tested)\n");
+        return;
+    }
+    // A rising ramp, the same on both sides: its level says how far the sound
+    // has played, so a restart would show as a drop to nothing.
+    const uint32_t hz = 24000;
+    const float top = 26000.0f / 32768.0f;
+    auto ramp = [&](std::vector<uint8_t> &pcm, double seconds) {
+        uint32_t frames = (uint32_t)(hz * seconds);
+        pcm.resize((size_t)frames * 4);
+        for (uint32_t i = 0; i < frames; ++i) {
+            int16_t v = (int16_t)(26000.0 * i / frames);
+            for (int c = 0; c < 2; ++c) {
+                pcm[(size_t)(i * 2 + c) * 2] = (uint8_t)(v & 0xff);
+                pcm[(size_t)(i * 2 + c) * 2 + 1] = (uint8_t)((v >> 8) & 0xff);
+            }
+        }
+    };
+    std::vector<float> planes[6];
+    float *out[6];
+    auto render = [&](uint32_t n) {
+        for (int c = 0; c < 6; ++c) {
+            planes[c].assign(n, 0.0f);
+            out[c] = planes[c].data();
+        }
+        CHECK_EQ(host_audio_offline_render_planes(n, out), n);
+    };
+    float gl = 1, gr = 1;
+    host_audio_pan_gains(-602, &gl, &gr);
+    CHECK(gr < gl * 0.6f);
+
+    std::vector<uint8_t> pcm;
+    ramp(pcm, 1.0);
+    const int32_t CH = 41;
+    HostAudioPlay p;
+    memset(&p, 0, sizeof p);
+    p.channel = CH;
+    p.pcm = pcm.data();
+    p.bytes = (uint32_t)pcm.size();
+    p.sample_rate = (int32_t)hz;
+    p.channels = 2;
+    p.bits = 16;
+    host_audio_play(&p);
+    render(12000); // a quarter of the sound
+    CHECK(fabsf(planes[0][11990] - planes[1][11990]) < 1e-4f);
+    CHECK(fabsf(planes[0][11990] - top * 0.25f) < 0.01f);
+
+    const uint32_t before = host_audio_position(CH);
+    host_audio_set_pan(CH, -602);
+    CHECK(host_audio_position(CH) >= before);
+    render(12000);
+    printf("  (after the pan: L %.4f R %.4f, wanted %.4f / %.4f)\n", planes[0][10],
+           planes[1][10], top * 0.25f * gl, top * 0.25f * gr);
+    CHECK(fabsf(planes[0][10] - top * 0.25f * gl) < 0.01f); // went on, not restarted
+    CHECK(fabsf(planes[1][10] - top * 0.25f * gr) < 0.01f);
+    host_audio_set_pan(CH, 0);
+    render(480);
+    CHECK(fabsf(planes[0][400] - planes[1][400]) < 1e-4f);
+    host_audio_stop(CH);
+
+    // A play that carries its own pan.
+    p.pan = -602;
+    host_audio_play(&p);
+    render(12000);
+    CHECK(planes[0][11990] > 0.1f);
+    CHECK(fabsf(planes[0][11990] * gr - planes[1][11990] * gl) < 1e-3f);
+    host_audio_stop(CH);
+
+    // A stream: a pan change between its chunks reaches the queued one.
+    p.pan = 0;
+    std::vector<uint8_t> chunk;
+    ramp(chunk, 0.1);
+    p.pcm = chunk.data();
+    p.bytes = (uint32_t)chunk.size();
+    host_audio_play(&p);
+    host_audio_stream(CH);
+    host_audio_set_pan(CH, -602);
+    CHECK(host_audio_queue(CH, chunk.data(), (uint32_t)chunk.size()) > 0);
+    render(9600);
+    const float ql = planes[0][8800], qr = planes[1][8800];
+    CHECK(ql > 0.1f);
+    CHECK(fabsf(ql * gr - qr * gl) < 1e-3f);
+    host_audio_stop(CH);
+    host_audio_set_pan(CH, 0);
+    host_audio_offline_end();
+}
+
 static void test_audio_replace_on_one_channel() {
     const double rate = 48000.0;
     if (!host_audio_offline_begin(rate, 4096)) {
@@ -11986,6 +12113,7 @@ int main(int argc, char **argv) {
         test_audio_clipper_takes_only_the_overshoot();
         test_audio_ring_and_clock();
         test_audio_replace_on_one_channel();
+        test_audio_pan_is_live();
         test_audio_every_sound_started_is_heard();
         test_audio_voice_remaining_versus_queued();
         printf("audio: %d checks, %d failures\n", g_checks, g_failures);
@@ -12160,6 +12288,7 @@ int main(int argc, char **argv) {
         {"clipper", test_audio_clipper_takes_only_the_overshoot},
         {"ring and clock", test_audio_ring_and_clock},
         {"replace on a channel", test_audio_replace_on_one_channel},
+        {"pan is live", test_audio_pan_is_live},
         {"every sound heard", test_audio_every_sound_started_is_heard},
         {"voice vs queued", test_audio_voice_remaining_versus_queued},
         {"primitive expansion", test_primitive_expansion},

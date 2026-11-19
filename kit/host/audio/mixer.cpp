@@ -12,7 +12,9 @@
 //     there. So a channel keeps its own byte cursor rather than asking the
 //     player, which knows nothing once it is stopped.
 //   * Pan is an attenuation of one channel, not a position (see audio.h). It
-//     is applied to the samples, which is also what lets it be exact.
+//     is a gain the player applies as it renders, like the volume, so a pan
+//     change is live and costs nothing: FMOD pans every 3D sound again
+//     whenever the camera moves.
 //   * SetFrequency takes effect immediately, mid-sound. A rate change
 //     re-schedules the rest of the buffer at the new rate from the cursor it
 //     had reached. The sound continues; it just continues faster.
@@ -167,10 +169,11 @@ void trace(const char *fmt, ...) {
 // --- the players -------------------------------------------------------------
 //
 // A segment is one scheduled buffer: floats at its own rate. The pan is the
-// player's, applied as it renders, so a pan change touches no samples. A player plays its segments in order, resampling each
-// to the render rate with a six-tap Lanczos kernel. Band-limited
-// interpolation of a signal already at full scale lands above it - which is
-// what the clipper is for, and what its test measures.
+// player's, applied as it renders, so a pan change touches no samples. A
+// player plays its segments in order, resampling each to the render rate with
+// a six-tap Lanczos kernel. Band-limited interpolation of a signal already at
+// full scale lands above it - which is what the clipper is for, and what its
+// test measures.
 struct Segment {
     std::vector<float> l, r, extra[4];
     unsigned channels = 2;
@@ -1701,9 +1704,10 @@ extern "C" void host_audio_set_volume(int32_t id, int32_t volume) {
     g_players[id].volume = gain;
 }
 
-// The frequency lives in the segment's rate, so a live change re-schedules the rest of the sound from where it had reached.
-// The sound does not restart. The player time is read, and the new
-// scheduling is performed, with the lock released.
+// The frequency lives in the segment's rate, so a live change re-schedules the
+// rest of the sound from where it had reached. The sound does not restart. The
+// player time is read, and the new scheduling is performed, with the lock
+// released.
 // `apply` changes the channel and says whether what is sounding has to be
 // redone. It must not say so through ch.playing: that is the channel's own
 // state, and a voice marked stopped there reads as finished to the guest (an
