@@ -90,11 +90,12 @@ still refuses to open a video.
 iOS cross-builds for arm64 and iOS 17.0 with the iPhoneOS SDK. Xcode embeds
 the three dylibs in `Frameworks/` and signs them on copy with the app's
 development identity/team; the executable uses `@executable_path/Frameworks`.
-Android cross-builds with the selected NDK's arm64 API-29 compiler and
-packages unversioned `libavformat.so`, `libavcodec.so` and `libavutil.so`
-beside `libmain.so` under `lib/arm64-v8a/`. No Gradle packaging override is
-needed. The mobile cross builds and Android APK contents are verified;
-iOS embedded signatures and mobile device playback remain unverified.
+Android cross-builds with the selected NDK's API-29 compiler for each ABI
+the APK carries (x86_64 and arm64-v8a) and packages unversioned
+`libavformat.so`, `libavcodec.so` and `libavutil.so` beside `libmain.so`
+under `lib/<abi>/`. The mobile cross builds and Android APK contents are
+verified; iOS embedded signatures and mobile device playback remain
+unverified.
 
 Linux uses CMake's native C compiler and `--enable-pic`. The desktop packager
 copies `libavformat.so.61`, `libavcodec.so.61` and `libavutil.so.59` beside
@@ -123,11 +124,58 @@ See [Contributing](CONTRIBUTING.md) for the CMake cache workflow and the
 [notice](third_party/ffmpeg/NOTICE.md) for each platform's configure flags.
 
 For Android, set `ANDROID_NDK_HOME`, `ANDROID_HOME` and `JAVA_HOME` for
-your NDK, SDK and Android Studio JBR, then run `tools/build.py --target android`
-from the prepared game repository (`--stub` needs no translation).
-The APK is `build/android/app/build/outputs/apk/debug/app-debug.apk`.
+your NDK, SDK and a JDK 17 or later (Android Studio's JBR, or a system
+OpenJDK 21), then run `tools/build.py --target android` from the prepared
+game repository (`--stub` needs no translation). CI pins NDK r27
+(27.2.12479018) for the stub; a game whose native code uses `#embed` needs
+r29 (clang 21). Each ABI builds in its own CMake tree,
+`build/cmake/android-<abi>` (`--abi x86_64` or `--abi arm64-v8a` for one;
+both by default): x86_64 for Intel Chromebooks, whose Android apps run in
+ChromeOS's ARCVM, and the emulator; arm64-v8a for ARM Chromebooks, phones and
+tablets. With two ABIs Gradle writes `app-x86_64-debug.apk`,
+`app-arm64-v8a-debug.apk` and `app-universal-debug.apk` in
+`build/android/app/build/outputs/apk/debug/`; with one, `app-debug.apk`. The
+libraries go in stripped (the CMake trees keep them whole for a crash's
+symbols) and the system unpacks them at install (`useLegacyPackaging`).
 `--push-game` still stages and pushes the original game data separately;
 without a ready device the default build skips install and launch.
+
+A multi-game app (`--game-modules`) works on Android as on Linux: SDL is
+the shared `libSDL3.so` (RecompActivity loads it before `libmain.so`), the
+other games' `libgame.<id>.so` sit beside them in `lib/<abi>/`
+(`tools/assemble_games.py --platform android` puts them into a project staged
+with `--stage-only`; build them with `--module-only`) and their resources in
+the APK's `assets/resources/modules/<app name>/`. RecompActivity unpacks
+`assets/resources/` into the app's external files folder, the host's
+resources folder there, whenever the APK changes. A module keeps its own
+profile in `profiles/<app name>` beside the app's `profile/`.
+
+The native launcher (`host/launcher/linux/`) runs on Android too. Its
+"Game folder…" and installer buttons open the system's pickers: GOG offline
+installers (several files, or a folder holding them) are linked by name into
+the app's internal storage through the descriptors the picker grants and
+installed with innoextract, which the APK carries as
+`lib/<abi>/libinnoextract.so` (`third_party/innoextract/build-android.sh`,
+built once per build root on the first APK); a folder holding an installed
+game is copied into the Games folder, `Android/data/<package>/files/Games`,
+which `adb push` reaches too.
+
+A Chromebook, Android's desktop mode or a device with a keyboard and a mouse
+at start is a desktop-class device (RecompActivity.desktopForm): the game
+plays in a window the player resizes, with the desktop's defaults, the
+`[android] ui_mods` interface mods and no on-screen controls unless asked
+for. Phones and tablets keep the full-screen touch layout and
+`[android] touch_ui_mods`. `RECOMP_DEVICE_FORM=desktop` or `touch` in
+`switches.txt` overrides the choice. Without Vulkan 1.1 the app still
+installs (the manifest does not require it) and its launcher, drawn in
+software, says why the game cannot start. `RECOMP_VULKAN_BC=0` decodes DXT
+textures on upload as on a GPU without BC formats (most Mali and PowerVR),
+`RECOMP_VULKAN_VFETCH=0` turns the vertex fetch off as on a GPU with fewer
+than five vertex-stage storage buffers; the log's `d3d9 vulkan:` line says
+which paths a device takes. The manifest asks for `INTERNET`,
+`ACCESS_NETWORK_STATE` and `CHANGE_WIFI_MULTICAST_STATE`: finding games on
+the local network needs a `WifiManager.MulticastLock` held while listening,
+or Android drops the broadcasts and multicast addressed to the app.
 
 ## Run on an iPad
 

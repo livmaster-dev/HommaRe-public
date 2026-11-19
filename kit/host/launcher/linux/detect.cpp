@@ -10,6 +10,7 @@
 #include <climits>
 #include <cstdlib>
 #include <mutex>
+#include <unistd.h>
 
 namespace launcher::native {
 
@@ -213,6 +214,14 @@ std::vector<std::string> roots_below(const std::string &dir, const std::vector<G
 
 std::string canonical(const std::string &path) {
     char buf[PATH_MAX];
+    // A link to an open descriptor (/proc/self/fd/<n>: a document the player
+    // picked on Android, android_files.cpp) stands for that document under
+    // its own name, beside the other files linked with it (an installer's
+    // slices are found by name): its target names a file only the
+    // descriptor can reach.
+    const ssize_t n = readlink(path.c_str(), buf, sizeof buf - 1);
+    if (n > 0 && std::string(buf, size_t(n)).rfind("/proc/self/fd/", 0) == 0)
+        return canonical(parent_dir(path)) + "/" + file_name(path);
     if (realpath(path.c_str(), buf))
         return buf;
     std::vector<std::string> parts;

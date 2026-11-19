@@ -13,11 +13,24 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        // The ABIs tools/build.py built (--abi): x86_64 for Intel Chromebooks
+        // and the emulator, arm64-v8a for phones, tablets and ARM Chromebooks.
         ndk {
-            abiFilters += "arm64-v8a"
+            abiFilters += listOf(@abi_filters@)
         }
         resValue("string", "app_name", "@app_name@")
         resValue("string", "game_id", "@id@")
+    }
+
+    // With several ABIs, an APK per ABI besides the universal one: a player
+    // sideloads the one for their device and saves the other's size.
+    splits {
+        abi {
+            isEnable = @abi_splits@
+            reset()
+            include(@abi_filters@)
+            isUniversalApk = true
+        }
     }
 
     buildFeatures {
@@ -26,6 +39,19 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    packaging {
+        jniLibs {
+            // tools/build.py stripped the libraries already (the translated
+            // games are far too big to strip twice), and the system unpacks
+            // them into the app's native library folder at install: that is
+            // where the launcher runs innoextract from (libinnoextract.so)
+            // and the host finds the other games' modules
+            // (host/sdl/main.cpp modules_dir), and it keeps the APK
+            // compressed for the download.
+            keepDebugSymbols += "**/*.so"
+            useLegacyPackaging = true
+        }
     }
     sourceSets.named("main") {
         // Use the SDL version fetched by the native build; no copied Java sources.

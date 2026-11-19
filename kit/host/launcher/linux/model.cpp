@@ -6,6 +6,9 @@
 #include "../../controls/json.h"
 #include "game_config.h"
 #include "l10n.h"
+#ifdef __ANDROID__
+#include "android_files.h"
+#endif
 
 #include <SDL3/SDL.h>
 
@@ -115,10 +118,16 @@ std::shared_ptr<const Skin> skin_for(const std::map<std::string, Found> &found,
     std::stable_sort(ranked.begin(), ranked.end(),
                      [](const auto &a, const auto &b) { return a.first < b.first; });
     std::string cache;
+#ifdef __ANDROID__
+    // The app's own cache folder: Android has no XDG one.
+    if (const char *app = SDL_GetAndroidCachePath())
+        cache = app;
+#else
     if (const std::string xdg = env("XDG_CACHE_HOME"); !xdg.empty())
         cache = xdg;
     else if (const std::string home = env("HOME"); !home.empty())
         cache = home + "/.cache";
+#endif
     if (!cache.empty())
         cache += std::string("/") + RECOMP_APP_NAME + "/LauncherSkin";
     for (const auto &r : ranked) {
@@ -355,6 +364,12 @@ std::string Model::import_base() {
     // Test runs keep their installs away from the player's own folder.
     if (const std::string dir = env("RECOMP_LAUNCHER_GAMES_DIR"); !dir.empty())
         return dir;
+#ifdef __ANDROID__
+    // The app's external files folder, where `adb push` and a computer over
+    // USB reach too (Android/data/<package>/files/Games).
+    const std::string data = android::data_dir();
+    return data.empty() ? "" : data + "/Games";
+#endif
     char buf[4096];
     if (os_user_data_dir(RECOMP_APP_NAME, buf, sizeof buf) != 0)
         return "";
@@ -389,6 +404,15 @@ std::vector<std::string> Model::candidate_roots() const {
     }
     for (const std::string &c : children(import_base()))
         add(c);
+#ifdef __ANDROID__
+    // The app reaches no other folder by path: the folders in its files
+    // folder are where a copy pushed with adb or over USB lands (adb cannot
+    // write into the Games folder the app made), game/ the canvas launcher's
+    // import and tools/build.py --push-game's.
+    for (const std::string &c : children(android::data_dir()))
+        add(c);
+    return roots;
+#endif
     const std::string home = env("HOME");
     if (home.empty())
         return roots;
@@ -592,8 +616,16 @@ void Model::accept(const std::vector<std::string> &paths) {
 }
 
 void Model::install_next() {
-    if (importing_ || install_queue_.empty())
+    if (importing_)
         return;
+    if (install_queue_.empty()) {
+#ifdef __ANDROID__
+        // Nothing more to install from what the player picked: its links
+        // (and any copy of an installer, gigabytes) go.
+        android::forget_picked();
+#endif
+        return;
+    }
     const std::string next = install_queue_.front();
     install_queue_.erase(install_queue_.begin());
     if (finder::is_patch_name(file_name(next)))
@@ -721,6 +753,7 @@ void Model::cancel_import() {
     cancel_->store(true);
 }
 
+#ifndef __ANDROID__
 namespace {
 
 // What a file dialog hands back, posted to the main thread.
@@ -739,7 +772,27 @@ void SDLCALL picked(void *userdata, const char *const *files, int) {
 }
 
 } // namespace
+#endif
 
+#ifdef __ANDROID__
+// The system's pickers hand back documents, not paths: android_files.cpp
+// links the installers by name or copies a game folder in, on a worker.
+void Model::pick_folder() {
+    std::shared_ptr<Shared> shared = shared_;
+    android::pick(true, import_base(), config_.exclude, [shared](android::Materialize work) {
+        post(shared, [work](Model &m) { m.import_picked(work); });
+    });
+}
+
+void Model::pick_installer(const std::string &message) {
+    if (!message.empty())
+        set_notice(message);
+    std::shared_ptr<Shared> shared = shared_;
+    android::pick(false, import_base(), config_.exclude, [shared](android::Materialize work) {
+        post(shared, [work](Model &m) { m.import_picked(work); });
+    });
+}
+#else
 void Model::pick_folder() {
     std::shared_ptr<Shared> shared = shared_;
     auto *picker = new Picker{[shared](std::vector<std::string> paths) {
@@ -779,10 +832,44 @@ void Model::pick_installer(const std::string &message) {
     SDL_ShowFileDialogWithProperties(SDL_FILEDIALOG_OPENFILE, picked, picker, props);
     SDL_DestroyProperties(props);
 }
+#endif
+
+void Model::import_picked(std::function<Outcome(const ProgressFn &, std::vector<std::string> *)> materialize) {
+    if (importing_)
+        return;
+    Progress p;
+    p.phase = Progress::Copying;
+    importing_ = p;
+    cancel_ = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<bool>> cancel = cancel_;
+    run_worker([=](const std::shared_ptr<Shared> &shared) {
+        std::vector<std::string> paths;
+        const Outcome o = materialize(
+            [&](const Progress &now) {
+                post(shared, [now](Model &m) {
+                    if (m.importing_)
+                        m.importing_ = now;
+                });
+                return !cancel->load();
+            },
+            &paths);
+        post(shared, [o, paths](Model &m) {
+            m.importing_.reset();
+            if (!o.ok) {
+                if (!o.cancelled)
+                    m.set_notice(o.error);
+                return;
+            }
+            m.accept(paths);
+        });
+    });
+}
 
 namespace {
 
 void open_folder(const std::string &dir) {
+    if (!Model::can_reveal())
+        return;
     std::string url = "file://";
     for (unsigned char c : dir) {
         if (isalnum(c) || strchr("/-_.~", c))
@@ -816,6 +903,14 @@ void Model::reveal_saves() {
         return;
     mkdirs(profile_dir_);
     open_folder(profile_dir_);
+}
+
+bool Model::can_reveal() {
+#ifdef __ANDROID__
+    return false;
+#else
+    return true;
+#endif
 }
 
 } // namespace launcher::native

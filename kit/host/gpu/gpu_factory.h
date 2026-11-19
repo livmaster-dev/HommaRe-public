@@ -10,6 +10,9 @@ namespace gpu {
 std::unique_ptr<Device> create_default_device();
 // The backend create_default_device() would build: "metal", "vulkan" or "none".
 const char *default_backend_name();
+// The graphics this build draws with, for telling a player whose device has
+// none ("Metal", "Vulkan 1.1", "WebGPU"), whether or not a device started.
+const char *graphics_needed();
 
 // A native surface create_swapchain() accepts, for tests that need one without
 // a window: a CAMetalLayer for Metal, a hidden SDL window for Vulkan, nullptr

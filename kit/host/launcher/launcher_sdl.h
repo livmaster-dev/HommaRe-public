@@ -58,4 +58,21 @@ struct Presenter {
 // RECOMP_LAUNCHER switch, or Shift or Alt held.
 bool requested(int argc, char **argv);
 
+#ifdef __ANDROID__
+// The system's pickers and documents for the native launcher on Android
+// (linux/android_files.cpp), through RecompActivity as the canvas
+// launcher's platform has them (launcher_platform_android.cpp). `done` runs
+// on the activity's thread.
+// Any files, several at once (GOG installers: setup_*.exe and its slices).
+void android_pick_documents(PickDone done);
+// A folder: Picked.uri is its tree.
+void android_pick_tree(PickDone done);
+// A document's contents as a descriptor the caller owns, or -1.
+int android_open_document(const std::string &uri);
+// Everything under a picked folder, with each entry's document URI
+// (documents[entry.index]); false with *error set when it cannot be read.
+bool android_list_tree(const std::string &tree, std::vector<Entry> *entries,
+                       std::vector<std::string> *documents, std::string *error);
+#endif
+
 } // namespace launcher

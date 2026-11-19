@@ -16,6 +16,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -48,11 +49,18 @@ struct Session {
     std::string exe, root, game, module, saved_title;
     uint32_t wake_event = 0;
     std::vector<std::string> dropped;
+    // The finger that is pressing (0: none), where it began and how far its
+    // scroll has gone, in pixels.
+    SDL_FingerID finger = 0;
+    float finger_start = 0, finger_y = 0;
+    bool scrolled = false;
 
     // Unattended runs (recomp_native_launcher_begin).
     std::string dump, dump_dir;
     bool autoplay = false, dumped = false, played = false, installed = false;
     double play_at = 0, cancel_at = 0, cancel_after = 0, dump_every = 5, next_dump = 0;
+    // Frames are drawn whether or not anything changed until then.
+    double redraw_until = 0;
     int dumps = 0;
     std::string install;
 
@@ -169,6 +177,13 @@ struct Session {
         case SDL_EVENT_WINDOW_SHOWN:
             dirty = true;
             break;
+        // Back from the background or from under the system's picker: the
+        // window has a new surface (Android drops it meanwhile), which the
+        // swapchain takes over once it is there; draw for a moment until then.
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            redraw_until = seconds() + 2;
+            dirty = true;
+            break;
         case SDL_EVENT_WINDOW_MOUSE_LEAVE:
             dirty |= view->leave();
             break;
@@ -186,8 +201,48 @@ struct Session {
         case SDL_EVENT_MOUSE_WHEEL:
             dirty |= view->wheel(-e.wheel.y);
             break;
+        // A finger is a pointer that presses where it lands and drags to
+        // scroll: the Android host turns SDL's own touch-to-mouse events off
+        // (host/sdl/platform_ui_desktop.cpp), so a tap reaches here as one.
+        case SDL_EVENT_FINGER_DOWN:
+        case SDL_EVENT_FINGER_MOTION:
+        case SDL_EVENT_FINGER_UP: {
+            int pw = 0, ph = 0;
+            SDL_GetWindowSizeInPixels(window, &pw, &ph);
+            const float x = e.tfinger.x * float(pw), y = e.tfinger.y * float(ph);
+            if (e.type == SDL_EVENT_FINGER_DOWN) {
+                if (finger != 0)
+                    break;
+                finger = e.tfinger.fingerID;
+                finger_y = finger_start = y;
+                scrolled = false;
+                dirty |= view->pointer(x, y);
+                dirty |= view->press(x, y);
+            } else if (e.tfinger.fingerID != finger) {
+                break;
+            } else if (e.type == SDL_EVENT_FINGER_MOTION) {
+                // Past a few points of travel the finger scrolls the page
+                // and the press it began with no longer clicks.
+                const float step = 40.0f * d; // a wheel line (View::wheel)
+                if (!scrolled && std::abs(y - finger_start) > step / 2)
+                    scrolled = true;
+                while (scrolled && std::abs(y - finger_y) >= step) {
+                    const int dir = y < finger_y ? 1 : -1;
+                    dirty |= view->wheel(float(dir));
+                    finger_y -= float(dir) * step;
+                }
+                dirty |= view->pointer(x, y);
+            } else {
+                finger = 0;
+                dirty |= view->release(scrolled ? -1e6f : x, scrolled ? -1e6f : y);
+                dirty |= view->leave();
+            }
+            break;
+        }
         case SDL_EVENT_KEY_DOWN:
-            dirty |= view->key(uint32_t(e.key.key), uint16_t(e.key.mod));
+            // Android's Back is the launcher's Escape.
+            dirty |= view->key(uint32_t(e.key.key == SDLK_AC_BACK ? SDLK_ESCAPE : e.key.key),
+                               uint16_t(e.key.mod));
             break;
         // Installers, their folders or a game folder dropped from a file manager.
         case SDL_EVENT_DROP_BEGIN:
@@ -215,7 +270,7 @@ struct Session {
     void frame() {
         SDL_Event e;
         const bool busy = model->importing() || model->scanning() || play_at > 0 || cancel_at > 0 ||
-                          !dump_dir.empty();
+                          !dump_dir.empty() || redraw_until > 0;
         if (SDL_WaitEventTimeout(&e, busy ? 50 : 250)) {
             do {
                 event(e);
@@ -225,6 +280,11 @@ struct Session {
             return;
         dirty |= model->drain();
         const double now = seconds();
+        if (redraw_until > 0) {
+            dirty = true;
+            if (now >= redraw_until)
+                redraw_until = 0;
+        }
         if (play_at > 0 && now >= play_at) {
             play_at = 0;
             model->play();

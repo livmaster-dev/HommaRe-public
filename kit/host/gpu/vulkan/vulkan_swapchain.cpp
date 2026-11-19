@@ -53,8 +53,11 @@ static bool build_swapchain(VulkanDevice &d, VulkanDevice::Chain &c, int width, 
     c.views.clear();
     c.images.clear();
     VkSurfaceCapabilitiesKHR caps;
-    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_, c.surface, &caps) != VK_SUCCESS)
+    if (const VkResult r = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_, c.surface, &caps);
+        r != VK_SUCCESS) {
+        c.surface_lost = r == VK_ERROR_SURFACE_LOST_KHR;
         return false;
+    }
     uint32_t fn = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(d.physical_, c.surface, &fn, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(fn);
@@ -99,8 +102,10 @@ static bool build_swapchain(VulkanDevice &d, VulkanDevice::Chain &c, int width, 
     sci.clipped = VK_TRUE;
     sci.oldSwapchain = c.swapchain;
     VkSwapchainKHR fresh;
-    if (vkCreateSwapchainKHR(d.device_, &sci, nullptr, &fresh) != VK_SUCCESS)
+    if (const VkResult r = vkCreateSwapchainKHR(d.device_, &sci, nullptr, &fresh); r != VK_SUCCESS) {
+        c.surface_lost = r == VK_ERROR_SURFACE_LOST_KHR || r == VK_ERROR_NATIVE_WINDOW_IN_USE_KHR;
         return false;
+    }
     if (c.swapchain)
         vkDestroySwapchainKHR(d.device_, c.swapchain, nullptr);
     c.swapchain = fresh;
@@ -132,6 +137,35 @@ static bool build_swapchain(VulkanDevice &d, VulkanDevice::Chain &c, int width, 
         c.finished_semaphores.push_back(s);
     }
     c.needs_recreate = false;
+    return true;
+}
+
+// The window's system surface went away and came back (Android destroys an
+// app's surface while it is in the background or another activity covers
+// it, and makes a new one when it returns): the swapchain and the
+// VkSurfaceKHR over the old one go, and a new pair is made over the window
+// as it is now. False while the window has no surface yet; the next acquire
+// tries again. The caller has made the queue idle (queue_idle), as for
+// build_swapchain.
+static bool rebuild_surface(VulkanDevice &d, VulkanDevice::Chain &c) {
+    for (VkImageView v : c.views)
+        vkDestroyImageView(d.device_, v, nullptr);
+    c.views.clear();
+    c.images.clear();
+    if (c.swapchain)
+        vkDestroySwapchainKHR(d.device_, c.swapchain, nullptr);
+    c.swapchain = VK_NULL_HANDLE;
+    if (c.surface)
+        vkDestroySurfaceKHR(d.instance_, c.surface, nullptr);
+    c.surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(static_cast<SDL_Window *>(c.window), d.instance_, nullptr, &c.surface)) {
+        c.surface = VK_NULL_HANDLE;
+        return false;
+    }
+    if (!build_swapchain(d, c, c.width, c.height))
+        return false;
+    c.surface_lost = false;
+    fprintf(stderr, "gpu/vulkan: the window's surface came back: swapchain %dx%d\n", c.width, c.height);
     return true;
 }
 
@@ -194,13 +228,17 @@ Texture VulkanDevice::acquire(Swapchain s) {
     auto it = swapchains_.find(s.id);
     if (it == swapchains_.end() || failed_)
         return {};
-    if (it->second->needs_recreate) {
+    if (it->second->surface_lost || it->second->needs_recreate) {
         lock.unlock();
         queue_idle(); // as resize: the old images' last presents finish first
         lock.lock();
         it = swapchains_.find(s.id);
-        if (it == swapchains_.end() ||
-            !build_swapchain(*this, *it->second, it->second->width, it->second->height))
+        if (it == swapchains_.end())
+            return {};
+        // A lost surface (present sets needs_recreate too) gets a new one
+        // first: a swapchain over the old surface cannot be built.
+        Chain &c = *it->second;
+        if (c.surface_lost ? !rebuild_surface(*this, c) : !build_swapchain(*this, c, c.width, c.height))
             return {};
     }
     Chain &c = *it->second;
@@ -210,6 +248,10 @@ Texture VulkanDevice::acquire(Swapchain s) {
         vkAcquireNextImageKHR(device_, c.swapchain, UINT64_MAX, sem, VK_NULL_HANDLE, &index);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         c.needs_recreate = true;
+        return {};
+    }
+    if (r == VK_ERROR_SURFACE_LOST_KHR) {
+        c.surface_lost = true;
         return {};
     }
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR)
@@ -377,11 +419,13 @@ void VulkanDevice::queue_present(Cmd &c) { // queue_mutex_ held; called by commi
     pi.pSwapchains = &sc;
     pi.pImageIndices = &c.present_image;
     VkResult r = vkQueuePresentKHR(queue_, &pi);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_SURFACE_LOST_KHR) {
         std::lock_guard lock(mutex_);
         auto it = swapchains_.find(c.present_swapchain);
-        if (it != swapchains_.end())
+        if (it != swapchains_.end()) {
             it->second->needs_recreate = true;
+            it->second->surface_lost |= r == VK_ERROR_SURFACE_LOST_KHR;
+        }
     }
     c.wait_semaphore = c.signal_semaphore = VK_NULL_HANDLE;
 }

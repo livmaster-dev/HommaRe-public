@@ -63,9 +63,15 @@ bool parse_config(const std::string &text, Config *out, std::string *error) {
     Config c;
     c.title = localized(root.get("title"));
     c.tagline = localized(root.get("tagline"));
-    // "taglines": the tagline of each platform; Linux's, when there is one, wins.
+    // "taglines": the tagline of each platform; this one's (Linux's, or
+    // Android's in the APK), when there is one, wins.
+#ifdef __ANDROID__
+    const char *platform = "android";
+#else
+    const char *platform = "linux";
+#endif
     if (const Json *taglines = root.get("taglines"))
-        if (const Json *own = taglines->get("linux"))
+        if (const Json *own = taglines->get(platform))
             c.tagline = localized(own);
     c.legal = localized(root.get("legal"));
     c.install_names = strings(root.get("installNames"));

@@ -1,6 +1,7 @@
 // configure.hpp - innoextract's build configuration (src/configure.hpp.in)
-// for Apple platforms, written out instead of probed: the library is
-// cross-compiled for iOS, where CMake's checks cannot run the results.
+// for the iOS library and the Android program, written out instead of
+// probed: both are cross-compiled, where CMake's checks cannot run the
+// results. Android's C library has the same functions (iconv since API 28).
 #ifndef INNOEXTRACT_CONFIGURE_HPP
 #define INNOEXTRACT_CONFIGURE_HPP
 
