@@ -148,7 +148,8 @@ void mirror_log_to_console(const std::string &path, int console) {
 
 // The process's memory as iOS counts it against its limit (phys_footprint,
 // what jetsam goes by) and what is left before that limit
-// (os_proc_available_memory), in MB.
+// (os_proc_available_memory), in MB. The simulator has no limit and reports
+// 0 left; the line then says so instead of a number.
 void log_memory(const char *why) {
     task_vm_info_data_t info{};
     mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
@@ -157,8 +158,12 @@ void log_memory(const char *why) {
             ? (unsigned long long)info.phys_footprint >> 20
             : 0;
     const unsigned long long available = (unsigned long long)os_proc_available_memory() >> 20;
-    fprintf(stderr, "[host] memory%s%s: footprint %llu MB, available %llu MB\n", why ? " " : "", why ? why : "",
-            footprint, available);
+    if (available)
+        fprintf(stderr, "[host] memory%s%s: footprint %llu MB, available %llu MB\n", why ? " " : "",
+                why ? why : "", footprint, available);
+    else
+        fprintf(stderr, "[host] memory%s%s: footprint %llu MB, no limit reported\n", why ? " " : "",
+                why ? why : "", footprint);
 }
 
 // A memory line every 30 s, every 5 s while less than 400 MB is left, and at
@@ -174,7 +179,8 @@ void watch_memory() {
                                                 }];
     std::thread([]() {
         for (;;) {
-            const bool low = (os_proc_available_memory() >> 20) < 400;
+            const size_t left = os_proc_available_memory() >> 20;
+            const bool low = left && left < 400;
             std::this_thread::sleep_for(std::chrono::seconds(low ? 5 : 30));
             log_memory(nullptr);
         }
