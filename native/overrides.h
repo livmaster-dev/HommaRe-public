@@ -216,3 +216,14 @@ void homm5_card_window(X86 *c);
 #define FN_007fcc80 homm5_card_window
 void homm5_card_window_combat(X86 *c);
 #define FN_007fd500 homm5_card_window_combat
+
+/* 00c3ec10 (NWorld::CVisitArenaCmd's run) and 00cf45f0 (a hero's "has visited
+ * the building"): the Arena's +2 is never given by the original, whose visit
+ * marks the building before the command checks the mark; native/game_fixes.c
+ * lets the command's check pass. */
+void homm5_arena_cmd(X86 *c);
+#define FN_00c3ec10 homm5_arena_cmd
+#define HOMM5_ARENA_CMD_ORIG fn_00c3ec10
+void homm5_hero_has_visited(X86 *c);
+#define FN_00cf45f0 homm5_hero_has_visited
+#define HOMM5_HAS_VISITED_ORIG fn_00cf45f0
