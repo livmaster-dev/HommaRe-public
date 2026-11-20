@@ -1081,12 +1081,13 @@ static bool g_fault_sent = false;
 // What the signals did before (on Android the system's crash reporter,
 // debuggerd's handler, which bionic installs in every process).
 static struct sigaction g_fault_before[3];
-// The read end of the pipe the host log goes through, when a reader thread
-// copies it to a file (the iOS app's log: Library/Caches/host.log). A fault
-// report written to the pipe and followed at once by the exit is lost with
-// whatever the reader had not taken yet; os_fault_exit waits for it first.
-// Read from RECOMP_HOST_LOG_PIPE_FD at install, so a game module's copy of
-// this file (its own statics) knows the base app's pipe too.
+// The read end of the pipe the host log goes through, when a host has a
+// reader thread copy it to a file. A fault report written to the pipe and
+// followed at once by the exit is lost with whatever the reader had not taken
+// yet; os_fault_exit waits for it first. Read from RECOMP_HOST_LOG_PIPE_FD at
+// install, so a game module's copy of this file (its own statics) knows the
+// base app's pipe too. The iOS app no longer sets it: its stderr is the log
+// file itself (platform_ui_ios.mm tee_log_to_file).
 static int g_fault_log_pipe = -1;
 
 static void fault_write_hex(uint64_t v) {

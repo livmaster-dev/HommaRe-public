@@ -38,6 +38,12 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <fcntl.h>
+#include <mach/mach.h>
+#include <os/proc.h>
+#include <sys/event.h>
 #include <sys/stat.h>
 #include <vector>
 #include <dlfcn.h>
@@ -98,11 +104,100 @@ void archive_previous_log(const std::string &prev) {
         fs::remove(kept[i], ec);
 }
 
+// Whether fd is /dev/null: what stdio is for an app started from the home
+// screen, where there is no console to copy the log to.
+bool fd_is_dev_null(int fd) {
+    struct stat a{}, b{};
+    return fstat(fd, &a) == 0 && stat("/dev/null", &b) == 0 && S_ISCHR(a.st_mode) && a.st_rdev == b.st_rdev;
+}
+
+// The console copy of the log (Xcode, devicectl --console): a thread that
+// reads the file behind the writers and hands what it finds to the console
+// the process started with. kqueue's EVFILT_READ on a file fires while the
+// read offset is short of the end, so the thread sleeps between writes.
+void mirror_log_to_console(const std::string &path, int console) {
+    const int in = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    const int kq = in >= 0 ? kqueue() : -1;
+    if (kq < 0) {
+        if (in >= 0)
+            close(in);
+        close(console);
+        return;
+    }
+    struct kevent ev;
+    EV_SET(&ev, in, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, nullptr);
+    if (kevent(kq, &ev, 1, nullptr, 0, nullptr) != 0) {
+        close(kq);
+        close(in);
+        close(console);
+        return;
+    }
+    std::thread([in, kq, console]() {
+        char buf[16384];
+        for (;;) {
+            ssize_t n;
+            while ((n = read(in, buf, sizeof buf)) > 0)
+                if (write(console, buf, (size_t)n) < 0)
+                    return; // the console went away; the file keeps everything
+            struct kevent got;
+            if (kevent(kq, nullptr, 0, &got, 1, nullptr) < 0 && errno != EINTR)
+                return;
+        }
+    }).detach();
+}
+
+// The process's memory as iOS counts it against its limit (phys_footprint,
+// what jetsam goes by) and what is left before that limit
+// (os_proc_available_memory), in MB. The simulator has no limit and reports
+// 0 left; the line then says so instead of a number.
+void log_memory(const char *why) {
+    task_vm_info_data_t info{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    const unsigned long long footprint =
+        task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS
+            ? (unsigned long long)info.phys_footprint >> 20
+            : 0;
+    const unsigned long long available = (unsigned long long)os_proc_available_memory() >> 20;
+    if (available)
+        fprintf(stderr, "[host] memory%s%s: footprint %llu MB, available %llu MB\n", why ? " " : "",
+                why ? why : "", footprint, available);
+    else
+        fprintf(stderr, "[host] memory%s%s: footprint %llu MB, no limit reported\n", why ? " " : "",
+                why ? why : "", footprint);
+}
+
+// A memory line every 30 s, every 5 s while less than 400 MB is left, and at
+// each memory warning, so a run that iOS ended for its memory says so in its
+// log (a jetsam kill leaves no report of its own in the log).
+void watch_memory() {
+    log_memory("at start");
+    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidReceiveMemoryWarningNotification
+                                                    object:nil
+                                                     queue:nil
+                                                usingBlock:^(NSNotification *) {
+                                                  log_memory("WARNING from iOS");
+                                                }];
+    std::thread([]() {
+        for (;;) {
+            const size_t left = os_proc_available_memory() >> 20;
+            const bool low = left && left < 400;
+            std::this_thread::sleep_for(std::chrono::seconds(low ? 5 : 30));
+            log_memory(nullptr);
+        }
+    }).detach();
+}
+
 // Started from the home screen the app has no console, and the host's log
 // went nowhere: it is kept in Library/Caches/host.log (the run before in
 // host-prev.log, and in Documents/Logs) and still reaches a console when one
 // is attached. Once a process, a game module's copy included
 // (RECOMP_HOST_LOG_TEE marks it).
+//
+// stdout and stderr are the file itself, so every line is in the kernel the
+// moment it is written. They used to be a pipe that a thread copied into the
+// file: a process that iOS kills (jetsam, the watchdog) runs no code of ours,
+// and whatever that thread had not copied yet - the lines just before the
+// kill, the ones that say why - died in the pipe.
 void tee_log_to_file() {
     if (getenv("RECOMP_HOST_LOG_TEE"))
         return;
@@ -115,32 +210,21 @@ void tee_log_to_file() {
     std::error_code ec;
     fs::rename(path, dir + "/host-prev.log", ec);
     archive_previous_log(dir + "/host-prev.log");
-    FILE *file = fopen(path.c_str(), "w");
-    int fds[2];
-    if (!file || pipe(fds) != 0) {
-        if (file)
-            fclose(file);
+    // O_APPEND: lines that threads write at once land whole, one after another.
+    const int file = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0644);
+    if (file < 0)
         return;
-    }
-    const int console = dup(STDERR_FILENO);
+    const int console = fd_is_dev_null(STDERR_FILENO) ? -1 : dup(STDERR_FILENO);
+    fflush(stdout);
+    fflush(stderr);
     setvbuf(stdout, nullptr, _IOLBF, 0);
     setvbuf(stderr, nullptr, _IONBF, 0);
-    dup2(fds[1], STDOUT_FILENO);
-    dup2(fds[1], STDERR_FILENO);
-    close(fds[1]);
-    // The fault handler waits on this pipe before the process ends, or the
-    // report it writes dies in it unread (os_posix.cpp fault_drain_log).
-    setenv("RECOMP_HOST_LOG_PIPE_FD", std::to_string(fds[0]).c_str(), 1);
-    std::thread([fd = fds[0], file, console]() {
-        char buf[4096];
-        ssize_t n;
-        while ((n = read(fd, buf, sizeof buf)) > 0) {
-            fwrite(buf, 1, (size_t)n, file);
-            fflush(file);
-            if (console >= 0)
-                (void)write(console, buf, (size_t)n);
-        }
-    }).detach();
+    dup2(file, STDOUT_FILENO);
+    dup2(file, STDERR_FILENO);
+    close(file);
+    if (console >= 0)
+        mirror_log_to_console(path, console);
+    watch_memory();
 }
 
 // The window's root view, for the reserved regions and safe area UIKit gives
