@@ -31,6 +31,8 @@
 #include "metal_device.h"
 #include "shader_warm_queue.h"
 #include "pipeline_warm_spec.h"
+#include "scaler_build_slot.h"
+#include "gpuarchiver_cleanup.h"
 #include "../../present.h"
 #include "../../gpu_time.h"
 #include "../d3d9_backend.h"
@@ -40,7 +42,9 @@
 #include <future>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -502,6 +506,31 @@ MTLRenderPipelineDescriptor *warm_descriptor(const PipeSpec &p, id<MTLFunction> 
     return pd;
 }
 
+// The folders Metal makes its archive work folders in (gpuarchiver_cleanup.h): in the user's cache
+// folder, under the bundle id when there is one. confstr gives no path on iOS, so the Caches
+// folder is looked at too. *own: the folders are this application's alone (a bundle id).
+std::vector<std::string> gpuarchiver_folders(bool *own) {
+    std::vector<std::string> bases, out;
+    char buf[PATH_MAX];
+    if (size_t n = confstr(_CS_DARWIN_USER_CACHE_DIR, buf, sizeof buf); n > 1 && n <= sizeof buf)
+        bases.emplace_back(buf);
+    @autoreleasepool {
+        NSArray<NSString *> *c = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+        if (c.count)
+            bases.emplace_back(c[0].UTF8String);
+        NSString *bid = NSBundle.mainBundle.bundleIdentifier;
+        *own = bid.length != 0;
+        for (std::string b : bases) {
+            while (b.size() > 1 && b.back() == '/')
+                b.pop_back();
+            std::string f = *own ? b + "/" + bid.UTF8String + "/com.apple.gpuarchiver" : b + "/com.apple.gpuarchiver";
+            if (std::find(out.begin(), out.end(), f) == out.end())
+                out.push_back(f);
+        }
+    }
+    return out;
+}
+
 class ShaderWarm {
   public:
     ShaderWarm(id<MTLDevice> dev, std::string dir, std::string seed, std::string identity)
@@ -741,6 +770,12 @@ class ShaderWarm {
     void run_pipelines(MTLCompileOptions *opts) {
         const uint64_t t0 = os_monotonic_ns();
         uint32_t made = 0, skipped = 0, taken_over = 0, mismatched = 0;
+        // Metal's work folders before this warm-up adds to the archive and writes it.
+        bool own = false;
+        std::vector<std::pair<std::string, std::set<std::string>>> before;
+        if (archive_)
+            for (const std::string &f : gpuarchiver_folders(&own))
+                before.emplace_back(f, gpuarchiver_cleanup::snapshot(f));
         for (const std::string &spec : pipe_order_) {
             if (stop_.load())
                 break;
@@ -796,8 +831,18 @@ class ShaderWarm {
                 made, (os_monotonic_ns() - t0) / 1e6, skipped, mismatched, taken_over, pipe_order_.size(),
                 stop_.load() ? ", stopped early" : "", archive_hits_, archive_added_);
         archive_save();
+        // The archive is written: the work folders Metal made for it meanwhile are left over (it
+        // never removes them; each write used to leave one more).
+        uint32_t folders = 0;
+        if (archive_added_)
+            for (const auto &[f, had] : before)
+                folders += gpuarchiver_cleanup::remove_where(
+                    f, [&had](const gpuarchiver_cleanup::Entry &e) { return !had.count(e.name); });
+        if (folders)
+            fprintf(stderr, "d3d9 metal: pipeline archive: removed %u Metal work folders of this write\n", folders);
     }
     void run() {
+        sweep_gpuarchiver();
         const uint64_t t0 = os_monotonic_ns();
         uint32_t compiled = 0, skipped = 0, taken_over = 0;
         MTLCompileOptions *opts = options();
@@ -895,6 +940,23 @@ class ShaderWarm {
                 ++archive_added_;
         }
     }
+    // At start, before this run writes the archive: Metal's work folders left by earlier runs.
+    // Only this application's own (under its bundle id), and only ones untouched for 10 minutes
+    // (another copy of the game may be writing an archive right now).
+    void sweep_gpuarchiver() {
+        if (!archive_)
+            return;
+        bool own = false;
+        const std::vector<std::string> folders = gpuarchiver_folders(&own);
+        if (!own)
+            return;
+        const time_t old = time(nullptr) - 600;
+        uint32_t n = 0;
+        for (const std::string &f : folders)
+            n += gpuarchiver_cleanup::remove_where(f, [old](const gpuarchiver_cleanup::Entry &e) { return e.mtime < old; });
+        if (n)
+            fprintf(stderr, "d3d9 metal: pipeline archive: removed %u work folders Metal left behind\n", n);
+    }
     void archive_save() {
         if (!archive_ || !archive_added_)
             return;
@@ -934,6 +996,39 @@ class ShaderWarm {
     uint32_t pipe_hits_ = 0;
     std::thread worker_;
 };
+
+#if RECOMP_HAVE_METALFX
+// A MetalFX spatial scaler is made off the render path (scaler_build_slot.h): creating one takes
+// about 70 ms, and the render thread keeps presenting with what it has meanwhile. One build per
+// slot runs at a time; when it ends, the latest configuration wanted since is built next.
+using FxSlot = ScalerBuildSlot<id<MTLFXSpatialScaler>>;
+void fx_build_async(id<MTLDevice> dev, std::shared_ptr<FxSlot> slot, ScalerKey first, const char *what) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        ScalerKey k = first;
+        for (;;) {
+            const uint64_t t0 = os_monotonic_ns();
+            id<MTLFXSpatialScaler> fx = nil;
+            @autoreleasepool {
+                MTLFXSpatialScalerDescriptor *sd = [MTLFXSpatialScalerDescriptor new];
+                sd.inputWidth = k.in_w;
+                sd.inputHeight = k.in_h;
+                sd.outputWidth = k.out_w;
+                sd.outputHeight = k.out_h;
+                sd.colorTextureFormat = (MTLPixelFormat)k.format;
+                sd.outputTextureFormat = (MTLPixelFormat)k.format;
+                sd.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
+                fx = [sd newSpatialScalerWithDevice:dev];
+            }
+            fprintf(stderr, "d3d9 metal: MetalFX %s scaler %ux%u -> %ux%u %s in the background in %.1f ms\n", what,
+                    k.in_w, k.in_h, k.out_w, k.out_h, fx ? "made" : "failed", (os_monotonic_ns() - t0) / 1e6);
+            const std::optional<ScalerKey> next = slot->complete(k, fx);
+            if (!next)
+                break;
+            k = *next;
+        }
+    });
+}
+#endif
 
 // Test157b: the number of cached fitted depth buffers, for host_tests (SIZE_MAX until a renderer exists).
 std::atomic<size_t> g_fitted_depth_entries{SIZE_MAX};
@@ -3019,45 +3114,59 @@ class Renderer final : public D9Backend {
             k = 3.0 * w / gw;
         const uint32_t ow = (uint32_t)std::lround(gw * k), oh = (uint32_t)std::lround(gh * k);
         const uint32_t iw = (uint32_t)src.width, ih = (uint32_t)src.height;
-        if (!fx_ || fx_in_w_ != iw || fx_in_h_ != ih || fx_out_w_ != ow || fx_out_h_ != oh ||
-            fx_format_ != src.pixelFormat) {
-            fx_ = nil;
-            fx_out_ = nil;
-            if (fx_imported_) {
-                device_->destroy(fx_imported_);
-                fx_imported_ = {};
+        const ScalerKey want{iw, ih, ow, oh, (uint32_t)src.pixelFormat};
+        const ScalerKey have{fx_in_w_, fx_in_h_, fx_out_w_, fx_out_h_, (uint32_t)fx_format_};
+        if (!fx_ || have != want) {
+            // A new configuration is made in the background (fx_build_async), between frames.
+            // Until it is ready the current scaler goes on when it still takes this input (its
+            // output, at the size it was made for, is fitted to the window by the presenter as
+            // any frame is); otherwise the frame takes the plain path, stretched.
+            const FxSlot::Request r = fx_slot_->request(want);
+            if (r.start)
+                fx_build_async(mtl_, fx_slot_, want, "present");
+            if (r.ready) {
+                fx_asked_ = false;
+                if (!r.scaler) {
+                    fx_supported_ = 0;
+                    fprintf(stderr, "d3d9 metal: MetalFX spatial scaler unavailable; stretching instead\n");
+                    return false;
+                }
+                fx_ = nil;
+                fx_out_ = nil;
+                if (fx_imported_) {
+                    device_->destroy(fx_imported_);
+                    fx_imported_ = {};
+                }
+                fx_ = r.scaler;
+                MTLTextureDescriptor *od =
+                    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:src.pixelFormat
+                                                                       width:ow
+                                                                      height:oh
+                                                                   mipmapped:NO];
+                od.storageMode = MTLStorageModePrivate;
+                od.usage = fx_.outputTextureUsage | MTLTextureUsageShaderRead;
+                fx_out_ = [mtl_ newTextureWithDescriptor:od];
+                fx_imported_ = fx_out_ ? device_->import_texture(fx_out_) : gpu::Texture{};
+                fx_in_w_ = iw;
+                fx_in_h_ = ih;
+                fx_out_w_ = ow;
+                fx_out_h_ = oh;
+                fx_format_ = src.pixelFormat;
+                fprintf(stderr, "d3d9 metal: MetalFX spatial upscale %ux%u -> %ux%u\n", iw, ih, ow, oh);
+            } else {
+                fx_asked_ = true;
+                if (!fx_ || fx_in_w_ != iw || fx_in_h_ != ih || fx_format_ != src.pixelFormat)
+                    return false;
             }
-            MTLFXSpatialScalerDescriptor *sd = [MTLFXSpatialScalerDescriptor new];
-            sd.inputWidth = iw;
-            sd.inputHeight = ih;
-            sd.outputWidth = ow;
-            sd.outputHeight = oh;
-            sd.colorTextureFormat = src.pixelFormat;
-            sd.outputTextureFormat = src.pixelFormat;
-            sd.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
-            fx_ = [sd newSpatialScalerWithDevice:mtl_];
-            if (!fx_) {
-                fx_supported_ = 0;
-                fprintf(stderr, "d3d9 metal: MetalFX spatial scaler unavailable; stretching instead\n");
-                return false;
-            }
-            MTLTextureDescriptor *od =
-                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:src.pixelFormat
-                                                                   width:ow
-                                                                  height:oh
-                                                               mipmapped:NO];
-            od.storageMode = MTLStorageModePrivate;
-            od.usage = fx_.outputTextureUsage | MTLTextureUsageShaderRead;
-            fx_out_ = [mtl_ newTextureWithDescriptor:od];
-            fx_imported_ = fx_out_ ? device_->import_texture(fx_out_) : gpu::Texture{};
-            fx_in_w_ = iw;
-            fx_in_h_ = ih;
-            fx_out_w_ = ow;
-            fx_out_h_ = oh;
-            fx_format_ = src.pixelFormat;
-            fprintf(stderr, "d3d9 metal: MetalFX spatial upscale %ux%u -> %ux%u\n", iw, ih, ow, oh);
+        } else if (fx_asked_) {
+            fx_asked_ = false;
+            fx_slot_->settle();   // back at the current scaler's size: a build still running is not wanted
         }
         if (!fx_out_ || !fx_imported_)
+            return false;
+        // Never encoded with a scaler of another size than the textures it is given.
+        if (fx_.inputWidth != iw || fx_.inputHeight != ih || fx_.outputWidth != fx_out_.width ||
+            fx_.outputHeight != fx_out_.height || fx_out_.width != fx_out_w_ || fx_out_.height != fx_out_h_)
             return false;
         if ((src.usage & fx_.colorTextureUsage) != fx_.colorTextureUsage) {
             static bool told = false;
@@ -3184,21 +3293,29 @@ class Renderer final : public D9Backend {
         const uint32_t ch = ls == t.scale ? ih : std::max<uint32_t>(1, (uint32_t)std::lround(h * ls));
         if (!w || !h || !iw || !ih || cw > iw || ch > ih)
             return;
-        // Made again when the game's size or the 3D's (the render quality) changes.
-        if (!split_hi_ || !split_fx_ || split_hi_.width != w || split_hi_.height != h ||
-            split_fx_.inputWidth != iw || split_fx_.inputHeight != ih) {
-            split_release();
-            MTLFXSpatialScalerDescriptor *sd = [MTLFXSpatialScalerDescriptor new];
-            sd.inputWidth = iw;
-            sd.inputHeight = ih;
-            sd.outputWidth = w;
-            sd.outputHeight = h;
-            sd.colorTextureFormat = t.texture.pixelFormat;
-            sd.outputTextureFormat = t.texture.pixelFormat;
-            sd.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
-            split_fx_ = [sd newSpatialScalerWithDevice:mtl_];
-            if (!split_fx_)
+        // Made again when the game's size or the 3D's (the render quality) changes - in the
+        // background (fx_build_async). Until the new scaler is ready the frame is not split: its
+        // interface is drawn over the smaller 3D, and Present upscales the whole frame, as it
+        // does whenever this pass is off. The old scaler never takes textures of another size.
+        const ScalerKey want{iw, ih, w, h, (uint32_t)t.texture.pixelFormat};
+        if (!split_hi_ || !split_fx_ || split_hi_.width != w || split_hi_.height != h || split_fx_.inputWidth != iw ||
+            split_fx_.inputHeight != ih || split_fx_.colorTextureFormat != t.texture.pixelFormat) {
+            if (split_failed_ && *split_failed_ == want)
                 return;
+            const FxSlot::Request r = split_slot_->request(want);
+            if (r.start)
+                fx_build_async(mtl_, split_slot_, want, "split");
+            if (!r.ready) {
+                split_asked_ = true;
+                return;
+            }
+            split_asked_ = false;
+            if (!r.scaler) {
+                split_failed_ = want;
+                return;
+            }
+            split_release();
+            split_fx_ = r.scaler;
             MTLTextureDescriptor *od = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:t.texture.pixelFormat
                                                                                          width:w
                                                                                         height:h
@@ -3210,6 +3327,9 @@ class Renderer final : public D9Backend {
             split_hi_imported_ = split_hi_ ? device_->import_texture(split_hi_) : gpu::Texture{};
             fprintf(stderr, "d3d9 metal: split frame: 3D in %ux%u, upscaled to %ux%u for the interface\n", iw, ih,
                     w, h);
+        } else if (split_asked_) {
+            split_asked_ = false;
+            split_slot_->settle();
         }
         if (!split_hi_ || !split_hi_imported_ ||
             (t.texture.usage & split_fx_.colorTextureUsage) != split_fx_.colorTextureUsage)
@@ -4435,6 +4555,13 @@ class Renderer final : public D9Backend {
     uint32_t fx_in_w_ = 0, fx_in_h_ = 0, fx_out_w_ = 0, fx_out_h_ = 0;
     MTLPixelFormat fx_format_ = MTLPixelFormatInvalid;
     mutable int fx_supported_ = -1; // a cache filled by the const metalfx_available
+#if RECOMP_HAVE_METALFX
+    // The scalers being made in the background (fx_build_async); the build loop holds its own
+    // reference, so a renderer gone first only drops the result.
+    std::shared_ptr<FxSlot> fx_slot_ = std::make_shared<FxSlot>(), split_slot_ = std::make_shared<FxSlot>();
+    std::optional<ScalerKey> split_failed_; // a split configuration MetalFX could not make: not asked again
+#endif
+    bool fx_asked_ = false, split_asked_ = false; // a configuration other than the current one was asked for
     // Split resolution (scene_end): the back buffer's own texture, at the render quality's
     // scale, holds the frame's 3D; at the scene's end MetalFX upscales it into split_hi_ at
     // the game's size, and the back buffer (and the depth buffer drawn with it) point at
