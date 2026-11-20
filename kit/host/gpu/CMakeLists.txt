@@ -33,6 +33,13 @@ pop_test_binary(scaler_build_slot_tests)
 add_test(NAME scaler_build_slot_tests COMMAND scaler_build_slot_tests WORKING_DIRECTORY ${POP_ROOT})
 set_tests_properties(scaler_build_slot_tests PROPERTIES LABELS nogame)
 
+add_executable(gpuarchiver_cleanup_tests tests/gpuarchiver_cleanup_tests.cpp)
+target_compile_options(gpuarchiver_cleanup_tests PRIVATE ${POP_WARN_STRICT})
+pop_optimize(gpuarchiver_cleanup_tests 1)
+pop_test_binary(gpuarchiver_cleanup_tests)
+add_test(NAME gpuarchiver_cleanup_tests COMMAND gpuarchiver_cleanup_tests WORKING_DIRECTORY ${POP_ROOT})
+set_tests_properties(gpuarchiver_cleanup_tests PROPERTIES LABELS nogame)
+
 add_executable(gpu_fake_tests fake/tests/gpu_fake_tests.cpp)
 target_link_libraries(gpu_fake_tests PRIVATE gpu_fake)
 target_compile_options(gpu_fake_tests PRIVATE ${POP_WARN_STRICT})

@@ -32,6 +32,7 @@
 #include "shader_warm_queue.h"
 #include "pipeline_warm_spec.h"
 #include "scaler_build_slot.h"
+#include "gpuarchiver_cleanup.h"
 #include "../../present.h"
 #include "../../gpu_time.h"
 #include "../d3d9_backend.h"
@@ -41,7 +42,9 @@
 #include <future>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -503,6 +506,31 @@ MTLRenderPipelineDescriptor *warm_descriptor(const PipeSpec &p, id<MTLFunction> 
     return pd;
 }
 
+// The folders Metal makes its archive work folders in (gpuarchiver_cleanup.h): in the user's cache
+// folder, under the bundle id when there is one. confstr gives no path on iOS, so the Caches
+// folder is looked at too. *own: the folders are this application's alone (a bundle id).
+std::vector<std::string> gpuarchiver_folders(bool *own) {
+    std::vector<std::string> bases, out;
+    char buf[PATH_MAX];
+    if (size_t n = confstr(_CS_DARWIN_USER_CACHE_DIR, buf, sizeof buf); n > 1 && n <= sizeof buf)
+        bases.emplace_back(buf);
+    @autoreleasepool {
+        NSArray<NSString *> *c = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+        if (c.count)
+            bases.emplace_back(c[0].UTF8String);
+        NSString *bid = NSBundle.mainBundle.bundleIdentifier;
+        *own = bid.length != 0;
+        for (std::string b : bases) {
+            while (b.size() > 1 && b.back() == '/')
+                b.pop_back();
+            std::string f = *own ? b + "/" + bid.UTF8String + "/com.apple.gpuarchiver" : b + "/com.apple.gpuarchiver";
+            if (std::find(out.begin(), out.end(), f) == out.end())
+                out.push_back(f);
+        }
+    }
+    return out;
+}
+
 class ShaderWarm {
   public:
     ShaderWarm(id<MTLDevice> dev, std::string dir, std::string seed, std::string identity)
@@ -742,6 +770,12 @@ class ShaderWarm {
     void run_pipelines(MTLCompileOptions *opts) {
         const uint64_t t0 = os_monotonic_ns();
         uint32_t made = 0, skipped = 0, taken_over = 0, mismatched = 0;
+        // Metal's work folders before this warm-up adds to the archive and writes it.
+        bool own = false;
+        std::vector<std::pair<std::string, std::set<std::string>>> before;
+        if (archive_)
+            for (const std::string &f : gpuarchiver_folders(&own))
+                before.emplace_back(f, gpuarchiver_cleanup::snapshot(f));
         for (const std::string &spec : pipe_order_) {
             if (stop_.load())
                 break;
@@ -797,8 +831,18 @@ class ShaderWarm {
                 made, (os_monotonic_ns() - t0) / 1e6, skipped, mismatched, taken_over, pipe_order_.size(),
                 stop_.load() ? ", stopped early" : "", archive_hits_, archive_added_);
         archive_save();
+        // The archive is written: the work folders Metal made for it meanwhile are left over (it
+        // never removes them; each write used to leave one more).
+        uint32_t folders = 0;
+        if (archive_added_)
+            for (const auto &[f, had] : before)
+                folders += gpuarchiver_cleanup::remove_where(
+                    f, [&had](const gpuarchiver_cleanup::Entry &e) { return !had.count(e.name); });
+        if (folders)
+            fprintf(stderr, "d3d9 metal: pipeline archive: removed %u Metal work folders of this write\n", folders);
     }
     void run() {
+        sweep_gpuarchiver();
         const uint64_t t0 = os_monotonic_ns();
         uint32_t compiled = 0, skipped = 0, taken_over = 0;
         MTLCompileOptions *opts = options();
@@ -895,6 +939,23 @@ class ShaderWarm {
             if ([archive_ addRenderPipelineFunctionsWithDescriptor:pd error:&error])
                 ++archive_added_;
         }
+    }
+    // At start, before this run writes the archive: Metal's work folders left by earlier runs.
+    // Only this application's own (under its bundle id), and only ones untouched for 10 minutes
+    // (another copy of the game may be writing an archive right now).
+    void sweep_gpuarchiver() {
+        if (!archive_)
+            return;
+        bool own = false;
+        const std::vector<std::string> folders = gpuarchiver_folders(&own);
+        if (!own)
+            return;
+        const time_t old = time(nullptr) - 600;
+        uint32_t n = 0;
+        for (const std::string &f : folders)
+            n += gpuarchiver_cleanup::remove_where(f, [old](const gpuarchiver_cleanup::Entry &e) { return e.mtime < old; });
+        if (n)
+            fprintf(stderr, "d3d9 metal: pipeline archive: removed %u work folders Metal left behind\n", n);
     }
     void archive_save() {
         if (!archive_ || !archive_added_)
