@@ -63,6 +63,12 @@ REG_CACHE = False
 # the context every flag store is a memory store the C compiler must keep,
 # since a guest store may alias the context; a local it drops when dead.
 FLAG_CACHE = False
+# game.toml [translate] x87_cache: inside a straight run of instructions (no
+# label, call, jump or return between them) keep the x87 registers the run
+# touches in C locals (X87Run). The context's registers, tags, exact-integer
+# marks and TOP are written once where the run ends, exactly as the
+# instruction-by-instruction code would have left them.
+X87_CACHE = False
 # game.toml [translate] ret_hint: each CALL stores its continuation in
 # c->ret_expect, each function takes it on entry, and a RET that pops it back
 # returns without recomp_return's continuation lookup (runtime/x86.h).
@@ -107,9 +113,10 @@ def configure_module(cfg, key):
     global RESUMABLE_STACKS, FLAG_LIVENESS
     RESUMABLE_STACKS = cfg["translate"].get("resumable_stacks", False)
     FLAG_LIVENESS = cfg["translate"].get("flag_liveness", "block")
-    global REG_CACHE, RET_HINT, FLAG_CACHE
+    global REG_CACHE, RET_HINT, FLAG_CACHE, X87_CACHE
     REG_CACHE = bool(cfg["translate"].get("reg_cache", False))
     FLAG_CACHE = bool(cfg["translate"].get("flag_cache", False))
+    X87_CACHE = bool(cfg["translate"].get("x87_cache", False))
     RET_HINT = bool(cfg["translate"].get("ret_hint", False))
     mods = {m["key"]: m for m in cfg.get("aux_modules", [])}
     if key not in mods:
@@ -166,9 +173,10 @@ def configure(cfg):
     global RESUMABLE_STACKS, FLAG_LIVENESS
     RESUMABLE_STACKS = cfg["translate"].get("resumable_stacks", False)
     FLAG_LIVENESS = cfg["translate"].get("flag_liveness", "block")
-    global REG_CACHE, RET_HINT, FLAG_CACHE
+    global REG_CACHE, RET_HINT, FLAG_CACHE, X87_CACHE
     REG_CACHE = bool(cfg["translate"].get("reg_cache", False))
     FLAG_CACHE = bool(cfg["translate"].get("flag_cache", False))
+    X87_CACHE = bool(cfg["translate"].get("x87_cache", False))
     RET_HINT = bool(cfg["translate"].get("ret_hint", False))
     EXTRA_ENTRY_POINTS = frozenset(int(a) for a in cfg["translate"].get("entry_points", ()))
     global DATA_RANGES
@@ -851,6 +859,8 @@ REG_FREE_HELPERS = frozenset((
     "fx87", "fx87_exact", "fto_float", "fto_i16", "fto_i32", "fto_i64", "recomp_comis",
     "fpush", "fpush_st", "fpush_int", "fcopy", "fxch", "fstsw", "fcom", "fucom", "fdivz",
     "fround_cw", "x87_set_cw", "fist_i16", "fist_i32", "fist_i64", "fistt_i32", "fistt_i64",
+    "ftag_put", "ftag_of", "fist_i16_v", "fist_i32_v", "fist_i64_v", "fistt_i16_v", "fistt_i32_v",
+    "fistt_i64_v",
     "x86_get_eflags", "x86_set_eflags", "imul2_32_f", "shld32_f", "shrd32_f"))
 REG_FREE_HELPER_RE = re.compile(r"^(shl|shr|sar|rol|ror|rcl|rcr)(8|16|32)_f$")
 # Helpers that use some registers: those are written back before and read
@@ -937,7 +947,9 @@ FLAG_FREE_HELPERS = frozenset((
     "ST", "xmm_f32", "xmm_set_f32", "xmm_f64", "xmm_set_f64", "fdrop", "fset", "fpop",
     "fx87", "fx87_exact", "fto_float", "fto_i16", "fto_i32", "fto_i64",
     "fpush", "fpush_st", "fpush_int", "fcopy", "fxch", "fstsw", "fcom", "fucom", "fdivz",
-    "fround_cw", "x87_set_cw", "fist_i16", "fist_i32", "fist_i64", "fistt_i32", "fistt_i64"))
+    "fround_cw", "x87_set_cw", "fist_i16", "fist_i32", "fist_i64", "fistt_i32", "fistt_i64",
+    "ftag_put", "ftag_of", "fist_i16_v", "fist_i32_v", "fist_i64_v", "fistt_i16_v", "fistt_i32_v",
+    "fistt_i64_v"))
 _SHIFT_FLAGS = frozenset(("cf", "of", "pf", "sf", "zf"))
 _MUL_FLAGS = frozenset(("cf", "of"))
 _SAHF_FLAGS = frozenset(("cf", "pf", "af", "zf", "sf"))
@@ -2106,7 +2118,285 @@ def noreturn_callees_from(parsed, iat_names, image=None):
     return out
 
 
+# ------------------------------------------------------------------ x87 ----
+
+class X87Flush(Exception):
+    """The x87 run cannot take this instruction: the run is written back to
+    the context and the instruction is translated against the context."""
+
+
+class X87Context(object):
+    """The x87 stack in the context: every instruction reads and writes c->st,
+    the tags and TOP through runtime/x86.h's helpers."""
+    caching = False
+
+    def st(self, n):
+        return "ST(c, %d)" % n
+
+    def set(self, n, v):
+        return ["fset(c, %d, %s);" % (n, v)]
+
+    def push(self, v):
+        return ["fpush(c, %s);" % v]
+
+    def push_int(self, v):
+        return ["fpush_int(c, %s);" % v]
+
+    def push_st(self, i):
+        return ["fpush_st(c, %d);" % i]
+
+    def pop(self):
+        return ["fdrop(c);"]
+
+    def pop2(self):
+        return ["fdrop(c); fdrop(c);"]
+
+    def copy(self, d, s):
+        return ["fcopy(c, %d, %d);" % (d, s)]
+
+    def xch(self, i):
+        return ["fxch(c, %d);" % i]
+
+    def fist(self, f, size):
+        return "%s_i%d(c)" % (f, size)
+
+    def bstp(self, addr):
+        return ["wrbcd80(%s, fpop(c));" % addr]
+
+    def whole_state(self):
+        """An instruction that reads or writes TOP, the tags or the whole
+        x87 state, not just ST(i) values."""
+
+    def take_pre(self):
+        return []
+
+
+class X87Run(object):
+    """The x87 registers in C locals over a straight run of instructions
+    (game.toml [translate] x87_cache).
+
+    Positions count from TOP as it was when the run began (x87t_): ST(i) is
+    position depth + i, and a push lowers depth. A position holds
+      ("E", e)     what position e held when the run began - value, exact
+                   integer and tag, all still in the context, which the run
+                   does not write until it ends;
+      ("V", v)     a double in the local v (not an exact integer);
+      ("I", v, i)  FILD's value: the double v and the exact int64 i;
+      ("P", slot)  popped: the register keeps slot's value, its tag empty.
+    A position never touched is ("E", p). At the end the context is written
+    once: the entry contents that moved are read first, then each changed
+    position, its tag, and TOP - the state the per-instruction helpers would
+    have left. Eight positions apart are one register, so a run that would
+    span eight positions ends before it does (X87Flush)."""
+    caching = True
+
+    def __init__(self, names):
+        self.names = names            # [next free number], shared per function
+        self.depth = 0
+        self.slots = {}
+        self.loads = {}               # entry position -> local with its value
+        self.lo = self.hi = None      # the positions touched so far
+        self.doubles = []
+        self.ints = []
+        self.pre = []
+        self.taken = 0
+
+    def clone(self):
+        o = X87Run.__new__(X87Run)
+        o.names = self.names
+        o.depth, o.lo, o.hi, o.taken = self.depth, self.lo, self.hi, self.taken
+        o.slots = dict(self.slots)
+        o.loads = dict(self.loads)
+        o.doubles = list(self.doubles)
+        o.ints = list(self.ints)
+        o.pre = list(self.pre)
+        return o
+
+    def _new(self, kind):
+        n = self.names[0]
+        self.names[0] += 1
+        name = "x87%s%d_" % (kind, n)
+        (self.doubles if kind == "f" else self.ints).append(name)
+        return name
+
+    @staticmethod
+    def phys(p):
+        return "(x87t_ + %du) & 7u" % (p % 8)
+
+    def _touch(self, p):
+        self.lo = p if self.lo is None else min(self.lo, p)
+        self.hi = p if self.hi is None else max(self.hi, p)
+        if self.hi - self.lo >= 8:
+            raise X87Flush("the run would reach a register twice")
+
+    def _slot(self, p):
+        self._touch(p)
+        return self.slots.get(p, ("E", p))
+
+    def _value(self, slot):
+        if slot[0] == "E":
+            e = slot[1]
+            if e not in self.loads:
+                v = self._new("f")
+                self.loads[e] = v
+                self.pre.append("%s = c->st[%s];" % (v, self.phys(e)))
+            return self.loads[e]
+        if slot[0] in ("V", "I"):
+            return slot[1]
+        raise X87Flush("a popped register is read")
+
+    def st(self, n):
+        return self._value(self._slot(self.depth + n))
+
+    def set(self, n, v):
+        p = self.depth + n
+        self._touch(p)
+        name = self._new("f")
+        self.slots[p] = ("V", name)
+        return ["%s = %s;" % (name, v)]
+
+    def push(self, v):
+        name = self._new("f")
+        self.depth -= 1
+        self._touch(self.depth)
+        self.slots[self.depth] = ("V", name)
+        return ["%s = %s;" % (name, v)]
+
+    def push_int(self, v):
+        i = self._new("i")
+        name = self._new("f")
+        self.depth -= 1
+        self._touch(self.depth)
+        self.slots[self.depth] = ("I", name, i)
+        return ["%s = (int64_t)(%s);" % (i, v), "%s = (double)%s;" % (name, i)]
+
+    def push_st(self, i):
+        src = self._slot(self.depth + i)
+        if src[0] == "P":
+            raise X87Flush("a popped register is read")
+        self.depth -= 1
+        self._touch(self.depth)
+        self.slots[self.depth] = src
+        return []
+
+    def pop(self):
+        p = self.depth
+        self.slots[p] = ("P", self._slot(p))
+        self.depth += 1
+        return []
+
+    def pop2(self):
+        return self.pop() + self.pop()
+
+    def copy(self, d, s):
+        src = self._slot(self.depth + s)
+        self._touch(self.depth + d)
+        self.slots[self.depth + d] = src
+        return []
+
+    def xch(self, i):
+        a, b = self.depth, self.depth + i
+        sa, sb = self._slot(a), self._slot(b)
+        self.slots[a], self.slots[b] = sb, sa
+        return []
+
+    def fist(self, f, size):
+        slot = self._slot(self.depth)
+        v = self._value(slot)
+        if slot[0] == "E":
+            ph = self.phys(slot[1])
+            return "%s_i%d_v(c, %s, c->st_exact[%s], (int64_t)c->st_bits[%s])" % (f, size, v, ph, ph)
+        if slot[0] == "I":
+            return "%s_i%d_v(c, %s, 1u, %s)" % (f, size, v, slot[2])
+        return "%s_i%d_v(c, %s, 0u, 0)" % (f, size, v)
+
+    def bstp(self, addr):
+        return ["wrbcd80(%s, %s);" % (addr, self.st(0))] + self.pop()
+
+    def whole_state(self):
+        raise X87Flush("the instruction reads or writes the whole x87 state")
+
+    def take_pre(self):
+        pre, self.pre = self.pre, []
+        return pre
+
+    def header(self):
+        """The run's opening line: TOP as the run found it, and its locals."""
+        line = "{   /* x87 run */ const unsigned x87t_ = c->fpu_top;"
+        if self.doubles:
+            line += " double %s;" % ", ".join(self.doubles)
+        if self.ints:
+            line += " int64_t %s;" % ", ".join(self.ints)
+        return line
+
+    def flush(self):
+        """The lines that leave the context as the per-instruction code would
+        have: entry contents read before anything is written."""
+        reads, writes = [], []
+        for p in sorted(self.slots):
+            slot = self.slots[p]
+            if slot == ("E", p):
+                continue
+            ph = self.phys(p)
+            if slot[0] == "P":
+                inner = slot[1]
+                if inner != ("E", p):
+                    writes.append("c->st[%s] = %s;" % (ph, self._value(inner)))
+                writes.append("c->st_exact[%s] = 0;" % ph)
+                writes.append("ftag_put(c, %s, FTAG_EMPTY);" % ph)
+            elif slot[0] == "E":
+                e = slot[1]
+                v = self._value(slot)
+                n = self.names[0]
+                self.names[0] += 1
+                pe = self.phys(e)
+                reads.append("const uint64_t x87b%d_ = c->st_bits[%s];" % (n, pe))
+                reads.append("const uint8_t x87x%d_ = c->st_exact[%s];" % (n, pe))
+                reads.append("const unsigned x87g%d_ = ftag_of(c, %s);" % (n, pe))
+                writes.append("c->st[%s] = %s;" % (ph, v))
+                writes.append("c->st_bits[%s] = x87b%d_;" % (ph, n))
+                writes.append("c->st_exact[%s] = x87x%d_;" % (ph, n))
+                writes.append("ftag_put(c, %s, x87g%d_);" % (ph, n))
+            elif slot[0] == "V":
+                writes.append("c->st[%s] = %s;" % (ph, slot[1]))
+                writes.append("c->st_exact[%s] = 0;" % ph)
+                writes.append("ftag_put(c, %s, ftag_classify(%s));" % (ph, slot[1]))
+            else:
+                writes.append("c->st[%s] = %s;" % (ph, slot[1]))
+                writes.append("c->st_bits[%s] = (uint64_t)%s;" % (ph, slot[2]))
+                writes.append("c->st_exact[%s] = 1;" % ph)
+                writes.append("ftag_put(c, %s, ftag_classify(%s));" % (ph, slot[1]))
+        if self.depth % 8:
+            writes.append("c->fpu_top = (x87t_ + %du) & 7u;" % (self.depth % 8))
+        return ["    " + l for l in self.take_pre() + reads + writes + ["(void)x87t_;"]] + ["}"]
+
+
+X87_CONTEXT = X87Context()
+
+#: Instructions an x87 run goes on across (X87_CACHE): they never read or
+#: write the x87 state and never leave the straight line. Anything else ends
+#: the run first.
+X87_PASS = frozenset((
+    "MOV", "MOVZX", "MOVSX", "LEA", "ADD", "ADC", "SUB", "SBB", "AND", "OR", "XOR",
+    "CMP", "TEST", "INC", "DEC", "NEG", "NOT", "SHL", "SAL", "SHR", "SAR", "ROL", "ROR",
+    "IMUL", "PUSH", "POP", "XCHG", "CDQ", "CWDE", "CBW", "CWD", "NOP", "BSWAP"))
+_X87_STATE = re.compile(r"fpu_|c->st|ST\(c|\bx87_|fstsw|fxam|recomp_")
+
+
+def x87_passes(ins, body):
+    """An x87 run may go on across this instruction's body."""
+    m = ins.mnem
+    if not (m in X87_PASS or m.startswith("SET") or m.startswith("CMOV")):
+        return False
+    return not any(_X87_STATE.search(line) for line in body)
+
+
 class Translator(object):
+    #: The open x87 run while one instruction is emitted into it (X87_CACHE),
+    #: and whether that instruction went through emit_x87.
+    x87 = None
+    x87_used = False
+
     def __init__(self, image, func_addrs, opts):
         self.image = image
         self.func_addrs = func_addrs      # set of all known function entry points
@@ -3178,12 +3468,48 @@ class Translator(object):
             if head:
                 out.append("    goto L_%08x;" % fn.addr)
         prologue = len(out)          # everything emitted so far is dispatch
+        # X87_CACHE: the open x87 run (X87Run) and the line its opening goes
+        # to, filled in when it ends.
+        run, run_at, x87_names = None, 0, [0]
+
+        def end_run():
+            nonlocal run
+            if run is not None:
+                tail = run.flush()
+                out[run_at] = "    " + run.header()
+                out.extend("    " + line for line in tail)
+                self.stats["_x87_run"] += 1
+                self.stats["_x87_run_insns"] += run.taken
+                run = None
+
         for i, ins in enumerate(fn.insns):
             if i in dead:
                 continue
             if ins.addr in labels:
+                end_run()
                 out.append("L_%08x: ;" % ins.addr)
-            body = self.emit(fn, i, live_out[i])
+            body = None
+            if X87_CACHE and ins.mnem.startswith("F"):
+                trial = run.clone() if run is not None else X87Run(x87_names)
+                self.x87, self.x87_used = trial, False
+                try:
+                    body = self.emit(fn, i, live_out[i])
+                except X87Flush:
+                    body = None
+                finally:
+                    self.x87 = None
+                if body is not None and self.x87_used:
+                    if run is None:
+                        run_at = len(out)
+                        out.append(None)
+                    run = trial
+                    run.taken += 1
+                else:
+                    end_run()
+            if body is None:
+                body = self.emit(fn, i, live_out[i])
+                if run is not None and not x87_passes(ins, body):
+                    end_run()
             for line in body:
                 out.append("    " + line)
             # An INT3 the listing ran into is MSVC's padding between
@@ -3191,12 +3517,14 @@ class Translator(object):
             # this body ends here rather than falling through into it.
             if (not fn.contiguous[i] and ins.mnem not in TERMINATORS
                     and ins.mnem != "INT3" and not self.never_returns(ins)):
+                end_run()
                 t = fn.fallthrough[i]
                 self.stats["_listing_gap"] += 1
                 self.notes.append(
                     "%08x: listing gap, %s falls through to %08x" % (ins.addr, ins.mnem, t))
                 for line in self.goto_target(fn, t, ins):
                     out.append("    " + line)
+        end_run()
         # A function whose last listed instruction is not a terminator falls
         # through into the next function.
         last_i = max(i for i in range(len(fn.insns)) if i not in dead)
@@ -4369,40 +4697,48 @@ class Translator(object):
         return ["c->mm[%d] = %s(c->mm[%d], %s);" % (dst.reg, fn, dst.reg, src(ops[1]))]
 
     def emit_x87(self, fn, ins, m, ops):
+        # The stack is the context's (X87Context) or a run's locals (X87Run,
+        # game.toml x87_cache); entry values a run loads go first.
+        b = self.x87 or X87_CONTEXT
+        self.x87_used = True
+        body = self._emit_x87(fn, ins, m, ops, b)
+        L = b.take_pre() + body
+        # A run moves registers without a line of code (FXCH, FLD ST(i)).
+        return L or [";"]
+
+    def _emit_x87(self, fn, ins, m, ops, b):
         L = []
-        st = lambda n: "ST(c, %d)" % n
-        # Writing a register goes through fset so its tag follows the value.
-        setst = lambda n, v: "fset(c, %d, %s);" % (n, v)
+        st = b.st
 
         if m == "FLD":
             if ops[0].kind == "st":
-                L.append("fpush_st(c, %d);" % ops[0].sti)
+                L += b.push_st(ops[0].sti)
             else:
-                L.append("fpush(c, %s);" % self.x87_mem_value(ops[0]))
+                L += b.push(self.x87_mem_value(ops[0]))
             return L
         if m == "FLD1":
-            return ["fpush(c, 1.0);"]
+            return b.push("1.0")
         if m == "FLDZ":
-            return ["fpush(c, 0.0);"]
+            return b.push("0.0")
         if m == "FLDPI":
-            return ["fpush(c, 3.14159265358979323846);"]
+            return b.push("3.14159265358979323846")
         if m == "FLDLN2":
-            return ["fpush(c, 0.69314718055994530942);"]
+            return b.push("0.69314718055994530942")
         if m == "FLDL2E":
-            return ["fpush(c, 1.44269504088896340736);"]
+            return b.push("1.44269504088896340736")
         if m == "FLDLG2":
-            return ["fpush(c, 0.30102999566398119521);"]
+            return b.push("0.30102999566398119521")
         if m == "FLDL2T":
-            return ["fpush(c, 3.32192809488736234787);"]
+            return b.push("3.32192809488736234787")
         if m == "FBSTP":
-            return ["wrbcd80(%s, fpop(c));" % addr_expr(ops[0])]
+            return b.bstp(addr_expr(ops[0]))
         if m == "FILD":
-            return ["fpush_int(c, %s);" % self.x87_signed_value(ops[0])]
+            return b.push_int(self.x87_signed_value(ops[0]))
 
         if m in ("FST", "FSTP"):
             if ops and ops[0].kind == "st":
                 if ops[0].sti != 0:
-                    L.append("fcopy(c, %d, 0);" % ops[0].sti)
+                    L += b.copy(ops[0].sti, 0)
             elif ops:
                 op = ops[0]
                 if op.size == 32:
@@ -4414,22 +4750,22 @@ class Translator(object):
                 else:
                     raise TranslateError("bad %s size" % m)
             if m == "FSTP":
-                L.append("fdrop(c);")
+                L += b.pop()
             return L
 
         if m in ("FIST", "FISTP", "FISTTP"):
             op = ops[0]
             f = "fistt" if m == "FISTTP" else "fist"
             if op.size == 16:
-                L.append("wr16(%s, (uint16_t)%s_i16(c));" % (addr_expr(op), f))
+                L.append("wr16(%s, (uint16_t)%s);" % (addr_expr(op), b.fist(f, 16)))
             elif op.size == 32:
-                L.append("wr32(%s, (uint32_t)%s_i32(c));" % (addr_expr(op), f))
+                L.append("wr32(%s, (uint32_t)%s);" % (addr_expr(op), b.fist(f, 32)))
             elif op.size == 64:
-                L.append("wr64(%s, (uint64_t)%s_i64(c));" % (addr_expr(op), f))
+                L.append("wr64(%s, (uint64_t)%s);" % (addr_expr(op), b.fist(f, 64)))
             else:
                 raise TranslateError("bad %s size" % m)
             if m in ("FISTP", "FISTTP"):
-                L.append("fdrop(c);")
+                L += b.pop()
             return L
 
         # arithmetic ------------------------------------------------------
@@ -4450,7 +4786,7 @@ class Translator(object):
             if len(ops) == 2:
                 d, s = ops[0].sti, ops[1].sti
                 lhs, rhs = (st(s), st(d)) if rev else (st(d), st(s))
-                L.append(setst(d, "fx87(c, %s)" % combine(lhs, o, rhs)))
+                L.extend(b.set(d, "fx87(c, %s)" % combine(lhs, o, rhs)))
             elif ops[0].kind == "st":
                 # Ghidra can print both D8 (ST0 destination) and DC (STi
                 # destination) as a single STi operand. Recover the direction
@@ -4462,12 +4798,12 @@ class Translator(object):
                     at += 1
                 d, s = (ops[0].sti, 0) if self.image.rd8(at) == 0xdc else (0, ops[0].sti)
                 lhs, rhs = (st(s), st(d)) if rev else (st(d), st(s))
-                L.append(setst(d, "fx87(c, %s)" % combine(lhs, o, rhs)))
+                L.extend(b.set(d, "fx87(c, %s)" % combine(lhs, o, rhs)))
             else:
                 v = (self.x87_mem_value(ops[0]))
                 L.append("double v_ = %s;" % v)
                 lhs, rhs = ("v_", st(0)) if rev else (st(0), "v_")
-                L.append(setst(0, "fx87(c, %s)" % combine(lhs, o, rhs)))
+                L.extend(b.set(0, "fx87(c, %s)" % combine(lhs, o, rhs)))
             return L
 
         if base:                             # FADDP/FSUBP/FMULP/FDIVP/...
@@ -4475,8 +4811,8 @@ class Translator(object):
             o = ARITH[base]
             d = ops[0].sti if ops else 1
             lhs, rhs = (st(0), st(d)) if rev else (st(d), st(0))
-            L.append(setst(d, "fx87(c, %s)" % combine(lhs, o, rhs)))
-            L.append("fdrop(c);")
+            L.extend(b.set(d, "fx87(c, %s)" % combine(lhs, o, rhs)))
+            L += b.pop()
             return L
 
         IARITH = {"FIADD": "+", "FISUB": "-", "FIMUL": "*", "FIDIV": "/",
@@ -4486,7 +4822,7 @@ class Translator(object):
             o = IARITH[m]
             L.append("double v_ = %s;" % self.x87_int_value(ops[0]))
             lhs, rhs = ("v_", st(0)) if rev else (st(0), "v_")
-            L.append(setst(0, "fx87(c, %s)" % combine(lhs, o, rhs)))
+            L.extend(b.set(0, "fx87(c, %s)" % combine(lhs, o, rhs)))
             return L
 
         # comparison ------------------------------------------------------
@@ -4503,28 +4839,29 @@ class Translator(object):
             L.append("%s(c, %s, %s);" % ("fucom" if m.startswith("FU") else "fcom",
                                          st(0), other))
             if m.endswith("P"):
-                L.append("fdrop(c);")
+                L += b.pop()
             return L
         if m in ("FCOMPP", "FUCOMPP"):
             L.append("%s(c, %s, %s);" % ("fucom" if m.startswith("FU") else "fcom",
                                          st(0), st(1)))
-            L.append("fdrop(c); fdrop(c);")
+            L += b.pop2()
             return L
         if m in ("FICOM", "FICOMP"):
             L.append("fcom(c, %s, %s);" % (st(0), self.x87_int_value(ops[0])))
             if m == "FICOMP":
-                L.append("fdrop(c);")
+                L += b.pop()
             return L
         if m in ("FCOMI", "FCOMIP", "FUCOMI", "FUCOMIP"):
             other = st(ops[-1].sti) if ops else st(1)
             L.append("%s(c, %s, %s);" % ("fucomi" if m.startswith("FU") else "fcomi",
                                          st(0), other))
             if m.endswith("IP"):
-                L.append("fdrop(c);")
+                L += b.pop()
             return L
         if m == "FTST":
             return ["fcom(c, %s, 0.0);" % st(0)]
         if m == "FXAM":
+            b.whole_state()
             return ["fxam(c);"]
 
         # transcendental / misc --------------------------------------------
@@ -4541,51 +4878,53 @@ class Translator(object):
                  "FCOS": "fx87_exact(c, recomp_libm_cos(%s))",
                  "FRNDINT": "fx87_exact(c, fround_cw(c, %s))"}
         if m in UNARY:
-            return [setst(0, UNARY[m] % st(0))]
+            return b.set(0, UNARY[m] % st(0))
         if m == "FPTAN":
             L.append("double v_ = %s;" % st(0))
-            L.append(setst(0, "fx87_exact(c, recomp_libm_tan(v_))"))
-            L.append("fpush(c, 1.0);")
+            L.extend(b.set(0, "fx87_exact(c, recomp_libm_tan(v_))"))
+            L += b.push("1.0")
             return L
         if m == "FSINCOS":
             L.append("double v_ = %s;" % st(0))
-            L.append(setst(0, "fx87_exact(c, recomp_libm_sin(v_))"))
-            L.append("fpush(c, fx87_exact(c, recomp_libm_cos(v_)));")
+            L.extend(b.set(0, "fx87_exact(c, recomp_libm_sin(v_))"))
+            L += b.push("fx87_exact(c, recomp_libm_cos(v_))")
             return L
         if m == "FSCALE":
-            return [setst(0, "fx87_exact(c, fscale(%s, %s))" % (st(0), st(1)))]
+            return b.set(0, "fx87_exact(c, fscale(%s, %s))" % (st(0), st(1)))
         if m == "FPATAN":
-            L.append(setst(1, "fx87_exact(c, recomp_libm_atan2(%s, %s))" % (st(1), st(0))))
-            L.append("fdrop(c);")
+            L.extend(b.set(1, "fx87_exact(c, recomp_libm_atan2(%s, %s))" % (st(1), st(0))))
+            L += b.pop()
             return L
         if m == "FYL2X":
-            L.append(setst(1, "fx87_exact(c, %s * recomp_libm_log2(%s))" % (st(1), st(0))))
-            L.append("fdrop(c);")
+            L.extend(b.set(1, "fx87_exact(c, %s * recomp_libm_log2(%s))" % (st(1), st(0))))
+            L += b.pop()
             return L
         if m == "FYL2XP1":
             # log2(x+1) loses every significant bit for small x; log1p keeps
             # them.  With ST(0) = 2^-54 and ST(1) = 1 the naive form returns 0.
-            L.append(setst(1, "fx87_exact(c, %s * recomp_libm_log1p(%s) / M_LN2)"
+            L.extend(b.set(1, "fx87_exact(c, %s * recomp_libm_log1p(%s) / M_LN2)"
                            % (st(1), st(0))))
-            L.append("fdrop(c);")
+            L += b.pop()
             return L
         if m == "F2XM1":
             # Likewise 2^x - 1: expm1(x * ln 2) is the same value without the
             # cancellation.
-            return [setst(0, "fx87_exact(c, recomp_libm_expm1(%s * M_LN2))" % st(0))]
+            return b.set(0, "fx87_exact(c, recomp_libm_expm1(%s * M_LN2))" % st(0))
         if m in ("FPREM", "FPREM1"):
-            return [setst(0, "fprem_common(c, %s, %s, %d)"
-                          % (st(0), st(1), 1 if m == "FPREM1" else 0))]
+            return b.set(0, "fprem_common(c, %s, %s, %d)"
+                         % (st(0), st(1), 1 if m == "FPREM1" else 0))
         if m == "FXTRACT":
             L.append("double v_ = %s;" % st(0))
-            L.append(setst(0, "fxtract_exponent(v_)"))
-            L.append("fpush(c, fxtract_significand(v_));")
+            L.extend(b.set(0, "fxtract_exponent(v_)"))
+            L += b.push("fxtract_significand(v_)")
             return L
         if m == "FDECSTP":
+            b.whole_state()
             # Both rotate TOP and clear C1.
             return ["c->fpu_top = (c->fpu_top - 1u) & 7u;",
                     "c->fpu_sw &= (uint16_t)~0x0200u;"]
         if m == "FINCSTP":
+            b.whole_state()
             return ["c->fpu_top = (c->fpu_top + 1u) & 7u;",
                     "c->fpu_sw &= (uint16_t)~0x0200u;"]
         if m == "FNOP":
@@ -4594,26 +4933,34 @@ class Translator(object):
             # Capstone renders D9 C9 with the implicit ST(0) present, as
             # `FXCH ST0,ST1`, where the listing writes `FXCH ST1`.  Taking
             # ops[0] there selects ST(0) and swaps the register with itself.
-            return ["fxch(c, %d);" % (ops[-1].sti if ops else 1)]
+            return b.xch(ops[-1].sti if ops else 1)
         if m in ("FNSTSW", "FSTSW"):
+            b.whole_state()
             if ops and ops[0].kind == "reg":
                 return ["c->r[0] = (c->r[0] & 0xffff0000u) | fstsw(c);"]
             return ["wr16(%s, fstsw(c));" % addr_expr(ops[0])]
         if m in ("FSTCW", "FNSTCW"):
+            b.whole_state()
             return ["wr16(%s, c->fpu_cw);" % addr_expr(ops[0])]
         if m == "FLDCW":
+            b.whole_state()
             return ["x87_set_cw(c, rd16(%s));" % addr_expr(ops[0])]
         if m == "FFREE":
             return [";"]
         if m in ("FSAVE", "FNSAVE"):
+            b.whole_state()
             return ["x87_fnsave(c, %s);" % addr_expr(ops[0])]
         if m == "FRSTOR":
+            b.whole_state()
             return ["x87_frstor(c, %s);" % addr_expr(ops[0])]
         if m in ("FINIT", "FNINIT"):
+            b.whole_state()
             return ["x87_finit(c);"]
         if m in ("FNSTENV", "FSTENV"):
+            b.whole_state()
             return ["x87_fnstenv(c, %s);" % addr_expr(ops[0])]
         if m == "FLDENV":
+            b.whole_state()
             return ["x87_fldenv(c, %s);" % addr_expr(ops[0])]
 
         raise TranslateError("unhandled x87 mnemonic %s" % m)
@@ -6352,12 +6699,14 @@ def main():
         # or modify its CPU. The first guest operation must still reach ADDR.
         # REG_CACHE: loading the register locals does not touch the guest,
         # nor does copying the flags (FLAG_CACHE);
-        # RET_HINT: nor does taking the caller's continuation. They come in
-        # whichever order the passes put them.
+        # RET_HINT: nor does taking the caller's continuation; X87_CACHE: nor
+        # does opening an x87 run (it reads TOP and declares its locals). They
+        # come in whichever order the passes put them.
         while lines and (lines[0].strip() == "uint64_t seh_mark_ = recomp_seh_frame_mark(c);"
                          or (lines[0].strip().startswith("uint32_t r") and "= c->r[" in lines[0])
                          or (lines[0].strip().startswith("uint32_t f") and "= c->eflags_" in lines[0])
-                         or lines[0].strip() == "const uint32_t ret_exp_ = c->ret_expect;"):
+                         or lines[0].strip() == "const uint32_t ret_exp_ = c->ret_expect;"
+                         or lines[0].strip().startswith("{   /* x87 run */")):
             lines = lines[1:]
         if not lines:
             continue

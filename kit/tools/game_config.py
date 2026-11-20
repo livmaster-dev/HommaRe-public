@@ -194,6 +194,8 @@ def load(game_dir):
         raise ValueError("%s: [translate] reg_cache must be a boolean" % source)
     if not isinstance(translate.setdefault("flag_cache", False), bool):
         raise ValueError("%s: [translate] flag_cache must be a boolean" % source)
+    if not isinstance(translate.setdefault("x87_cache", False), bool):
+        raise ValueError("%s: [translate] x87_cache must be a boolean" % source)
     alignment = translate.setdefault("function_alignment", 16)
     if type(alignment) is not int or alignment <= 0:
         raise ValueError("%s: [translate] function_alignment must be a positive integer" % source)
