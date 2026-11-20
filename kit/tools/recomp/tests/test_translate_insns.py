@@ -12,7 +12,8 @@ arithmetic flags and the scratch memory both sides wrote must agree.
 No game is needed: the cases are their own machine code.  A translator that
 cannot emit a case fails that case's test with the translator's error, and
 the remaining cases still build and run.  clang must be on PATH (a skip
-otherwise)."""
+otherwise).  Every case runs twice: with the guest registers and flags in the
+context, and with game.toml's reg_cache and flag_cache on (CACHE_MODES)."""
 
 import ctypes as C
 import os
@@ -40,7 +41,7 @@ import translate as T  # noqa: E402
 # Guest layout shared by both engines.  The code lives in its own page range,
 # the stack and scratch are zeroed before every run, and the cave holds the
 # return address a RET lands on, which is where emulation stops.
-CODE_BASE, CODE_SIZE = 0x0D010000, 0x00020000
+CODE_BASE, CODE_SIZE = 0x0D010000, 0x00030000
 STACK_BASE, STACK_SIZE = 0x0EF00000, 0x00100000
 ESP_INIT = 0x0EFFFF00
 SCRATCH, SCRATCH_SIZE = 0x0E100000, 0x00010000
@@ -936,10 +937,209 @@ class Native(object):
         C.memset(C.addressof(self.mem.contents) + addr, 0, n)
 
 
-@pytest.fixture(scope="module")
-def built():
+# x87 runs (game.toml x87_cache): straight float code the translator keeps in
+# C locals between the points where the context must hold the stack. Inputs
+# are small integers and powers of two, so the 80-bit and the 64-bit results
+# round to the same float.
+def x87_io(rng, mem):
+    return {"regs": rand_regs(rng, ESI=SCRATCH, EDI=SCRATCH + 0x80), "mem": [(SCRATCH, mem)]}
+
+
+def x87_small(rng, n):
+    return [float(rng.randint(-100, 100)) for _ in range(n)]
+
+
+def x87_chain_setup(rng):
+    return x87_io(rng, struct.pack("<6f", *(x87_small(rng, 5) + [rng.choice((-1, 1)) * 2.0 ** rng.randint(-3, 3)])))
+
+
+def x87_cmp_setup(rng):
+    a, b, c = x87_small(rng, 3)
+    if rng.random() < 0.3:
+        b = a
+    return x87_io(rng, struct.pack("<4f", a, b, c, float(rng.randint(-9, 9))))
+
+
+def x87_deep_setup(rng):
+    return x87_io(rng, struct.pack("<5f", *x87_small(rng, 5)))
+
+
+def x87_ints_setup(rng):
+    return x87_io(rng, struct.pack("<ifhxxiq", rng.randint(-2 ** 31, 2 ** 31 - 1), rng.randint(-8, 8) / 2.0,
+                                   rng.randint(-2 ** 15, 2 ** 15 - 1), rng.randint(-2 ** 31, 2 ** 31 - 1),
+                                   rng.randint(-2 ** 63, 2 ** 63 - 1)))
+
+
+def x87_unary_setup(rng):
+    return x87_io(rng, struct.pack("<3f", float(rng.randint(0, 100) ** 2), *x87_small(rng, 2)))
+
+
+def x87_entry_setup(rng):
+    return x87_io(rng, struct.pack("<i", rng.randint(-2 ** 31, 2 ** 31 - 1)))
+
+
+CASES += [
+    Case('x87 run: a straight float chain stays in locals', 0x0D031000,
+         [(0, 'FLD float ptr [ESI]'),
+          (2, 'FLD float ptr [ESI + 0x4]'),
+          (5, 'FLD float ptr [ESI + 0x8]'),
+          (8, 'FLD float ptr [ESI + 0xc]'),
+          (11, 'FSUB ST0,ST2'),
+          (13, 'FSTP float ptr [EDI]'),
+          (15, 'FLD ST2'),
+          (17, 'FSUB ST0,ST2'),
+          (19, 'FDIV float ptr [ESI + 0x14]'),
+          (22, 'FSTP float ptr [EDI + 0x8]'),
+          (25, 'MOV ECX,dword ptr [ESI + 0x10]'),
+          (28, 'FLD float ptr [ESI + 0x10]'),
+          (31, 'FSUB ST0,ST1'),
+          (33, 'FXCH ST3'),
+          (35, 'FSUB ST0,ST1'),
+          (37, 'FMULP ST3,ST0'),
+          (39, 'FXCH ST2'),
+          (41, 'FSTP ST2'),
+          (43, 'FADD ST0,ST0'),
+          (45, 'ADD ECX,0x1'),
+          (48, 'FMUL ST1'),
+          (50, 'FSTP float ptr [EDI + 0x10]'),
+          (53, 'FSTP double ptr [EDI + 0x18]'),
+          (56, 'RET')],
+         'd9 06 d9 46 04 d9 46 08 d9 46 0c d8 e2 d9 1f d9 c2 d8 e2 d8 76 14 d9 5f 08 8b 4e 10 d9 46 10 d8 e1 d9 cb d8 e1 de cb d9 ca dd da d8 c0 83 c1 01 d8 c9 d9 5f 10 dd 5f 18 c3',
+         x87_chain_setup),
+    Case("x87 run ends at FNSTSW and at the branch's label", 0x0D031100,
+         [(0, 'FLD float ptr [ESI + 0x8]'),
+          (3, 'FLD float ptr [ESI]'),
+          (5, 'FCOMP float ptr [ESI + 0x4]'),
+          (8, 'FNSTSW AX'),
+          (10, 'TEST AH,0x41'),
+          (13, 'JNZ 0xd031116'),
+          (15, 'FADD float ptr [ESI + 0xc]'),
+          (18, 'FLD ST0'),
+          (20, 'FMULP ST1,ST0'),
+          (22, 'FSTP float ptr [EDI]'),
+          (24, 'RET')],
+         'd9 46 08 d9 06 d8 5e 04 df e0 f6 c4 41 75 07 d8 46 0c d9 c0 de c9 d9 1f c3',
+         x87_cmp_setup),
+    Case('x87 run: seven pushes, a copy from the bottom and a sum', 0x0D031200,
+         [(0, 'FLD1'),
+          (2, 'FLDZ'),
+          (4, 'FLD float ptr [ESI]'),
+          (6, 'FLD float ptr [ESI + 0x4]'),
+          (9, 'FLD float ptr [ESI + 0x8]'),
+          (12, 'FLD float ptr [ESI + 0xc]'),
+          (15, 'FLD float ptr [ESI + 0x10]'),
+          (18, 'FLD ST6'),
+          (20, 'FADDP ST1,ST0'),
+          (22, 'FADDP ST1,ST0'),
+          (24, 'FXCH ST5'),
+          (26, 'FADDP ST1,ST0'),
+          (28, 'FADDP ST1,ST0'),
+          (30, 'FADDP ST1,ST0'),
+          (32, 'FADDP ST1,ST0'),
+          (34, 'FADDP ST1,ST0'),
+          (36, 'FSTP float ptr [EDI]'),
+          (38, 'RET')],
+         'd9 e8 d9 ee d9 06 d9 46 04 d9 46 08 d9 46 0c d9 46 10 d9 c6 de c1 de c1 d9 cd de c1 de c1 de c1 de c1 de c1 d9 1f c3',
+         x87_deep_setup),
+    Case('x87 run: FILD and FIST keep exact integers in locals', 0x0D031300,
+         [(0, 'FILD dword ptr [ESI]'),
+          (2, 'FMUL float ptr [ESI + 0x4]'),
+          (5, 'FISTP dword ptr [EDI]'),
+          (7, 'FILD word ptr [ESI + 0x8]'),
+          (10, 'FIST word ptr [EDI + 0x4]'),
+          (13, 'FILD dword ptr [ESI + 0xc]'),
+          (16, 'FXCH ST1'),
+          (18, 'FISTP dword ptr [EDI + 0x8]'),
+          (21, 'FISTP word ptr [EDI + 0xc]'),
+          (24, 'FILD qword ptr [ESI + 0x10]'),
+          (27, 'FLD ST0'),
+          (29, 'FISTP qword ptr [EDI + 0x10]'),
+          (32, 'FISTP qword ptr [EDI + 0x18]'),
+          (35, 'RET')],
+         'db 06 d8 4e 04 db 1f df 46 08 df 57 04 db 46 0c d9 c9 db 5f 08 df 5f 0c df 6e 10 d9 c0 df 7f 10 df 7f 18 c3',
+         x87_ints_setup),
+    Case('x87 run: unary forms, a compare and reverse subtraction', 0x0D031400,
+         [(0, 'FLD float ptr [ESI]'),
+          (2, 'FSQRT'),
+          (4, 'FLD float ptr [ESI + 0x4]'),
+          (7, 'FCHS'),
+          (9, 'FABS'),
+          (11, 'FADDP ST1,ST0'),
+          (13, 'FLD ST0'),
+          (15, 'FSTP ST0'),
+          (17, 'FLD float ptr [ESI + 0x8]'),
+          (20, 'FCOM ST1'),
+          (22, 'FNSTSW AX'),
+          (24, 'FSUBRP ST1,ST0'),
+          (26, 'FST float ptr [EDI]'),
+          (28, 'FSTP double ptr [EDI + 0x8]'),
+          (31, 'RET')],
+         'd9 06 d9 fa d9 46 04 d9 e0 d9 e1 de c1 d9 c0 dd d8 d9 46 08 d8 d1 df e0 de e1 d9 17 dd 5f 08 c3',
+         x87_unary_setup),
+]
+#: x87 runs checked only against the per-instruction code
+#: (test_x87_run_leaves_the_context_as_the_helpers_do): they read registers
+#: the run did not push, which that test fills, and wrap round the stack.
+X87_STATE_CASES = [
+    Case('x87 run reads, moves and pops registers it did not push', 0x0D031500,
+         [(0, 'FADD ST0,ST3'),
+          (2, 'FXCH ST5'),
+          (4, 'FLD ST7'),
+          (6, 'FSTP ST3'),
+          (8, 'FADDP ST2,ST0'),
+          (10, 'FIST dword ptr [EDI]'),
+          (12, 'FXCH ST1'),
+          (14, 'FISTP qword ptr [EDI + 0x8]'),
+          (17, 'FLD ST4'),
+          (19, 'FSTP ST6'),
+          (21, 'FILD dword ptr [ESI]'),
+          (23, 'FXCH ST6'),
+          (25, 'FSTP float ptr [EDI + 0x10]'),
+          (28, 'RET')],
+         'd8 c3 d9 cd d9 c7 dd db de c2 db 17 d9 c9 df 7f 08 d9 c4 dd de db 06 d9 ce d9 5f 10 c3',
+         x87_entry_setup),
+    Case('x87 run that would reach a register twice ends first', 0x0D031600,
+         [(0, 'FLD1'),
+          (2, 'FLD1'),
+          (4, 'FLD1'),
+          (6, 'FLD1'),
+          (8, 'FLD1'),
+          (10, 'FLD1'),
+          (12, 'FLD1'),
+          (14, 'FLD ST7'),
+          (16, 'FADD ST0,ST1'),
+          (18, 'FSTP ST7'),
+          (20, 'FDECSTP'),
+          (22, 'FLD float ptr [ESI]'),
+          (24, 'FINCSTP'),
+          (26, 'FSTP float ptr [EDI]'),
+          (28, 'RET')],
+         'd9 e8 d9 e8 d9 e8 d9 e8 d9 e8 d9 e8 d9 e8 d9 c7 d8 c1 dd df d9 f6 d9 06 d9 f7 d9 1f c3',
+         x87_entry_setup),
+]
+
+
+#: How the translated bodies keep the guest state: "context" (registers,
+#: flags and the x87 stack in struct X86, as with reg_cache, flag_cache and
+#: x87_cache off) or "cached" (all three on: registers and flags in C locals,
+#: stored at calls and returns, and the x87 registers of straight runs in
+#: locals too). Each mode is its own library and its own run of every case.
+CACHE_MODES = ("context", "cached")
+
+
+@pytest.fixture(scope="module", params=CACHE_MODES)
+def built(request):
     """Translate every case, compile the ones that translated into one shared
     library with the harness, and return (Native, {case name: error})."""
+    saved = T.REG_CACHE, T.FLAG_CACHE, T.X87_CACHE
+    T.REG_CACHE = T.FLAG_CACHE = T.X87_CACHE = request.param == "cached"
+    try:
+        return build_cases()
+    finally:
+        T.REG_CACHE, T.FLAG_CACHE, T.X87_CACHE = saved
+
+
+def build_cases(cases=None):
     clang = shutil.which("clang")
     if clang is None:
         pytest.skip("clang is not on PATH")
@@ -949,7 +1149,7 @@ def built():
         # The instruction semantics are checked on the other runners.
         pytest.skip("the instruction harness builds as a POSIX shared library")
     errors, parts, ok = {}, ['#include "x86.h"', ""], []
-    for case in CASES:
+    for case in CASES if cases is None else cases:
         try:
             parts.append("/* %s */\n%s\n" % (case.name, translate_case(case)))
             ok.append(case)
@@ -1103,6 +1303,91 @@ def test_case(case, built):
             run_once(case, native, emu, rng)
         except UcError as e:
             pytest.fail("unicorn: %s" % e)
+
+
+def x87_state_cases():
+    """Every case with an x87 instruction, and the state-only x87 cases."""
+    return [c for c in CASES if any(text.startswith("F") for _, text in c.lines)] + X87_STATE_CASES
+
+
+@pytest.fixture(scope="module")
+def x87_pair():
+    """The x87 cases built twice: with the stack in the context, and with
+    reg_cache, flag_cache and x87_cache on."""
+    saved = T.REG_CACHE, T.FLAG_CACHE, T.X87_CACHE
+    try:
+        T.REG_CACHE = T.FLAG_CACHE = T.X87_CACHE = False
+        context = build_cases(x87_state_cases())
+        T.REG_CACHE = T.FLAG_CACHE = T.X87_CACHE = True
+        cached = build_cases(x87_state_cases())
+        return context, cached
+    finally:
+        T.REG_CACHE, T.FLAG_CACHE, T.X87_CACHE = saved
+
+
+def random_x87(rng, c):
+    """A used x87 state: TOP anywhere, each register empty (with a stale
+    value), zero, a double, or FILD's exact integer; three control words."""
+    tags = 0
+    for i in range(8):
+        kind = rng.choice(("empty", "zero", "valid", "exact"))
+        c.st_bits[i] = rng.getrandbits(64)
+        c.st_exact[i] = 0
+        if kind == "zero":
+            c.st[i], tag = 0.0, 1
+        elif kind == "exact":
+            n = rng.randint(-2 ** 62, 2 ** 62)
+            c.st[i], tag = float(n), 1 if n == 0 else 0
+            c.st_bits[i], c.st_exact[i] = n & 0xFFFFFFFFFFFFFFFF, 1
+        else:
+            c.st[i], tag = rng.uniform(-1e6, 1e6), 3 if kind == "empty" else 0
+        tags |= tag << (2 * i)
+    c.fpu_tag = tags
+    c.fpu_top = rng.randrange(8)
+    c.fpu_cw = rng.choice((FPU_CW_INIT, 0x007F, 0x0F7F))
+
+
+def x87_state(c):
+    return {"r": list(c.r), "st": [struct.pack("<d", v).hex() for v in c.st],
+            "exact": list(c.st_exact),
+            "bits": [c.st_bits[i] if c.st_exact[i] else None for i in range(8)],
+            "tag": "%04x" % c.fpu_tag, "top": c.fpu_top, "sw": "%04x" % c.fpu_sw, "cw": c.fpu_cw}
+
+
+def test_x87_run_leaves_the_context_as_the_helpers_do(x87_pair):
+    """x87_cache: after every case the context holds what the per-instruction
+    helpers leave - each register's value, tag and exact integer, TOP, the
+    status word - as well as the same registers, flags and memory, from a
+    random used x87 state."""
+    (context, errors_a), (cached, errors_b) = x87_pair
+    assert not errors_a and not errors_b, (errors_a, errors_b)
+    for case in x87_state_cases():
+        rng = random.Random(0x783837 ^ case.addr)
+        for _ in range(60):
+            state = case.setup(rng)
+            regs = dict(rand_regs(rng), **state.get("regs", {}))
+            args = state.get("args", [])
+            frame = struct.pack("<I", MAGIC_RET) + struct.pack("<%dI" % len(args), *args)
+            seed = rng.getrandbits(64)
+            seen = []
+            for native in (context, cached):
+                native.zero(STACK_BASE, STACK_SIZE)
+                native.zero(SCRATCH, SCRATCH_SIZE)
+                for addr, data in state.get("mem", []):
+                    native.write(addr, data)
+                native.write(ESP_INIT, frame)
+                c = X86()
+                for i, name in enumerate(REG_NAMES):
+                    c.r[i] = ESP_INIT if name == "ESP" else regs[name]
+                c.eflags_misc = EFLAGS_MISC_INIT
+                c.mxcsr = MXCSR_INIT
+                random_x87(random.Random(seed), c)
+                native.lib.harness_run(case.addr, C.byref(c))
+                seen.append((x87_state(c), native.lib.harness_eflags(C.byref(c)) & EFLAGS_COMPARED,
+                             native.read(SCRATCH, SCRATCH_SIZE), native.read(STACK_BASE, STACK_SIZE)))
+            a, b = seen
+            assert a[0] == b[0], "%s: context %s, x87 run %s" % (case.name, a[0], b[0])
+            assert a[1:] == b[1:], "%s: flags or memory differ" % case.name
 
 
 def test_mmx_goes_to_the_mm_registers_and_xmm_forms_still_go_to_sse():

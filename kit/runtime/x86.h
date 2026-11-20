@@ -1904,6 +1904,45 @@ static inline int64_t fistt_i64(X86 *c) {
     return fistt_any(c, -9223372036854775808.0, 9223372036854774784.0, INT64_MIN);
 }
 
+/* The same stores for the translator's x87 runs (game.toml x87_cache), where
+ * ST(0) is a local rather than the context's register: its value, whether it
+ * holds FILD's exact integer, and that integer. The results are fist_* and
+ * fistt_*'s for the same register. */
+static inline int16_t fist_i16_v(X86 *c, double v, unsigned exact, int64_t bits) {
+    if (exact && bits >= INT16_MIN && bits <= INT16_MAX)
+        return (int16_t)bits;
+    return fto_i16(c, v);
+}
+static inline int32_t fist_i32_v(X86 *c, double v, unsigned exact, int64_t bits) {
+    if (exact && bits >= INT32_MIN && bits <= INT32_MAX)
+        return (int32_t)bits;
+    return fto_i32(c, v);
+}
+static inline int64_t fist_i64_v(X86 *c, double v, unsigned exact, int64_t bits) {
+    if (exact)
+        return bits;
+    return fto_i64(c, v);
+}
+static inline int64_t fistt_any_v(X86 *c, double v, unsigned exact, int64_t bits, double lo, double hi,
+                                  int64_t indefinite) {
+    if (exact && (double)bits >= lo && (double)bits <= hi)
+        return bits;
+    double t = trunc(v);
+    if (t >= lo && t <= hi)
+        return (int64_t)t;
+    c->fpu_sw |= 0x0001u;
+    return indefinite;
+}
+static inline int16_t fistt_i16_v(X86 *c, double v, unsigned exact, int64_t bits) {
+    return (int16_t)fistt_any_v(c, v, exact, bits, -32768.0, 32767.0, INT16_MIN);
+}
+static inline int32_t fistt_i32_v(X86 *c, double v, unsigned exact, int64_t bits) {
+    return (int32_t)fistt_any_v(c, v, exact, bits, -2147483648.0, 2147483647.0, INT32_MIN);
+}
+static inline int64_t fistt_i64_v(X86 *c, double v, unsigned exact, int64_t bits) {
+    return fistt_any_v(c, v, exact, bits, -9223372036854775808.0, 9223372036854774784.0, INT64_MIN);
+}
+
 /* FPREM / FPREM1.
  *
  * Two things the obvious implementation gets wrong.
